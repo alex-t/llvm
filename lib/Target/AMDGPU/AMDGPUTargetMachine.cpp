@@ -86,6 +86,13 @@ static cl::opt<bool> ScalarizeGlobal(
   cl::init(true),
   cl::Hidden);
 
+// Option to control global loads scalarization
+static cl::opt<bool> SIFixSGPRsOff(
+  "amdgpu-disable-si-fix-sgpr",
+  cl::desc("Disable SIFixSGPRCopies pass"),
+  cl::init(false),
+  cl::Hidden);
+
 // Option to run internalize pass.
 static cl::opt<bool> InternalizeSymbols(
   "amdgpu-internalize-symbols",
@@ -793,7 +800,8 @@ bool GCNPassConfig::addILPOpts() {
 bool GCNPassConfig::addInstSelector() {
   AMDGPUPassConfig::addInstSelector();
   addPass(createSILowerI1CopiesPass());
-  addPass(&SIFixSGPRCopiesID);
+  if (!SIFixSGPRsOff)
+    addPass(&SIFixSGPRCopiesID);
   return false;
 }
 

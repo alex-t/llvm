@@ -2592,7 +2592,9 @@ TreePatternNode *TreePattern::ParseTreePattern(Init *TheInit, StringRef OpName){
     error("Pattern has unexpected init kind!");
   }
   DefInit *OpDef = dyn_cast<DefInit>(Dag->getOperator());
-  if (!OpDef) error("Pattern has unexpected operator type!");
+  if (!OpDef) {
+    error("Pattern has unexpected operator type!");
+  }
   Record *Operator = OpDef->getDef();
 
   if (Operator->isSubClassOf("ValueType")) {
