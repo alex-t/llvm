@@ -620,7 +620,10 @@ bool SelectionDAGISel::runOnMachineFunction(MachineFunction &mf) {
     MRI.replaceRegWith(From, To);
   }
 
+  
+
   TLI->finalizeLowering(*MF);
+  TLI->finalizePHIs(*MF, FuncInfo, CurDAG->getDivergenceAnalysis());
 
   // Release function-specific state. SDB and CurDAG are already cleared
   // at this point.
@@ -1712,7 +1715,7 @@ void SelectionDAGISel::SelectAllBasicBlocks(const Function &Fn) {
               !Inst->use_empty()) {
             unsigned &R = FuncInfo->ValueMap[Inst];
             if (!R)
-              R = FuncInfo->CreateRegs(Inst->getType());
+              R = FuncInfo->CreateRegs(Inst);
           }
 
           bool HadTailCall = false;

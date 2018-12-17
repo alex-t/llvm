@@ -619,10 +619,15 @@ public:
 
   /// Return the register class that should be used for the specified value
   /// type.
-  virtual const TargetRegisterClass *getRegClassFor(MVT VT) const {
+  virtual const TargetRegisterClass *getRegClassFor(MVT VT, bool isDivergent = false) const {
+    (void)isDivergent;
     const TargetRegisterClass *RC = RegClassForVT[VT.SimpleTy];
     assert(RC && "This value type is not natively supported!");
     return RC;
+  }
+
+  virtual bool requiresUniformRegister(const Value *) const {
+    return false;
   }
 
   /// Return the 'representative' register class for the specified value
@@ -2459,6 +2464,11 @@ public:
   /// the set of reserved registers.
   /// The default implementation just freezes the set of reserved registers.
   virtual void finalizeLowering(MachineFunction &MF) const;
+
+  virtual void finalizePHIs(MachineFunction &MF,
+    FunctionLoweringInfo *FLI, const LegacyDivergenceAnalysis *DA) const
+  {};
+
 
 private:
   const TargetMachine &TM;

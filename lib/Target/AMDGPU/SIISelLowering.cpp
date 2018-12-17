@@ -8963,7 +8963,8 @@ SDNode *SITargetLowering::PostISelFolding(MachineSDNode *Node,
       break;
 
     MVT VT = Src0.getValueType().getSimpleVT();
-    const TargetRegisterClass *RC = getRegClassFor(VT);
+    const TargetRegisterClass *RC = getRegClassFor(VT,
+     Src0.getNode()->isDivergent());
 
     MachineRegisterInfo &MRI = DAG.getMachineFunction().getRegInfo();
     SDValue UndefReg = DAG.getRegister(MRI.createVirtualRegister(RC), VT);
@@ -9382,3 +9383,137 @@ bool SITargetLowering::isKnownNeverNaNForTargetNode(SDValue Op,
   return AMDGPUTargetLowering::isKnownNeverNaNForTargetNode(Op, DAG,
                                                             SNaN, Depth);
 }
+
+const TargetRegisterClass * SITargetLowering::getRegClassFor(MVT VT,
+ bool isDivergent) const
+{
+  if (VT == MVT::i1) return isDivergent?
+    &AMDGPU::VReg_1RegClass :
+    &AMDGPU::SReg_1RegClass;
+  const TargetRegisterClass *RC = TargetLoweringBase::getRegClassFor(VT, false);
+  const SIRegisterInfo * TRI = Subtarget->getRegisterInfo();
+  return isDivergent ? TRI->getEquivalentVGPRClass(RC)
+    : TRI->getEquivalentSGPRClass(RC);
+}
+
+bool SITargetLowering::requiresUniformRegister(const Value * V) const
+{
+  if (const ExtractValueInst * ExtValue = dyn_cast<ExtractValueInst>(V)) {
+    if (const IntrinsicInst *Intrinsic = dyn_cast<IntrinsicInst>(ExtValue->getOperand(0))) {
+      switch (Intrinsic->getIntrinsicID()) {
+      default:
+        return false;
+      case Intrinsic::amdgcn_if:
+      case Intrinsic::amdgcn_else:
+      {
+        ArrayRef<unsigned> Indices = ExtValue->getIndices();
+        if (Indices.size() == 1 && Indices[0] == 1) {
+          return true;
+        }
+      }
+      }
+    }
+  }
+  return false;
+}
+
+void SITargetLowering::finalizePHIs(MachineFunction & MF,
+  FunctionLoweringInfo *FLI, const LegacyDivergenceAnalysis *DA) const
+{
+  MachineRegisterInfo &MRI = MF.getRegInfo();
+  const SIRegisterInfo *TRI = Subtarget->getRegisterInfo();
+  const SIInstrInfo * TII = Subtarget->getInstrInfo();
+
+  for (auto &MBB : MF) {
+    SmallVector<MachineInstr*, 4> CopiesToDelete;
+    for (auto &I : MBB.phis()) {
+      unsigned PHIRes = I.getOperand(0).getReg();
+      const TargetRegisterClass * RC0 = MRI.getRegClass(PHIRes);
+      if (TRI->isVGPR(MRI, PHIRes) || RC0 == &AMDGPU::VReg_1RegClass) {
+        // PHI producing VGPR is divergent
+        // all it's uses must be divergent as well
+        for (unsigned i = 1; i < I.getNumOperands(); i += 2) {
+          unsigned InputReg = I.getOperand(i).getReg();
+          const TargetRegisterClass * RC = MRI.getRegClass(InputReg);
+          if (TRI->isSGPRClass(RC)) {
+            // This can only happen if PHI is divergent because of the
+            // control dependency of the divergent branch
+            MachineInstr * Def = MRI.getVRegDef(InputReg);
+            MachineBasicBlock * InMBB = Def->getParent();
+            MachineBasicBlock::iterator IP = InMBB->getFirstTerminator();
+            unsigned NewReg = MRI.createVirtualRegister(RC0);
+            BuildMI(*InMBB, IP, IP->getDebugLoc(), TII->get(AMDGPU::COPY), NewReg)
+            .addReg(InputReg);
+            I.getOperand(i).setReg(NewReg);
+          }
+        }
+      }
+      else {
+        // uniform PHI
+        // First check if all it's users can accept SGPR
+        SetVector<MachineInstr*> worklist;
+        worklist.insert(&I);
+        bool AllUsersAcceptSGPR = true;
+        while (!worklist.empty()) {
+          MachineInstr * Instr = worklist.pop_back_val();
+          unsigned Reg = Instr->getOperand(0).getReg();
+          for (auto & Use : MRI.use_operands(Reg)) {
+            MachineInstr * UseMI = Use.getParent();
+            if (UseMI->isCopy() || UseMI->isRegSequence()) {
+              worklist.insert(UseMI);
+              continue;
+            }
+            if (UseMI->isPHI())
+              continue;
+            unsigned OpNo = UseMI->getOperandNo(&Use);
+            const MCInstrDesc &Desc = TII->get(UseMI->getOpcode());
+            const TargetRegisterClass * OpRC =
+             TRI->getRegClass(Desc.OpInfo[OpNo].RegClass);
+            if (!TRI->isSGPRClass(OpRC) &&
+             OpRC != &AMDGPU::VS_32RegClass &&
+             OpRC != &AMDGPU::VS_64RegClass) {
+              AllUsersAcceptSGPR = false;
+              break;
+            }
+          }
+        }
+
+        if (!AllUsersAcceptSGPR) {
+          // !!! CONVERT to VGPR
+          const TargetRegisterClass * NewRC = TRI->getEquivalentVGPRClass(RC0);
+          unsigned NewDest = MRI.createVirtualRegister(NewRC);
+          unsigned OldDest = I.getOperand(0).getReg();
+          for (auto & Use : MRI.use_operands(OldDest)) {
+            const TargetRegisterClass * OldRC = MRI.getRegClass(Use.getReg());
+            if (TRI->isSGPRClass(OldRC)) {
+              MachineInstr * UseMI = Use.getParent();
+              BuildMI(*UseMI->getParent(), UseMI, UseMI->getDebugLoc(),
+              TII->get(AMDGPU::V_READFIRSTLANE_B32), OldDest).addReg(NewDest);
+            }
+          }
+          I.getOperand(0).setReg(NewDest);
+          // Convert inputs
+          for (unsigned i = 1; i < I.getNumOperands(); i += 2) {
+            unsigned InputReg = I.getOperand(i).getReg();
+            const TargetRegisterClass * RC = MRI.getRegClass(InputReg);
+            if (TRI->isSGPRClass(RC)) {
+              MachineInstr * Def = MRI.getVRegDef(InputReg);
+              MachineBasicBlock * InMBB = Def->getParent();
+              MachineBasicBlock::iterator IP = InMBB->getFirstTerminator();
+              unsigned NewReg = MRI.createVirtualRegister(RC0);
+              BuildMI(*InMBB, IP, IP->getDebugLoc(), TII->get(AMDGPU::COPY), NewReg)
+                .addReg(InputReg);
+              I.getOperand(i).setReg(NewReg);
+            }
+          }
+        }
+      }
+    }
+    for (auto &Copy : CopiesToDelete) {
+      unsigned CopyDst = Copy->getOperand(0).getReg();
+      if (MRI.use_empty(CopyDst))
+        Copy->eraseFromParent();
+    }
+  }
+}
+

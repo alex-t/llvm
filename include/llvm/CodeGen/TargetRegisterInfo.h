@@ -521,6 +521,8 @@ public:
   /// function.  Used by MachineRegisterInfo::isConstantPhysReg().
   virtual bool isConstantPhysReg(unsigned PhysReg) const { return false; }
 
+  virtual bool isDivergentRegClass(const TargetRegisterClass * RC) const { return false; }
+
   /// Physical registers that may be modified within a function but are
   /// guaranteed to be restored before any uses. This is useful for targets that
   /// have call sequences where a GOT register may be updated by the caller

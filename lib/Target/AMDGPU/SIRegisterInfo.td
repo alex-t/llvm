@@ -542,7 +542,11 @@ def VReg_512 : RegisterClass<"AMDGPU", [v16i32, v16f32], 32, (add VGPR_512)> {
 }
 
 def VReg_1 : RegisterClass<"AMDGPU", [i1], 32, (add VGPR_32)> {
-  let Size = 32;
+  let Size = 64;
+}
+
+def SReg_1 : RegisterClass<"AMDGPU", [i1], 32, (add SGPR_32)> {
+  let Size = 64;
 }
 
 def VS_32 : RegisterClass<"AMDGPU", [i32, f32, i16, f16, v2i16, v2f16], 32,

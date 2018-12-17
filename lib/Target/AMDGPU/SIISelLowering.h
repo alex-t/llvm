@@ -352,7 +352,13 @@ public:
                                     const SelectionDAG &DAG,
                                     bool SNaN = false,
                                     unsigned Depth = 0) const override;
-};
+
+  virtual const TargetRegisterClass *getRegClassFor(MVT VT,
+   bool isDivergent) const override;
+  virtual bool requiresUniformRegister(const Value * V) const override;
+  virtual void finalizePHIs(MachineFunction &MF,
+    FunctionLoweringInfo *FLI, const LegacyDivergenceAnalysis *DA) const override;
+  };
 
 } // End namespace llvm
 

@@ -621,66 +621,66 @@ bool SIFixSGPRCopies::runOnMachineFunction(MachineFunction &MF) {
 
         break;
       }
-      case AMDGPU::PHI: {
-        unsigned Reg = MI.getOperand(0).getReg();
-        if (!TRI->isSGPRClass(MRI.getRegClass(Reg)))
-          break;
+      //case AMDGPU::PHI: {
+      //  unsigned Reg = MI.getOperand(0).getReg();
+      //  if (!TRI->isSGPRClass(MRI.getRegClass(Reg)))
+      //    break;
 
-        // We don't need to fix the PHI if the common dominator of the
-        // two incoming blocks terminates with a uniform branch.
-        bool HasVGPROperand = phiHasVGPROperands(MI, MRI, TRI, TII);
-        if (MI.getNumExplicitOperands() == 5 && !HasVGPROperand) {
-          MachineBasicBlock *MBB0 = MI.getOperand(2).getMBB();
-          MachineBasicBlock *MBB1 = MI.getOperand(4).getMBB();
+      //  // We don't need to fix the PHI if the common dominator of the
+      //  // two incoming blocks terminates with a uniform branch.
+      //  bool HasVGPROperand = phiHasVGPROperands(MI, MRI, TRI, TII);
+      //  if (MI.getNumExplicitOperands() == 5 && !HasVGPROperand) {
+      //    MachineBasicBlock *MBB0 = MI.getOperand(2).getMBB();
+      //    MachineBasicBlock *MBB1 = MI.getOperand(4).getMBB();
 
-          if (!predsHasDivergentTerminator(MBB0, TRI) &&
-              !predsHasDivergentTerminator(MBB1, TRI)) {
-            LLVM_DEBUG(dbgs()
-                       << "Not fixing PHI for uniform branch: " << MI << '\n');
-            break;
-          }
-        }
+      //    if (!predsHasDivergentTerminator(MBB0, TRI) &&
+      //        !predsHasDivergentTerminator(MBB1, TRI)) {
+      //      LLVM_DEBUG(dbgs()
+      //                 << "Not fixing PHI for uniform branch: " << MI << '\n');
+      //      break;
+      //    }
+      //  }
 
-        // If a PHI node defines an SGPR and any of its operands are VGPRs,
-        // then we need to move it to the VALU.
-        //
-        // Also, if a PHI node defines an SGPR and has all SGPR operands
-        // we must move it to the VALU, because the SGPR operands will
-        // all end up being assigned the same register, which means
-        // there is a potential for a conflict if different threads take
-        // different control flow paths.
-        //
-        // For Example:
-        //
-        // sgpr0 = def;
-        // ...
-        // sgpr1 = def;
-        // ...
-        // sgpr2 = PHI sgpr0, sgpr1
-        // use sgpr2;
-        //
-        // Will Become:
-        //
-        // sgpr2 = def;
-        // ...
-        // sgpr2 = def;
-        // ...
-        // use sgpr2
-        //
-        // The one exception to this rule is when one of the operands
-        // is defined by a SI_BREAK, SI_IF_BREAK, or SI_ELSE_BREAK
-        // instruction.  In this case, there we know the program will
-        // never enter the second block (the loop) without entering
-        // the first block (where the condition is computed), so there
-        // is no chance for values to be over-written.
+      //  // If a PHI node defines an SGPR and any of its operands are VGPRs,
+      //  // then we need to move it to the VALU.
+      //  //
+      //  // Also, if a PHI node defines an SGPR and has all SGPR operands
+      //  // we must move it to the VALU, because the SGPR operands will
+      //  // all end up being assigned the same register, which means
+      //  // there is a potential for a conflict if different threads take
+      //  // different control flow paths.
+      //  //
+      //  // For Example:
+      //  //
+      //  // sgpr0 = def;
+      //  // ...
+      //  // sgpr1 = def;
+      //  // ...
+      //  // sgpr2 = PHI sgpr0, sgpr1
+      //  // use sgpr2;
+      //  //
+      //  // Will Become:
+      //  //
+      //  // sgpr2 = def;
+      //  // ...
+      //  // sgpr2 = def;
+      //  // ...
+      //  // use sgpr2
+      //  //
+      //  // The one exception to this rule is when one of the operands
+      //  // is defined by a SI_BREAK, SI_IF_BREAK, or SI_ELSE_BREAK
+      //  // instruction.  In this case, there we know the program will
+      //  // never enter the second block (the loop) without entering
+      //  // the first block (where the condition is computed), so there
+      //  // is no chance for values to be over-written.
 
-        SmallSet<unsigned, 8> Visited;
-        if (HasVGPROperand || !phiHasBreakDef(MI, MRI, Visited)) {
-          LLVM_DEBUG(dbgs() << "Fixing PHI: " << MI);
-          TII->moveToVALU(MI, MDT);
-        }
-        break;
-      }
+      //  SmallSet<unsigned, 8> Visited;
+      //  if (HasVGPROperand || !phiHasBreakDef(MI, MRI, Visited)) {
+      //    LLVM_DEBUG(dbgs() << "Fixing PHI: " << MI);
+      //    TII->moveToVALU(MI, MDT);
+      //  }
+      //  break;
+      //}
       case AMDGPU::REG_SEQUENCE:
         if (TRI->hasVGPRs(TII->getOpRegClass(MI, 0)) ||
             !hasVGPROperands(MI, TRI)) {
