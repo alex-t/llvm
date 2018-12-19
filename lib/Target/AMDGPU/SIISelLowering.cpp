@@ -9453,7 +9453,10 @@ void SITargetLowering::finalizePHIs(MachineFunction & MF,
         // First check if all it's users can accept SGPR
         SetVector<MachineInstr*> worklist;
         worklist.insert(&I);
-        bool AllUsersAcceptSGPR = true;
+        //bool AllUsersAcceptSGPR = true;
+        // Also need some book keeping
+        SetVector<MachineOperand*> SGPRUses;
+        SetVector<MachineOperand*> VGPRUses;
         while (!worklist.empty()) {
           MachineInstr * Instr = worklist.pop_back_val();
           unsigned Reg = Instr->getOperand(0).getReg();
@@ -9461,6 +9464,8 @@ void SITargetLowering::finalizePHIs(MachineFunction & MF,
             MachineInstr * UseMI = Use.getParent();
             if (UseMI->isCopy() || UseMI->isRegSequence()) {
               worklist.insert(UseMI);
+              if (UseMI->isCopy())
+                CopiesToDelete.push_back(UseMI);
               continue;
             }
             if (UseMI->isPHI())
@@ -9472,25 +9477,38 @@ void SITargetLowering::finalizePHIs(MachineFunction & MF,
             if (!TRI->isSGPRClass(OpRC) &&
              OpRC != &AMDGPU::VS_32RegClass &&
              OpRC != &AMDGPU::VS_64RegClass) {
-              AllUsersAcceptSGPR = false;
-              break;
-            }
+              //AllUsersAcceptSGPR = false;
+              //break;
+              VGPRUses.insert(&Use);
+            } else
+              SGPRUses.insert(&Use);
           }
         }
 
-        if (!AllUsersAcceptSGPR) {
+        if (!VGPRUses.empty()/*!AllUsersAcceptSGPR*/) {
           // !!! CONVERT to VGPR
           const TargetRegisterClass * NewRC = TRI->getEquivalentVGPRClass(RC0);
           unsigned NewDest = MRI.createVirtualRegister(NewRC);
           unsigned OldDest = I.getOperand(0).getReg();
-          for (auto & Use : MRI.use_operands(OldDest)) {
-            const TargetRegisterClass * OldRC = MRI.getRegClass(Use.getReg());
-            if (TRI->isSGPRClass(OldRC)) {
-              MachineInstr * UseMI = Use.getParent();
-              BuildMI(*UseMI->getParent(), UseMI, UseMI->getDebugLoc(),
+          //for (auto & Use : MRI.use_operands(OldDest)) {
+          //  MachineInstr * UseMI = Use.getParent();
+          //  unsigned OpNo = UseMI->getOperandNo(&Use);
+          //  const MCInstrDesc &Desc = TII->get(UseMI->getOpcode());
+          //  const TargetRegisterClass * OpRC =
+          //    TRI->getRegClass(Desc.OpInfo[OpNo].RegClass);
+          //  if (TRI->isSGPRClass(OpRC)) {
+          //    BuildMI(*UseMI->getParent(), UseMI, UseMI->getDebugLoc(),
+          //    TII->get(AMDGPU::V_READFIRSTLANE_B32), OldDest).addReg(NewDest);
+          //  }
+          //}
+          for (auto & Use : SGPRUses) {
+            MachineInstr * UseMI = Use->getParent();
+            unsigned OpNo = UseMI->getOperandNo(Use);
+            BuildMI(*UseMI->getParent(), UseMI, UseMI->getDebugLoc(),
               TII->get(AMDGPU::V_READFIRSTLANE_B32), OldDest).addReg(NewDest);
-            }
           }
+          for (auto & Use : VGPRUses)
+            Use->setReg(NewDest);
           I.getOperand(0).setReg(NewDest);
           // Convert inputs
           for (unsigned i = 1; i < I.getNumOperands(); i += 2) {
@@ -9500,6 +9518,9 @@ void SITargetLowering::finalizePHIs(MachineFunction & MF,
               MachineInstr * Def = MRI.getVRegDef(InputReg);
               MachineBasicBlock * InMBB = Def->getParent();
               MachineBasicBlock::iterator IP = InMBB->getFirstTerminator();
+              if (IP == InMBB->end()) {
+                IP = InMBB->getLastNonDebugInstr();
+              }
               unsigned NewReg = MRI.createVirtualRegister(RC0);
               BuildMI(*InMBB, IP, IP->getDebugLoc(), TII->get(AMDGPU::COPY), NewReg)
                 .addReg(InputReg);
@@ -9513,6 +9534,18 @@ void SITargetLowering::finalizePHIs(MachineFunction & MF,
       unsigned CopyDst = Copy->getOperand(0).getReg();
       if (MRI.use_empty(CopyDst))
         Copy->eraseFromParent();
+    }
+    // Now we convert all the PHIs and we're free to get rid of SReg_1
+    for (auto &I : MBB.phis()) {
+      unsigned PHIRes = I.getOperand(0).getReg();
+      const TargetRegisterClass * RC0 = MRI.getRegClass(PHIRes);
+      if (RC0 == &AMDGPU::SReg_1RegClass) {
+        MRI.setRegClass(PHIRes, &AMDGPU::SReg_64_XEXECRegClass);
+        for (unsigned i = 1; i < I.getNumOperands(); i += 2) {
+          unsigned InputReg = I.getOperand(i).getReg();
+          MRI.setRegClass(InputReg, &AMDGPU::SReg_64_XEXECRegClass);
+        }
+      }
     }
   }
 }
