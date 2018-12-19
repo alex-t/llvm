@@ -5011,7 +5011,7 @@ const TargetRegisterClass *SIInstrInfo::getDestEquivalentVGPRClass(
   case AMDGPU::INSERT_SUBREG:
   case AMDGPU::WQM:
   case AMDGPU::WWM:
-    if (RI.hasVGPRs(NewDstRC))
+    if (RI.hasVGPRs(NewDstRC) || NewDstRC == &AMDGPU::VReg_1RegClass)
       return nullptr;
 
     NewDstRC = RI.getEquivalentVGPRClass(NewDstRC);

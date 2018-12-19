@@ -9424,8 +9424,37 @@ void SITargetLowering::finalizePHIs(MachineFunction & MF,
   const SIRegisterInfo *TRI = Subtarget->getRegisterInfo();
   const SIInstrInfo * TII = Subtarget->getInstrInfo();
 
+ /* for (auto &MBB : MF) {
+    for (auto &I : MBB) {
+      if (I.isRegSequence()) {
+        SetVector <MachineInstr *> worklist;
+        worklist.insert(&I);
+        while(!worklist.empty()) {
+          MachineInstr * Instr = worklist.pop_back_val();
+          unsigned Res = Instr->getOperand(0).getReg();
+          for (auto & Use : MRI.use_operands(Res)) {
+            MachineInstr * UseMI = Use.getParent();
+            if (UseMI->isCopy()) {
+              worklist.insert(UseMI);
+              continue;
+            }
+            unsigned OpNo = UseMI->getOperandNo(&Use);
+            const MCInstrDesc &Desc = TII->get(UseMI->getOpcode());
+            const TargetRegisterClass * OpRC =
+              TRI->getRegClass(Desc.OpInfo[OpNo].RegClass);
+            if (!TRI->isSGPRClass(OpRC) &&
+              OpRC != &AMDGPU::VS_32RegClass &&
+              OpRC != &AMDGPU::VS_64RegClass) {
+            }
+          }
+        }
+
+      }
+    }
+  }*/
+
   for (auto &MBB : MF) {
-    SmallVector<MachineInstr*, 4> CopiesToDelete;
+    SetVector<MachineInstr*> CopiesToDelete;
     for (auto &I : MBB.phis()) {
       unsigned PHIRes = I.getOperand(0).getReg();
       const TargetRegisterClass * RC0 = MRI.getRegClass(PHIRes);
@@ -9453,7 +9482,6 @@ void SITargetLowering::finalizePHIs(MachineFunction & MF,
         // First check if all it's users can accept SGPR
         SetVector<MachineInstr*> worklist;
         worklist.insert(&I);
-        //bool AllUsersAcceptSGPR = true;
         // Also need some book keeping
         SetVector<MachineOperand*> SGPRUses;
         SetVector<MachineOperand*> VGPRUses;
@@ -9465,7 +9493,7 @@ void SITargetLowering::finalizePHIs(MachineFunction & MF,
             if (UseMI->isCopy() || UseMI->isRegSequence()) {
               worklist.insert(UseMI);
               if (UseMI->isCopy())
-                CopiesToDelete.push_back(UseMI);
+                CopiesToDelete.insert(UseMI);
               continue;
             }
             if (UseMI->isPHI())
@@ -9477,33 +9505,32 @@ void SITargetLowering::finalizePHIs(MachineFunction & MF,
             if (!TRI->isSGPRClass(OpRC) &&
              OpRC != &AMDGPU::VS_32RegClass &&
              OpRC != &AMDGPU::VS_64RegClass) {
-              //AllUsersAcceptSGPR = false;
-              //break;
               VGPRUses.insert(&Use);
             } else
               SGPRUses.insert(&Use);
           }
         }
 
-        if (!VGPRUses.empty()/*!AllUsersAcceptSGPR*/) {
+        bool hasVGPRInput = false;
+        for (unsigned i = 1; i < I.getNumOperands(); i += 2) {
+          unsigned InputReg = I.getOperand(i).getReg();
+          MachineInstr * Def = MRI.getVRegDef(InputReg);
+          //const TargetRegisterClass * RC = MRI.getRegClass(InputReg);
+          if (TRI->isVGPR(MRI, InputReg) ||
+              (Def->isCopy() && TRI->isVGPR(MRI, Def->getOperand(1).getReg()))) {
+            hasVGPRInput = true;
+            break;
+          }
+        }
+
+        if (!VGPRUses.empty()/*!AllUsersAcceptSGPR*/ || hasVGPRInput) {
           // !!! CONVERT to VGPR
           const TargetRegisterClass * NewRC = TRI->getEquivalentVGPRClass(RC0);
           unsigned NewDest = MRI.createVirtualRegister(NewRC);
           unsigned OldDest = I.getOperand(0).getReg();
-          //for (auto & Use : MRI.use_operands(OldDest)) {
-          //  MachineInstr * UseMI = Use.getParent();
-          //  unsigned OpNo = UseMI->getOperandNo(&Use);
-          //  const MCInstrDesc &Desc = TII->get(UseMI->getOpcode());
-          //  const TargetRegisterClass * OpRC =
-          //    TRI->getRegClass(Desc.OpInfo[OpNo].RegClass);
-          //  if (TRI->isSGPRClass(OpRC)) {
-          //    BuildMI(*UseMI->getParent(), UseMI, UseMI->getDebugLoc(),
-          //    TII->get(AMDGPU::V_READFIRSTLANE_B32), OldDest).addReg(NewDest);
-          //  }
-          //}
+  
           for (auto & Use : SGPRUses) {
             MachineInstr * UseMI = Use->getParent();
-            unsigned OpNo = UseMI->getOperandNo(Use);
             BuildMI(*UseMI->getParent(), UseMI, UseMI->getDebugLoc(),
               TII->get(AMDGPU::V_READFIRSTLANE_B32), OldDest).addReg(NewDest);
           }

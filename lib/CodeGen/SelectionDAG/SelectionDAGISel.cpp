@@ -623,7 +623,7 @@ bool SelectionDAGISel::runOnMachineFunction(MachineFunction &mf) {
   
 
   TLI->finalizeLowering(*MF);
-  TLI->finalizePHIs(*MF, FuncInfo, CurDAG->getDivergenceAnalysis());
+  //TLI->finalizePHIs(*MF, FuncInfo, CurDAG->getDivergenceAnalysis());
 
   // Release function-specific state. SDB and CurDAG are already cleared
   // at this point.
