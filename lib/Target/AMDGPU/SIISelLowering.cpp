@@ -9398,6 +9398,14 @@ const TargetRegisterClass * SITargetLowering::getRegClassFor(MVT VT,
 
 bool SITargetLowering::requiresUniformRegister(const Value * V) const
 {
+  if (const IntrinsicInst *Intrinsic = dyn_cast<IntrinsicInst>(V)) {
+    switch (Intrinsic->getIntrinsicID()) {
+    default:
+      return false;
+    case Intrinsic::amdgcn_if_break:
+      return true;
+    }
+  }
   if (const ExtractValueInst * ExtValue = dyn_cast<ExtractValueInst>(V)) {
     if (const IntrinsicInst *Intrinsic = dyn_cast<IntrinsicInst>(ExtValue->getOperand(0))) {
       switch (Intrinsic->getIntrinsicID()) {
@@ -9411,6 +9419,18 @@ bool SITargetLowering::requiresUniformRegister(const Value * V) const
           return true;
         }
       }
+      }
+    }
+  }
+  if (const PHINode * PHI = dyn_cast<PHINode>(V)) {
+    for (auto U : PHI->users()) {
+      if (const IntrinsicInst *Intrinsic = dyn_cast<IntrinsicInst>(U)) {
+        switch (Intrinsic->getIntrinsicID()) {
+        default:
+          return false;
+        case Intrinsic::amdgcn_if_break:
+          return true;
+        }
       }
     }
   }

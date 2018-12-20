@@ -630,7 +630,8 @@ void SILowerI1Copies::lowerCopiesToI1() {
 
       unsigned DstReg = MI.getOperand(0).getReg();
 
-      if (MI.isCopy() && (MRI->getRegClass(DstReg) == &AMDGPU::SReg_1RegClass) &&
+      if (MI.isCopy() && (TargetRegisterInfo::isVirtualRegister(DstReg) &&
+         MRI->getRegClass(DstReg) == &AMDGPU::SReg_1RegClass) &&
         (MRI->getRegClass(MI.getOperand(1).getReg()) == &AMDGPU::SReg_64RegClass)) {
         SmallVector<MachineOperand*, 4> UsesToUpdate;
         for (auto & Use : MRI->use_operands(DstReg)) {

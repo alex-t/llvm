@@ -631,6 +631,14 @@ bool SIFixSGPRCopies::runOnMachineFunction(MachineFunction &MF) {
           for (auto & Use : MRI.use_operands(Reg)) {
             MachineInstr * UseMI = Use.getParent();
             if (UseMI->isCopy() || UseMI->isRegSequence()) {
+              if (UseMI->isCopy()) {
+                unsigned Reg = UseMI->getOperand(0).getReg();
+                if (TRI->isPhysicalRegister(Reg)) {
+                  if (TRI->hasVGPRs(TRI->getPhysRegClass(Reg)));
+                    hasVGPRUses = true;
+                    break;
+                }
+              }
               worklist.insert(UseMI);
               continue;
             }

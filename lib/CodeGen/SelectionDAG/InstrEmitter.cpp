@@ -403,7 +403,7 @@ void InstrEmitter::AddOperand(MachineInstrBuilder &MIB,
            : nullptr;
     const TargetRegisterClass *OpRC =
       TLI->isTypeLegal(OpVT) ? TLI->getRegClassFor(OpVT,
-        TRI->isDivergentRegClass(IIRC) ||
+        (IIRC && TRI->isDivergentRegClass(IIRC)) ||
          Op.getNode()->isDivergent()) : nullptr;
 
     if (OpRC && IIRC && OpRC != IIRC &&
