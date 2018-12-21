@@ -25,6 +25,7 @@
 #include "SIDefines.h"
 #include "SIInstrInfo.h"
 #include "SIRegisterInfo.h"
+#include "MCTargetDesc/AMDGPUMCTargetDesc.h"
 #include "Utils/AMDGPUBaseInfo.h"
 #include "llvm/ADT/None.h"
 #include "llvm/ADT/Optional.h"
@@ -39,6 +40,7 @@
 #include "llvm/CodeGen/MachineOperand.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/TargetRegisterInfo.h"
+#include "llvm/Config/llvm-config.h"
 #include "llvm/MC/LaneBitmask.h"
 #include "llvm/MC/MCInstrDesc.h"
 #include "llvm/Pass.h"
@@ -88,9 +90,11 @@ public:
   bool runOnMachineFunction(MachineFunction &MF) override;
   void matchSDWAOperands(MachineBasicBlock &MBB);
   std::unique_ptr<SDWAOperand> matchSDWAOperand(MachineInstr &MI);
-  bool isConvertibleToSDWA(const MachineInstr &MI, const SISubtarget &ST) const;
+  bool isConvertibleToSDWA(MachineInstr &MI, const GCNSubtarget &ST) const;
+  void pseudoOpConvertToVOP2(MachineInstr &MI,
+                             const GCNSubtarget &ST) const;
   bool convertToSDWA(MachineInstr &MI, const SDWAOperandsVector &SDWAOperands);
-  void legalizeScalarOperands(MachineInstr &MI, const SISubtarget &ST) const;
+  void legalizeScalarOperands(MachineInstr &MI, const GCNSubtarget &ST) const;
 
   StringRef getPassName() const override { return "SI Peephole SDWA"; }
 
@@ -845,15 +849,90 @@ SIPeepholeSDWA::matchSDWAOperand(MachineInstr &MI) {
 void SIPeepholeSDWA::matchSDWAOperands(MachineBasicBlock &MBB) {
   for (MachineInstr &MI : MBB) {
     if (auto Operand = matchSDWAOperand(MI)) {
-      DEBUG(dbgs() << "Match: " << MI << "To: " << *Operand << '\n');
+      LLVM_DEBUG(dbgs() << "Match: " << MI << "To: " << *Operand << '\n');
       SDWAOperands[&MI] = std::move(Operand);
       ++NumSDWAPatternsFound;
     }
   }
 }
 
-bool SIPeepholeSDWA::isConvertibleToSDWA(const MachineInstr &MI,
-                                         const SISubtarget &ST) const {
+// Convert the V_ADDC_U32_e64 into V_ADDC_U32_e32, and
+// V_ADD_I32_e64 into V_ADD_I32_e32. This allows isConvertibleToSDWA
+// to perform its transformation on V_ADD_I32_e32 into V_ADD_I32_sdwa.
+//
+// We are transforming from a VOP3 into a VOP2 form of the instruction.
+//   %19:vgpr_32 = V_AND_B32_e32 255,
+//       killed %16:vgpr_32, implicit $exec
+//   %47:vgpr_32, %49:sreg_64_xexec = V_ADD_I32_e64
+//       %26.sub0:vreg_64, %19:vgpr_32, implicit $exec
+//  %48:vgpr_32, dead %50:sreg_64_xexec = V_ADDC_U32_e64
+//       %26.sub1:vreg_64, %54:vgpr_32, killed %49:sreg_64_xexec, implicit $exec
+//
+// becomes
+//   %47:vgpr_32 = V_ADD_I32_sdwa
+//       0, %26.sub0:vreg_64, 0, killed %16:vgpr_32, 0, 6, 0, 6, 0,
+//       implicit-def $vcc, implicit $exec
+//  %48:vgpr_32 = V_ADDC_U32_e32
+//       0, %26.sub1:vreg_64, implicit-def $vcc, implicit $vcc, implicit $exec
+void SIPeepholeSDWA::pseudoOpConvertToVOP2(MachineInstr &MI,
+                                           const GCNSubtarget &ST) const {
+  int Opc = MI.getOpcode();
+  assert((Opc == AMDGPU::V_ADD_I32_e64 || Opc == AMDGPU::V_SUB_I32_e64) &&
+         "Currently only handles V_ADD_I32_e64 or V_SUB_I32_e64");
+
+  // Can the candidate MI be shrunk?
+  if (!TII->canShrink(MI, *MRI))
+    return;
+  Opc = AMDGPU::getVOPe32(Opc);
+  // Find the related ADD instruction.
+  const MachineOperand *Sdst = TII->getNamedOperand(MI, AMDGPU::OpName::sdst);
+  if (!Sdst)
+    return;
+  MachineOperand *NextOp = findSingleRegUse(Sdst, MRI);
+  if (!NextOp)
+    return;
+  MachineInstr &MISucc = *NextOp->getParent();
+  // Can the successor be shrunk?
+  if (!TII->canShrink(MISucc, *MRI))
+    return;
+  int SuccOpc = AMDGPU::getVOPe32(MISucc.getOpcode());
+  // Make sure the carry in/out are subsequently unused.
+  MachineOperand *CarryIn = TII->getNamedOperand(MISucc, AMDGPU::OpName::src2);
+  if (!CarryIn)
+    return;
+  MachineOperand *CarryOut = TII->getNamedOperand(MISucc, AMDGPU::OpName::sdst);
+  if (!CarryOut)
+    return;
+  if (!MRI->hasOneUse(CarryIn->getReg()) || !MRI->use_empty(CarryOut->getReg()))
+    return;
+  // Make sure VCC or its subregs are dead before MI.
+  MachineBasicBlock &MBB = *MI.getParent();
+  auto Liveness = MBB.computeRegisterLiveness(TRI, AMDGPU::VCC, MI, 25);
+  if (Liveness != MachineBasicBlock::LQR_Dead)
+    return;
+  // Check if VCC is referenced in range of (MI,MISucc].
+  for (auto I = std::next(MI.getIterator()), E = MISucc.getIterator();
+       I != E; ++I) {
+    if (I->modifiesRegister(AMDGPU::VCC, TRI))
+      return;
+  }
+  // Make the two new e32 instruction variants.
+  // Replace MI with V_{SUB|ADD}_I32_e32
+  auto NewMI = BuildMI(MBB, MI, MI.getDebugLoc(), TII->get(Opc));
+  NewMI.add(*TII->getNamedOperand(MI, AMDGPU::OpName::vdst));
+  NewMI.add(*TII->getNamedOperand(MI, AMDGPU::OpName::src0));
+  NewMI.add(*TII->getNamedOperand(MI, AMDGPU::OpName::src1));
+  MI.eraseFromParent();
+  // Replace MISucc with V_{SUBB|ADDC}_U32_e32
+  auto NewInst = BuildMI(MBB, MISucc, MISucc.getDebugLoc(), TII->get(SuccOpc));
+  NewInst.add(*TII->getNamedOperand(MISucc, AMDGPU::OpName::vdst));
+  NewInst.add(*TII->getNamedOperand(MISucc, AMDGPU::OpName::src0));
+  NewInst.add(*TII->getNamedOperand(MISucc, AMDGPU::OpName::src1));
+  MISucc.eraseFromParent();
+}
+
+bool SIPeepholeSDWA::isConvertibleToSDWA(MachineInstr &MI,
+                                         const GCNSubtarget &ST) const {
   // Check if this is already an SDWA instruction
   unsigned Opc = MI.getOpcode();
   if (TII->isSDWA(Opc))
@@ -900,7 +979,7 @@ bool SIPeepholeSDWA::isConvertibleToSDWA(const MachineInstr &MI,
 bool SIPeepholeSDWA::convertToSDWA(MachineInstr &MI,
                                    const SDWAOperandsVector &SDWAOperands) {
 
-  DEBUG(dbgs() << "Convert instruction:" << MI);
+  LLVM_DEBUG(dbgs() << "Convert instruction:" << MI);
 
   // Convert to sdwa
   int SDWAOpcode;
@@ -1049,7 +1128,7 @@ bool SIPeepholeSDWA::convertToSDWA(MachineInstr &MI,
   // Apply all sdwa operand patterns.
   bool Converted = false;
   for (auto &Operand : SDWAOperands) {
-    DEBUG(dbgs() << *SDWAInst << "\nOperand: " << *Operand);
+    LLVM_DEBUG(dbgs() << *SDWAInst << "\nOperand: " << *Operand);
     // There should be no intesection between SDWA operands and potential MIs
     // e.g.:
     // v_and_b32 v0, 0xff, v1 -> src:v1 sel:BYTE_0
@@ -1070,7 +1149,7 @@ bool SIPeepholeSDWA::convertToSDWA(MachineInstr &MI,
     return false;
   }
 
-  DEBUG(dbgs() << "\nInto:" << *SDWAInst << '\n');
+  LLVM_DEBUG(dbgs() << "\nInto:" << *SDWAInst << '\n');
   ++NumSDWAInstructionsPeepholed;
 
   MI.eraseFromParent();
@@ -1080,7 +1159,7 @@ bool SIPeepholeSDWA::convertToSDWA(MachineInstr &MI,
 // If an instruction was converted to SDWA it should not have immediates or SGPR
 // operands (allowed one SGPR on GFX9). Copy its scalar operands into VGPRs.
 void SIPeepholeSDWA::legalizeScalarOperands(MachineInstr &MI,
-                                            const SISubtarget &ST) const {
+                                            const GCNSubtarget &ST) const {
   const MCInstrDesc &Desc = TII->get(MI.getOpcode());
   unsigned ConstantBusCount = 0;
   for (MachineOperand &Op : MI.explicit_uses()) {
@@ -1111,7 +1190,7 @@ void SIPeepholeSDWA::legalizeScalarOperands(MachineInstr &MI,
 }
 
 bool SIPeepholeSDWA::runOnMachineFunction(MachineFunction &MF) {
-  const SISubtarget &ST = MF.getSubtarget<SISubtarget>();
+  const GCNSubtarget &ST = MF.getSubtarget<GCNSubtarget>();
 
   if (!ST.hasSDWA() || skipFunction(MF.getFunction()))
     return false;
@@ -1125,6 +1204,22 @@ bool SIPeepholeSDWA::runOnMachineFunction(MachineFunction &MF) {
   for (MachineBasicBlock &MBB : MF) {
     bool Changed = false;
     do {
+      // Preprocess the ADD/SUB pairs so they could be SDWA'ed.
+      // Look for a possible ADD or SUB that resulted from a previously lowered
+      // V_{ADD|SUB}_U64_PSEUDO. The function pseudoOpConvertToVOP2
+      // lowers the pair of instructions into e32 form.
+      matchSDWAOperands(MBB);
+      for (const auto &OperandPair : SDWAOperands) {
+        const auto &Operand = OperandPair.second;
+        MachineInstr *PotentialMI = Operand->potentialToConvert(TII);
+        if (PotentialMI &&
+           (PotentialMI->getOpcode() == AMDGPU::V_ADD_I32_e64 ||
+            PotentialMI->getOpcode() == AMDGPU::V_SUB_I32_e64))
+          pseudoOpConvertToVOP2(*PotentialMI, ST);
+      }
+      SDWAOperands.clear();
+
+      // Generate potential match list.
       matchSDWAOperands(MBB);
 
       for (const auto &OperandPair : SDWAOperands) {

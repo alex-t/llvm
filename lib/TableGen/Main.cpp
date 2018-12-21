@@ -46,13 +46,17 @@ static cl::list<std::string>
 IncludeDirs("I", cl::desc("Directory of include files"),
             cl::value_desc("directory"), cl::Prefix);
 
+static cl::list<std::string>
+MacroNames("D", cl::desc("Name of the macro to be defined"),
+            cl::value_desc("macro name"), cl::Prefix);
+
 static int reportError(const char *ProgName, Twine Msg) {
   errs() << ProgName << ": " << Msg;
   errs().flush();
   return 1;
 }
 
-/// \brief Create a dependency file for `-d` option.
+/// Create a dependency file for `-d` option.
 ///
 /// This functionality is really only for the benefit of the build system.
 /// It is similar to GCC's `-M*` family of options.
@@ -91,26 +95,13 @@ int llvm::TableGenMain(char *argv0, TableGenMainFn *MainFn) {
   // it later.
   SrcMgr.setIncludeDirs(IncludeDirs);
 
-  TGParser Parser(SrcMgr, Records);
+  TGParser Parser(SrcMgr, MacroNames, Records);
 
   if (Parser.ParseFile())
     return 1;
 
-  // Write output to memory.
-  std::string OutString;
-  raw_string_ostream Out(OutString);
-  if (MainFn(Out, Records))
-    return 1;
-
-  // Only updates the real output file if there are any differences.
-  // This prevents recompilation of all the files depending on it if there
-  // aren't any.
-  if (auto ExistingOrErr = MemoryBuffer::getFile(OutputFilename))
-    if (std::move(ExistingOrErr.get())->getBuffer() == Out.str())
-      return 0;
-
   std::error_code EC;
-  ToolOutputFile OutFile(OutputFilename, EC, sys::fs::F_Text);
+  ToolOutputFile Out(OutputFilename, EC, sys::fs::F_Text);
   if (EC)
     return reportError(argv0, "error opening " + OutputFilename + ":" +
                                   EC.message() + "\n");
@@ -118,12 +109,14 @@ int llvm::TableGenMain(char *argv0, TableGenMainFn *MainFn) {
     if (int Ret = createDependencyFile(Parser, argv0))
       return Ret;
   }
-  OutFile.os() << Out.str();
+
+  if (MainFn(Out.os(), Records))
+    return 1;
 
   if (ErrorsPrinted > 0)
     return reportError(argv0, Twine(ErrorsPrinted) + " errors.\n");
 
   // Declare success.
-  OutFile.keep();
+  Out.keep();
   return 0;
 }

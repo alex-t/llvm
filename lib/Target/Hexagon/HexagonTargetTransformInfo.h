@@ -46,6 +46,11 @@ class HexagonTTIImpl : public BasicTTIImplBase<HexagonTTIImpl> {
   bool useHVX() const;
   bool isTypeForHVX(Type *VecTy) const;
 
+  // Returns the number of vector elements of Ty, if Ty is a vector type,
+  // or 1 if Ty is a scalar type. It is incorrect to call this function
+  // with any other type.
+  unsigned getTypeNumElements(Type *Ty) const;
+
 public:
   explicit HexagonTTIImpl(const HexagonTargetMachine *TM, const Function &F)
       : BaseT(TM, F.getParent()->getDataLayout()),
@@ -93,6 +98,9 @@ public:
   bool prefersVectorizedAddressing() {
     return false;
   }
+  bool enableInterleavedAccessVectorization() {
+    return true;
+  }
 
   unsigned getScalarizationOverhead(Type *Ty, bool Insert, bool Extract);
   unsigned getOperandsScalarizationOverhead(ArrayRef<const Value*> Args,
@@ -115,7 +123,8 @@ public:
             bool VariableMask, unsigned Alignment);
   unsigned getInterleavedMemoryOpCost(unsigned Opcode, Type *VecTy,
             unsigned Factor, ArrayRef<unsigned> Indices, unsigned Alignment,
-            unsigned AddressSpace);
+            unsigned AddressSpace, bool UseMaskForCond = false,
+            bool UseMaskForGaps = false);
   unsigned getCmpSelInstrCost(unsigned Opcode, Type *ValTy, Type *CondTy,
             const Instruction *I);
   unsigned getArithmeticInstrCost(unsigned Opcode, Type *Ty,

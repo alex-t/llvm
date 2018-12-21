@@ -18,6 +18,7 @@
 #include "RISCVRegisterInfo.h"
 #include "RISCVSubtarget.h"
 #include "RISCVTargetMachine.h"
+#include "llvm/ADT/Statistic.h"
 #include "llvm/CodeGen/CallingConvLower.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/MachineFunction.h"
@@ -35,6 +36,8 @@
 using namespace llvm;
 
 #define DEBUG_TYPE "riscv-lower"
+
+STATISTIC(NumTailCalls, "Number of tail calls");
 
 RISCVTargetLowering::RISCVTargetLowering(const TargetMachine &TM,
                                          const RISCVSubtarget &STI)
@@ -77,11 +80,6 @@ RISCVTargetLowering::RISCVTargetLowering(const TargetMachine &TM,
   for (auto VT : {MVT::i1, MVT::i8, MVT::i16})
     setOperationAction(ISD::SIGN_EXTEND_INREG, VT, Expand);
 
-  setOperationAction(ISD::ADDC, XLenVT, Expand);
-  setOperationAction(ISD::ADDE, XLenVT, Expand);
-  setOperationAction(ISD::SUBC, XLenVT, Expand);
-  setOperationAction(ISD::SUBE, XLenVT, Expand);
-
   if (!Subtarget.hasStdExtM()) {
     setOperationAction(ISD::MUL, XLenVT, Expand);
     setOperationAction(ISD::MULHS, XLenVT, Expand);
@@ -113,6 +111,9 @@ RISCVTargetLowering::RISCVTargetLowering(const TargetMachine &TM,
       ISD::SETUGT, ISD::SETUGE, ISD::SETULT, ISD::SETULE, ISD::SETUNE,
       ISD::SETGT,  ISD::SETGE,  ISD::SETNE};
 
+  ISD::NodeType FPOpToExtend[] = {
+      ISD::FSIN, ISD::FCOS, ISD::FSINCOS, ISD::FPOW, ISD::FREM};
+
   if (Subtarget.hasStdExtF()) {
     setOperationAction(ISD::FMINNUM, MVT::f32, Legal);
     setOperationAction(ISD::FMAXNUM, MVT::f32, Legal);
@@ -121,6 +122,8 @@ RISCVTargetLowering::RISCVTargetLowering(const TargetMachine &TM,
     setOperationAction(ISD::SELECT_CC, MVT::f32, Expand);
     setOperationAction(ISD::SELECT, MVT::f32, Custom);
     setOperationAction(ISD::BR_CC, MVT::f32, Expand);
+    for (auto Op : FPOpToExtend)
+      setOperationAction(Op, MVT::f32, Expand);
   }
 
   if (Subtarget.hasStdExtD()) {
@@ -133,11 +136,20 @@ RISCVTargetLowering::RISCVTargetLowering(const TargetMachine &TM,
     setOperationAction(ISD::BR_CC, MVT::f64, Expand);
     setLoadExtAction(ISD::EXTLOAD, MVT::f64, MVT::f32, Expand);
     setTruncStoreAction(MVT::f64, MVT::f32, Expand);
+    for (auto Op : FPOpToExtend)
+      setOperationAction(Op, MVT::f64, Expand);
   }
 
   setOperationAction(ISD::GlobalAddress, XLenVT, Custom);
   setOperationAction(ISD::BlockAddress, XLenVT, Custom);
   setOperationAction(ISD::ConstantPool, XLenVT, Custom);
+
+  if (Subtarget.hasStdExtA()) {
+    setMaxAtomicSizeInBitsSupported(Subtarget.getXLen());
+    setMinCmpXchgSizeInBits(32);
+  } else {
+    setMaxAtomicSizeInBitsSupported(0);
+  }
 
   setBooleanContents(ZeroOrOneBooleanContent);
 
@@ -155,6 +167,34 @@ EVT RISCVTargetLowering::getSetCCResultType(const DataLayout &DL, LLVMContext &,
   if (!VT.isVector())
     return getPointerTy(DL);
   return VT.changeVectorElementTypeToInteger();
+}
+
+bool RISCVTargetLowering::getTgtMemIntrinsic(IntrinsicInfo &Info,
+                                             const CallInst &I,
+                                             MachineFunction &MF,
+                                             unsigned Intrinsic) const {
+  switch (Intrinsic) {
+  default:
+    return false;
+  case Intrinsic::riscv_masked_atomicrmw_xchg_i32:
+  case Intrinsic::riscv_masked_atomicrmw_add_i32:
+  case Intrinsic::riscv_masked_atomicrmw_sub_i32:
+  case Intrinsic::riscv_masked_atomicrmw_nand_i32:
+  case Intrinsic::riscv_masked_atomicrmw_max_i32:
+  case Intrinsic::riscv_masked_atomicrmw_min_i32:
+  case Intrinsic::riscv_masked_atomicrmw_umax_i32:
+  case Intrinsic::riscv_masked_atomicrmw_umin_i32:
+  case Intrinsic::riscv_masked_cmpxchg_i32:
+    PointerType *PtrTy = cast<PointerType>(I.getArgOperand(0)->getType());
+    Info.opc = ISD::INTRINSIC_W_CHAIN;
+    Info.memVT = MVT::getVT(PtrTy->getElementType());
+    Info.ptrVal = I.getArgOperand(0);
+    Info.offset = 0;
+    Info.align = 4;
+    Info.flags = MachineMemOperand::MOLoad | MachineMemOperand::MOStore |
+                 MachineMemOperand::MOVolatile;
+    return true;
+  }
 }
 
 bool RISCVTargetLowering::isLegalAddressingMode(const DataLayout &DL,
@@ -225,6 +265,10 @@ bool RISCVTargetLowering::isZExtFree(SDValue Val, EVT VT2) const {
   return TargetLowering::isZExtFree(Val, VT2);
 }
 
+bool RISCVTargetLowering::isSExtCheaperThanZExt(EVT SrcVT, EVT DstVT) const {
+  return Subtarget.is64Bit() && SrcVT == MVT::i32 && DstVT == MVT::i64;
+}
+
 // Changes the condition code and swaps operands if necessary, so the SetCC
 // operation matches one of the comparisons supported directly in the RISC-V
 // ISA.
@@ -280,9 +324,9 @@ SDValue RISCVTargetLowering::LowerOperation(SDValue Op,
   case ISD::VASTART:
     return lowerVASTART(Op, DAG);
   case ISD::FRAMEADDR:
-    return LowerFRAMEADDR(Op, DAG);
+    return lowerFRAMEADDR(Op, DAG);
   case ISD::RETURNADDR:
-    return LowerRETURNADDR(Op, DAG);
+    return lowerRETURNADDR(Op, DAG);
   }
 }
 
@@ -293,17 +337,22 @@ SDValue RISCVTargetLowering::lowerGlobalAddress(SDValue Op,
   GlobalAddressSDNode *N = cast<GlobalAddressSDNode>(Op);
   const GlobalValue *GV = N->getGlobal();
   int64_t Offset = N->getOffset();
+  MVT XLenVT = Subtarget.getXLenVT();
 
-  if (isPositionIndependent() || Subtarget.is64Bit())
+  if (isPositionIndependent())
     report_fatal_error("Unable to lowerGlobalAddress");
-
-  SDValue GAHi =
-    DAG.getTargetGlobalAddress(GV, DL, Ty, Offset, RISCVII::MO_HI);
-  SDValue GALo =
-    DAG.getTargetGlobalAddress(GV, DL, Ty, Offset, RISCVII::MO_LO);
+  // In order to maximise the opportunity for common subexpression elimination,
+  // emit a separate ADD node for the global address offset instead of folding
+  // it in the global address node. Later peephole optimisations may choose to
+  // fold it back in when profitable.
+  SDValue GAHi = DAG.getTargetGlobalAddress(GV, DL, Ty, 0, RISCVII::MO_HI);
+  SDValue GALo = DAG.getTargetGlobalAddress(GV, DL, Ty, 0, RISCVII::MO_LO);
   SDValue MNHi = SDValue(DAG.getMachineNode(RISCV::LUI, DL, Ty, GAHi), 0);
   SDValue MNLo =
     SDValue(DAG.getMachineNode(RISCV::ADDI, DL, Ty, MNHi, GALo), 0);
+  if (Offset != 0)
+    return DAG.getNode(ISD::ADD, DL, Ty, MNLo,
+                       DAG.getConstant(Offset, DL, XLenVT));
   return MNLo;
 }
 
@@ -315,7 +364,7 @@ SDValue RISCVTargetLowering::lowerBlockAddress(SDValue Op,
   const BlockAddress *BA = N->getBlockAddress();
   int64_t Offset = N->getOffset();
 
-  if (isPositionIndependent() || Subtarget.is64Bit())
+  if (isPositionIndependent())
     report_fatal_error("Unable to lowerBlockAddress");
 
   SDValue BAHi = DAG.getTargetBlockAddress(BA, Ty, Offset, RISCVII::MO_HI);
@@ -347,26 +396,6 @@ SDValue RISCVTargetLowering::lowerConstantPool(SDValue Op,
   } else {
     report_fatal_error("Unable to lowerConstantPool");
   }
-}
-
-SDValue RISCVTargetLowering::lowerExternalSymbol(SDValue Op,
-                                                 SelectionDAG &DAG) const {
-  SDLoc DL(Op);
-  EVT Ty = Op.getValueType();
-  ExternalSymbolSDNode *N = cast<ExternalSymbolSDNode>(Op);
-  const char *Sym = N->getSymbol();
-
-  // TODO: should also handle gp-relative loads.
-
-  if (isPositionIndependent() || Subtarget.is64Bit())
-    report_fatal_error("Unable to lowerExternalSymbol");
-
-  SDValue GAHi = DAG.getTargetExternalSymbol(Sym, Ty, RISCVII::MO_HI);
-  SDValue GALo = DAG.getTargetExternalSymbol(Sym, Ty, RISCVII::MO_LO);
-  SDValue MNHi = SDValue(DAG.getMachineNode(RISCV::LUI, DL, Ty, GAHi), 0);
-  SDValue MNLo =
-    SDValue(DAG.getMachineNode(RISCV::ADDI, DL, Ty, MNHi, GALo), 0);
-  return MNLo;
 }
 
 SDValue RISCVTargetLowering::lowerSELECT(SDValue Op, SelectionDAG &DAG) const {
@@ -424,7 +453,7 @@ SDValue RISCVTargetLowering::lowerVASTART(SDValue Op, SelectionDAG &DAG) const {
                       MachinePointerInfo(SV));
 }
 
-SDValue RISCVTargetLowering::LowerFRAMEADDR(SDValue Op,
+SDValue RISCVTargetLowering::lowerFRAMEADDR(SDValue Op,
                                             SelectionDAG &DAG) const {
   const RISCVRegisterInfo &RI = *Subtarget.getRegisterInfo();
   MachineFunction &MF = DAG.getMachineFunction();
@@ -447,7 +476,7 @@ SDValue RISCVTargetLowering::LowerFRAMEADDR(SDValue Op,
   return FrameAddr;
 }
 
-SDValue RISCVTargetLowering::LowerRETURNADDR(SDValue Op,
+SDValue RISCVTargetLowering::lowerRETURNADDR(SDValue Op,
                                              SelectionDAG &DAG) const {
   const RISCVRegisterInfo &RI = *Subtarget.getRegisterInfo();
   MachineFunction &MF = DAG.getMachineFunction();
@@ -464,7 +493,7 @@ SDValue RISCVTargetLowering::LowerRETURNADDR(SDValue Op,
   unsigned Depth = cast<ConstantSDNode>(Op.getOperand(0))->getZExtValue();
   if (Depth) {
     int Off = -XLenInBytes;
-    SDValue FrameAddr = LowerFRAMEADDR(Op, DAG);
+    SDValue FrameAddr = lowerFRAMEADDR(Op, DAG);
     SDValue Offset = DAG.getConstant(Off, DL, VT);
     return DAG.getLoad(VT, DL, DAG.getEntryNode(),
                        DAG.getNode(ISD::ADD, DL, VT, FrameAddr, Offset),
@@ -475,6 +504,24 @@ SDValue RISCVTargetLowering::LowerRETURNADDR(SDValue Op,
   // live-in.
   unsigned Reg = MF.addLiveIn(RI.getRARegister(), getRegClassFor(XLenVT));
   return DAG.getCopyFromReg(DAG.getEntryNode(), DL, Reg, XLenVT);
+}
+
+SDValue RISCVTargetLowering::PerformDAGCombine(SDNode *N,
+                                               DAGCombinerInfo &DCI) const {
+  switch (N->getOpcode()) {
+  default:
+    break;
+  case RISCVISD::SplitF64: {
+    // If the input to SplitF64 is just BuildPairF64 then the operation is
+    // redundant. Instead, use BuildPairF64's operands directly.
+    SDValue Op0 = N->getOperand(0);
+    if (Op0->getOpcode() != RISCVISD::BuildPairF64)
+      break;
+    return DCI.CombineTo(N, Op0.getOperand(0), Op0.getOperand(1));
+  }
+  }
+
+  return SDValue();
 }
 
 static MachineBasicBlock *emitSplitF64Pseudo(MachineInstr &MI,
@@ -799,10 +846,14 @@ static bool CC_RISCV(const DataLayout &DL, unsigned ValNo, MVT ValVT, MVT LocVT,
 
   if (Reg) {
     State.addLoc(CCValAssign::getReg(ValNo, ValVT, Reg, LocVT, LocInfo));
-  } else {
-    State.addLoc(
-        CCValAssign::getMem(ValNo, ValVT, StackOffset, LocVT, LocInfo));
+    return false;
   }
+
+  if (ValVT == MVT::f32) {
+    LocVT = MVT::f32;
+    LocInfo = CCValAssign::Full;
+  }
+  State.addLoc(CCValAssign::getMem(ValNo, ValVT, StackOffset, LocVT, LocInfo));
   return false;
 }
 
@@ -824,8 +875,8 @@ void RISCVTargetLowering::analyzeInputArgs(
 
     if (CC_RISCV(MF.getDataLayout(), i, ArgVT, ArgVT, CCValAssign::Full,
                  ArgFlags, CCInfo, /*IsRet=*/true, IsRet, ArgTy)) {
-      DEBUG(dbgs() << "InputArg #" << i << " has unhandled type "
-                   << EVT(ArgVT).getEVTString() << '\n');
+      LLVM_DEBUG(dbgs() << "InputArg #" << i << " has unhandled type "
+                        << EVT(ArgVT).getEVTString() << '\n');
       llvm_unreachable(nullptr);
     }
   }
@@ -844,11 +895,27 @@ void RISCVTargetLowering::analyzeOutputArgs(
 
     if (CC_RISCV(MF.getDataLayout(), i, ArgVT, ArgVT, CCValAssign::Full,
                  ArgFlags, CCInfo, Outs[i].IsFixed, IsRet, OrigTy)) {
-      DEBUG(dbgs() << "OutputArg #" << i << " has unhandled type "
-                   << EVT(ArgVT).getEVTString() << "\n");
+      LLVM_DEBUG(dbgs() << "OutputArg #" << i << " has unhandled type "
+                        << EVT(ArgVT).getEVTString() << "\n");
       llvm_unreachable(nullptr);
     }
   }
+}
+
+// Convert Val to a ValVT. Should not be called for CCValAssign::Indirect
+// values.
+static SDValue convertLocVTToValVT(SelectionDAG &DAG, SDValue Val,
+                                   const CCValAssign &VA, const SDLoc &DL) {
+  switch (VA.getLocInfo()) {
+  default:
+    llvm_unreachable("Unexpected CCValAssign::LocInfo");
+  case CCValAssign::Full:
+    break;
+  case CCValAssign::BCvt:
+    Val = DAG.getNode(ISD::BITCAST, DL, VA.getValVT(), Val);
+    break;
+  }
+  return Val;
 }
 
 // The caller is responsible for loading the full value if the argument is
@@ -858,21 +925,29 @@ static SDValue unpackFromRegLoc(SelectionDAG &DAG, SDValue Chain,
   MachineFunction &MF = DAG.getMachineFunction();
   MachineRegisterInfo &RegInfo = MF.getRegInfo();
   EVT LocVT = VA.getLocVT();
-  EVT ValVT = VA.getValVT();
   SDValue Val;
 
   unsigned VReg = RegInfo.createVirtualRegister(&RISCV::GPRRegClass);
   RegInfo.addLiveIn(VA.getLocReg(), VReg);
   Val = DAG.getCopyFromReg(Chain, DL, VReg, LocVT);
 
+  if (VA.getLocInfo() == CCValAssign::Indirect)
+    return Val;
+
+  return convertLocVTToValVT(DAG, Val, VA, DL);
+}
+
+static SDValue convertValVTToLocVT(SelectionDAG &DAG, SDValue Val,
+                                   const CCValAssign &VA, const SDLoc &DL) {
+  EVT LocVT = VA.getLocVT();
+
   switch (VA.getLocInfo()) {
   default:
     llvm_unreachable("Unexpected CCValAssign::LocInfo");
   case CCValAssign::Full:
-  case CCValAssign::Indirect:
     break;
   case CCValAssign::BCvt:
-    Val = DAG.getNode(ISD::BITCAST, DL, ValVT, Val);
+    Val = DAG.getNode(ISD::BITCAST, DL, LocVT, Val);
     break;
   }
   return Val;
@@ -959,6 +1034,21 @@ SDValue RISCVTargetLowering::LowerFormalArguments(
   }
 
   MachineFunction &MF = DAG.getMachineFunction();
+
+  const Function &Func = MF.getFunction();
+  if (Func.hasFnAttribute("interrupt")) {
+    if (!Func.arg_empty())
+      report_fatal_error(
+        "Functions with the interrupt attribute cannot have arguments!");
+
+    StringRef Kind =
+      MF.getFunction().getFnAttribute("interrupt").getValueAsString();
+
+    if (!(Kind == "user" || Kind == "supervisor" || Kind == "machine"))
+      report_fatal_error(
+        "Function interrupt attribute argument not supported!");
+  }
+
   EVT PtrVT = getPointerTy(DAG.getDataLayout());
   MVT XLenVT = Subtarget.getXLenVT();
   unsigned XLenInBytes = Subtarget.getXLen() / 8;
@@ -972,7 +1062,6 @@ SDValue RISCVTargetLowering::LowerFormalArguments(
 
   for (unsigned i = 0, e = ArgLocs.size(); i != e; ++i) {
     CCValAssign &VA = ArgLocs[i];
-    assert(VA.getLocVT() == XLenVT && "Unhandled argument type");
     SDValue ArgValue;
     // Passing f64 on RV32D with a soft float ABI must be handled as a special
     // case.
@@ -1071,6 +1160,88 @@ SDValue RISCVTargetLowering::LowerFormalArguments(
   return Chain;
 }
 
+/// IsEligibleForTailCallOptimization - Check whether the call is eligible
+/// for tail call optimization.
+/// Note: This is modelled after ARM's IsEligibleForTailCallOptimization.
+bool RISCVTargetLowering::IsEligibleForTailCallOptimization(
+  CCState &CCInfo, CallLoweringInfo &CLI, MachineFunction &MF,
+  const SmallVector<CCValAssign, 16> &ArgLocs) const {
+
+  auto &Callee = CLI.Callee;
+  auto CalleeCC = CLI.CallConv;
+  auto IsVarArg = CLI.IsVarArg;
+  auto &Outs = CLI.Outs;
+  auto &Caller = MF.getFunction();
+  auto CallerCC = Caller.getCallingConv();
+
+  // Do not tail call opt functions with "disable-tail-calls" attribute.
+  if (Caller.getFnAttribute("disable-tail-calls").getValueAsString() == "true")
+    return false;
+
+  // Exception-handling functions need a special set of instructions to
+  // indicate a return to the hardware. Tail-calling another function would
+  // probably break this.
+  // TODO: The "interrupt" attribute isn't currently defined by RISC-V. This
+  // should be expanded as new function attributes are introduced.
+  if (Caller.hasFnAttribute("interrupt"))
+    return false;
+
+  // Do not tail call opt functions with varargs.
+  if (IsVarArg)
+    return false;
+
+  // Do not tail call opt if the stack is used to pass parameters.
+  if (CCInfo.getNextStackOffset() != 0)
+    return false;
+
+  // Do not tail call opt if any parameters need to be passed indirectly.
+  // Since long doubles (fp128) and i128 are larger than 2*XLEN, they are
+  // passed indirectly. So the address of the value will be passed in a
+  // register, or if not available, then the address is put on the stack. In
+  // order to pass indirectly, space on the stack often needs to be allocated
+  // in order to store the value. In this case the CCInfo.getNextStackOffset()
+  // != 0 check is not enough and we need to check if any CCValAssign ArgsLocs
+  // are passed CCValAssign::Indirect.
+  for (auto &VA : ArgLocs)
+    if (VA.getLocInfo() == CCValAssign::Indirect)
+      return false;
+
+  // Do not tail call opt if either caller or callee uses struct return
+  // semantics.
+  auto IsCallerStructRet = Caller.hasStructRetAttr();
+  auto IsCalleeStructRet = Outs.empty() ? false : Outs[0].Flags.isSRet();
+  if (IsCallerStructRet || IsCalleeStructRet)
+    return false;
+
+  // Externally-defined functions with weak linkage should not be
+  // tail-called. The behaviour of branch instructions in this situation (as
+  // used for tail calls) is implementation-defined, so we cannot rely on the
+  // linker replacing the tail call with a return.
+  if (GlobalAddressSDNode *G = dyn_cast<GlobalAddressSDNode>(Callee)) {
+    const GlobalValue *GV = G->getGlobal();
+    if (GV->hasExternalWeakLinkage())
+      return false;
+  }
+
+  // The callee has to preserve all registers the caller needs to preserve.
+  const RISCVRegisterInfo *TRI = Subtarget.getRegisterInfo();
+  const uint32_t *CallerPreserved = TRI->getCallPreservedMask(MF, CallerCC);
+  if (CalleeCC != CallerCC) {
+    const uint32_t *CalleePreserved = TRI->getCallPreservedMask(MF, CalleeCC);
+    if (!TRI->regmaskSubsetEqual(CallerPreserved, CalleePreserved))
+      return false;
+  }
+
+  // Byval parameters hand the function a pointer directly into the stack area
+  // we want to reuse during a tail call. Working around this *is* possible
+  // but less efficient and uglier in LowerCall.
+  for (auto &Arg : Outs)
+    if (Arg.Flags.isByVal())
+      return false;
+
+  return true;
+}
+
 // Lower a call to a callseq_start + CALL + callseq_end chain, and add input
 // and output parameter nodes.
 SDValue RISCVTargetLowering::LowerCall(CallLoweringInfo &CLI,
@@ -1082,7 +1253,7 @@ SDValue RISCVTargetLowering::LowerCall(CallLoweringInfo &CLI,
   SmallVectorImpl<ISD::InputArg> &Ins = CLI.Ins;
   SDValue Chain = CLI.Chain;
   SDValue Callee = CLI.Callee;
-  CLI.IsTailCall = false;
+  bool &IsTailCall = CLI.IsTailCall;
   CallingConv::ID CallConv = CLI.CallConv;
   bool IsVarArg = CLI.IsVarArg;
   EVT PtrVT = getPointerTy(DAG.getDataLayout());
@@ -1094,6 +1265,17 @@ SDValue RISCVTargetLowering::LowerCall(CallLoweringInfo &CLI,
   SmallVector<CCValAssign, 16> ArgLocs;
   CCState ArgCCInfo(CallConv, IsVarArg, MF, ArgLocs, *DAG.getContext());
   analyzeOutputArgs(MF, ArgCCInfo, Outs, /*IsRet=*/false, &CLI);
+
+  // Check if it's really possible to do a tail call.
+  if (IsTailCall)
+    IsTailCall = IsEligibleForTailCallOptimization(ArgCCInfo, CLI, MF,
+                                                   ArgLocs);
+
+  if (IsTailCall)
+    ++NumTailCalls;
+  else if (CLI.CS && CLI.CS.isMustTailCall())
+    report_fatal_error("failed to perform tail call elimination on a call "
+                       "site marked musttail");
 
   // Get a count of how many bytes are to be pushed on the stack.
   unsigned NumBytes = ArgCCInfo.getNextStackOffset();
@@ -1116,12 +1298,13 @@ SDValue RISCVTargetLowering::LowerCall(CallLoweringInfo &CLI,
     Chain = DAG.getMemcpy(Chain, DL, FIPtr, Arg, SizeNode, Align,
                           /*IsVolatile=*/false,
                           /*AlwaysInline=*/false,
-                          /*isTailCall=*/false, MachinePointerInfo(),
+                          IsTailCall, MachinePointerInfo(),
                           MachinePointerInfo());
     ByValArgs.push_back(FIPtr);
   }
 
-  Chain = DAG.getCALLSEQ_START(Chain, NumBytes, 0, CLI.DL);
+  if (!IsTailCall)
+    Chain = DAG.getCALLSEQ_START(Chain, NumBytes, 0, CLI.DL);
 
   // Copy argument values to their designated locations.
   SmallVector<std::pair<unsigned, SDValue>, 8> RegsToPass;
@@ -1165,13 +1348,7 @@ SDValue RISCVTargetLowering::LowerCall(CallLoweringInfo &CLI,
 
     // Promote the value if needed.
     // For now, only handle fully promoted and indirect arguments.
-    switch (VA.getLocInfo()) {
-    case CCValAssign::Full:
-      break;
-    case CCValAssign::BCvt:
-      ArgValue = DAG.getNode(ISD::BITCAST, DL, VA.getLocVT(), ArgValue);
-      break;
-    case CCValAssign::Indirect: {
+    if (VA.getLocInfo() == CCValAssign::Indirect) {
       // Store the argument in a stack slot and pass its address.
       SDValue SpillSlot = DAG.CreateStackTemporary(Outs[i].ArgVT);
       int FI = cast<FrameIndexSDNode>(SpillSlot)->getIndex();
@@ -1193,10 +1370,8 @@ SDValue RISCVTargetLowering::LowerCall(CallLoweringInfo &CLI,
         ++i;
       }
       ArgValue = SpillSlot;
-      break;
-    }
-    default:
-      llvm_unreachable("Unknown loc info!");
+    } else {
+      ArgValue = convertValVTToLocVT(DAG, ArgValue, VA, DL);
     }
 
     // Use local copy if it is a byval arg.
@@ -1208,6 +1383,8 @@ SDValue RISCVTargetLowering::LowerCall(CallLoweringInfo &CLI,
       RegsToPass.push_back(std::make_pair(VA.getLocReg(), ArgValue));
     } else {
       assert(VA.isMemLoc() && "Argument not register or memory");
+      assert(!IsTailCall && "Tail call not allowed if stack is used "
+                            "for passing parameters");
 
       // Work out the address of the stack slot.
       if (!StackPtr.getNode())
@@ -1253,11 +1430,13 @@ SDValue RISCVTargetLowering::LowerCall(CallLoweringInfo &CLI,
   for (auto &Reg : RegsToPass)
     Ops.push_back(DAG.getRegister(Reg.first, Reg.second.getValueType()));
 
-  // Add a register mask operand representing the call-preserved registers.
-  const TargetRegisterInfo *TRI = Subtarget.getRegisterInfo();
-  const uint32_t *Mask = TRI->getCallPreservedMask(MF, CallConv);
-  assert(Mask && "Missing call preserved mask for calling convention");
-  Ops.push_back(DAG.getRegisterMask(Mask));
+  if (!IsTailCall) {
+    // Add a register mask operand representing the call-preserved registers.
+    const TargetRegisterInfo *TRI = Subtarget.getRegisterInfo();
+    const uint32_t *Mask = TRI->getCallPreservedMask(MF, CallConv);
+    assert(Mask && "Missing call preserved mask for calling convention");
+    Ops.push_back(DAG.getRegisterMask(Mask));
+  }
 
   // Glue the call to the argument copies, if any.
   if (Glue.getNode())
@@ -1265,6 +1444,12 @@ SDValue RISCVTargetLowering::LowerCall(CallLoweringInfo &CLI,
 
   // Emit the call.
   SDVTList NodeTys = DAG.getVTList(MVT::Other, MVT::Glue);
+
+  if (IsTailCall) {
+    MF.getFrameInfo().setHasTailCall();
+    return DAG.getNode(RISCVISD::TAIL, DL, NodeTys, Ops);
+  }
+
   Chain = DAG.getNode(RISCVISD::CALL, DL, NodeTys, Ops);
   Glue = Chain.getValue(1);
 
@@ -1288,6 +1473,7 @@ SDValue RISCVTargetLowering::LowerCall(CallLoweringInfo &CLI,
     // Glue the RetValue to the end of the call sequence
     Chain = RetValue.getValue(1);
     Glue = RetValue.getValue(2);
+
     if (VA.getLocVT() == MVT::i32 && VA.getValVT() == MVT::f64) {
       assert(VA.getLocReg() == ArgGPRs[0] && "Unexpected reg assignment");
       SDValue RetValue2 =
@@ -1298,15 +1484,7 @@ SDValue RISCVTargetLowering::LowerCall(CallLoweringInfo &CLI,
                              RetValue2);
     }
 
-    switch (VA.getLocInfo()) {
-    default:
-      llvm_unreachable("Unknown loc info!");
-    case CCValAssign::Full:
-      break;
-    case CCValAssign::BCvt:
-      RetValue = DAG.getNode(ISD::BITCAST, DL, VA.getValVT(), RetValue);
-      break;
-    }
+    RetValue = convertLocVTToValVT(DAG, RetValue, VA, DL);
 
     InVals.push_back(RetValue);
   }
@@ -1327,22 +1505,6 @@ bool RISCVTargetLowering::CanLowerReturn(
       return false;
   }
   return true;
-}
-
-static SDValue packIntoRegLoc(SelectionDAG &DAG, SDValue Val,
-                              const CCValAssign &VA, const SDLoc &DL) {
-  EVT LocVT = VA.getLocVT();
-
-  switch (VA.getLocInfo()) {
-  default:
-    llvm_unreachable("Unexpected CCValAssign::LocInfo");
-  case CCValAssign::Full:
-    break;
-  case CCValAssign::BCvt:
-    Val = DAG.getNode(ISD::BITCAST, DL, LocVT, Val);
-    break;
-  }
-  return Val;
 }
 
 SDValue
@@ -1387,7 +1549,7 @@ RISCVTargetLowering::LowerReturn(SDValue Chain, CallingConv::ID CallConv,
       RetOps.push_back(DAG.getRegister(RegHi, MVT::i32));
     } else {
       // Handle a 'normal' return.
-      Val = packIntoRegLoc(DAG, Val, VA, DL);
+      Val = convertValVTToLocVT(DAG, Val, VA, DL);
       Chain = DAG.getCopyToReg(Chain, DL, VA.getLocReg(), Val, Glue);
 
       // Guarantee that all emitted copies are stuck together.
@@ -1403,6 +1565,28 @@ RISCVTargetLowering::LowerReturn(SDValue Chain, CallingConv::ID CallConv,
     RetOps.push_back(Glue);
   }
 
+  // Interrupt service routines use different return instructions.
+  const Function &Func = DAG.getMachineFunction().getFunction();
+  if (Func.hasFnAttribute("interrupt")) {
+    if (!Func.getReturnType()->isVoidTy())
+      report_fatal_error(
+          "Functions with the interrupt attribute must have void return type!");
+
+    MachineFunction &MF = DAG.getMachineFunction();
+    StringRef Kind =
+      MF.getFunction().getFnAttribute("interrupt").getValueAsString();
+
+    unsigned RetOpc;
+    if (Kind == "user")
+      RetOpc = RISCVISD::URET_FLAG;
+    else if (Kind == "supervisor")
+      RetOpc = RISCVISD::SRET_FLAG;
+    else
+      RetOpc = RISCVISD::MRET_FLAG;
+
+    return DAG.getNode(RetOpc, DL, MVT::Other, RetOps);
+  }
+
   return DAG.getNode(RISCVISD::RET_FLAG, DL, MVT::Other, RetOps);
 }
 
@@ -1412,6 +1596,12 @@ const char *RISCVTargetLowering::getTargetNodeName(unsigned Opcode) const {
     break;
   case RISCVISD::RET_FLAG:
     return "RISCVISD::RET_FLAG";
+  case RISCVISD::URET_FLAG:
+    return "RISCVISD::URET_FLAG";
+  case RISCVISD::SRET_FLAG:
+    return "RISCVISD::SRET_FLAG";
+  case RISCVISD::MRET_FLAG:
+    return "RISCVISD::MRET_FLAG";
   case RISCVISD::CALL:
     return "RISCVISD::CALL";
   case RISCVISD::SELECT_CC:
@@ -1420,6 +1610,8 @@ const char *RISCVTargetLowering::getTargetNodeName(unsigned Opcode) const {
     return "RISCVISD::BuildPairF64";
   case RISCVISD::SplitF64:
     return "RISCVISD::SplitF64";
+  case RISCVISD::TAIL:
+    return "RISCVISD::TAIL";
   }
   return nullptr;
 }
@@ -1440,4 +1632,102 @@ RISCVTargetLowering::getRegForInlineAsmConstraint(const TargetRegisterInfo *TRI,
   }
 
   return TargetLowering::getRegForInlineAsmConstraint(TRI, Constraint, VT);
+}
+
+Instruction *RISCVTargetLowering::emitLeadingFence(IRBuilder<> &Builder,
+                                                   Instruction *Inst,
+                                                   AtomicOrdering Ord) const {
+  if (isa<LoadInst>(Inst) && Ord == AtomicOrdering::SequentiallyConsistent)
+    return Builder.CreateFence(Ord);
+  if (isa<StoreInst>(Inst) && isReleaseOrStronger(Ord))
+    return Builder.CreateFence(AtomicOrdering::Release);
+  return nullptr;
+}
+
+Instruction *RISCVTargetLowering::emitTrailingFence(IRBuilder<> &Builder,
+                                                    Instruction *Inst,
+                                                    AtomicOrdering Ord) const {
+  if (isa<LoadInst>(Inst) && isAcquireOrStronger(Ord))
+    return Builder.CreateFence(AtomicOrdering::Acquire);
+  return nullptr;
+}
+
+TargetLowering::AtomicExpansionKind
+RISCVTargetLowering::shouldExpandAtomicRMWInIR(AtomicRMWInst *AI) const {
+  unsigned Size = AI->getType()->getPrimitiveSizeInBits();
+  if (Size == 8 || Size == 16)
+    return AtomicExpansionKind::MaskedIntrinsic;
+  return AtomicExpansionKind::None;
+}
+
+static Intrinsic::ID
+getIntrinsicForMaskedAtomicRMWBinOp32(AtomicRMWInst::BinOp BinOp) {
+  switch (BinOp) {
+  default:
+    llvm_unreachable("Unexpected AtomicRMW BinOp");
+  case AtomicRMWInst::Xchg:
+    return Intrinsic::riscv_masked_atomicrmw_xchg_i32;
+  case AtomicRMWInst::Add:
+    return Intrinsic::riscv_masked_atomicrmw_add_i32;
+  case AtomicRMWInst::Sub:
+    return Intrinsic::riscv_masked_atomicrmw_sub_i32;
+  case AtomicRMWInst::Nand:
+    return Intrinsic::riscv_masked_atomicrmw_nand_i32;
+  case AtomicRMWInst::Max:
+    return Intrinsic::riscv_masked_atomicrmw_max_i32;
+  case AtomicRMWInst::Min:
+    return Intrinsic::riscv_masked_atomicrmw_min_i32;
+  case AtomicRMWInst::UMax:
+    return Intrinsic::riscv_masked_atomicrmw_umax_i32;
+  case AtomicRMWInst::UMin:
+    return Intrinsic::riscv_masked_atomicrmw_umin_i32;
+  }
+}
+
+Value *RISCVTargetLowering::emitMaskedAtomicRMWIntrinsic(
+    IRBuilder<> &Builder, AtomicRMWInst *AI, Value *AlignedAddr, Value *Incr,
+    Value *Mask, Value *ShiftAmt, AtomicOrdering Ord) const {
+  Value *Ordering = Builder.getInt32(static_cast<uint32_t>(AI->getOrdering()));
+  Type *Tys[] = {AlignedAddr->getType()};
+  Function *LrwOpScwLoop = Intrinsic::getDeclaration(
+      AI->getModule(),
+      getIntrinsicForMaskedAtomicRMWBinOp32(AI->getOperation()), Tys);
+
+  // Must pass the shift amount needed to sign extend the loaded value prior
+  // to performing a signed comparison for min/max. ShiftAmt is the number of
+  // bits to shift the value into position. Pass XLen-ShiftAmt-ValWidth, which
+  // is the number of bits to left+right shift the value in order to
+  // sign-extend.
+  if (AI->getOperation() == AtomicRMWInst::Min ||
+      AI->getOperation() == AtomicRMWInst::Max) {
+    const DataLayout &DL = AI->getModule()->getDataLayout();
+    unsigned ValWidth =
+        DL.getTypeStoreSizeInBits(AI->getValOperand()->getType());
+    Value *SextShamt = Builder.CreateSub(
+        Builder.getInt32(Subtarget.getXLen() - ValWidth), ShiftAmt);
+    return Builder.CreateCall(LrwOpScwLoop,
+                              {AlignedAddr, Incr, Mask, SextShamt, Ordering});
+  }
+
+  return Builder.CreateCall(LrwOpScwLoop, {AlignedAddr, Incr, Mask, Ordering});
+}
+
+TargetLowering::AtomicExpansionKind
+RISCVTargetLowering::shouldExpandAtomicCmpXchgInIR(
+    AtomicCmpXchgInst *CI) const {
+  unsigned Size = CI->getCompareOperand()->getType()->getPrimitiveSizeInBits();
+  if (Size == 8 || Size == 16)
+    return AtomicExpansionKind::MaskedIntrinsic;
+  return AtomicExpansionKind::None;
+}
+
+Value *RISCVTargetLowering::emitMaskedAtomicCmpXchgIntrinsic(
+    IRBuilder<> &Builder, AtomicCmpXchgInst *CI, Value *AlignedAddr,
+    Value *CmpVal, Value *NewVal, Value *Mask, AtomicOrdering Ord) const {
+  Value *Ordering = Builder.getInt32(static_cast<uint32_t>(Ord));
+  Type *Tys[] = {AlignedAddr->getType()};
+  Function *MaskedCmpXchg = Intrinsic::getDeclaration(
+      CI->getModule(), Intrinsic::riscv_masked_cmpxchg_i32, Tys);
+  return Builder.CreateCall(MaskedCmpXchg,
+                            {AlignedAddr, CmpVal, NewVal, Mask, Ordering});
 }

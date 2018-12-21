@@ -71,6 +71,7 @@ class MCTargetOptions;
 class MDNode;
 class Module;
 class raw_ostream;
+class StackMaps;
 class TargetLoweringObjectFile;
 class TargetMachine;
 
@@ -200,6 +201,10 @@ public:
 
   /// Return a unique ID for the current function.
   unsigned getFunctionNumber() const;
+
+  /// Return symbol for the function pseudo stack if the stack frame is not a
+  /// register based.
+  virtual const MCSymbol *getFunctionFrameSymbol() const { return nullptr; }
 
   MCSymbol *getFunctionBegin() const { return CurrentFnBegin; }
   MCSymbol *getFunctionEnd() const { return CurrentFnEnd; }
@@ -338,15 +343,15 @@ public:
   /// global value is specified, and if that global has an explicit alignment
   /// requested, it will override the alignment request if required for
   /// correctness.
-  void EmitAlignment(unsigned NumBits, const GlobalObject *GO = nullptr) const;
+  void EmitAlignment(unsigned NumBits, const GlobalObject *GV = nullptr) const;
 
   /// Lower the specified LLVM Constant to an MCExpr.
   virtual const MCExpr *lowerConstant(const Constant *CV);
 
-  /// \brief Print a general LLVM constant to the .s file.
+  /// Print a general LLVM constant to the .s file.
   void EmitGlobalConstant(const DataLayout &DL, const Constant *CV);
 
-  /// \brief Unnamed constant global variables solely contaning a pointer to
+  /// Unnamed constant global variables solely contaning a pointer to
   /// another globals variable act like a global variable "proxy", or GOT
   /// equivalents, i.e., it's only used to hold the address of the latter. One
   /// optimization is to replace accesses to these proxies by using the GOT
@@ -356,10 +361,13 @@ public:
   /// accesses to GOT entries.
   void computeGlobalGOTEquivs(Module &M);
 
-  /// \brief Constant expressions using GOT equivalent globals may not be
+  /// Constant expressions using GOT equivalent globals may not be
   /// eligible for PC relative GOT entry conversion, in such cases we need to
   /// emit the proxies we previously omitted in EmitGlobalVariable.
   void emitGlobalGOTEquivs();
+
+  /// Emit the stack maps.
+  void emitStackMaps(StackMaps &SM);
 
   //===------------------------------------------------------------------===//
   // Overridable Hooks
@@ -463,6 +471,9 @@ public:
   /// Emit a long directive and value.
   void emitInt32(int Value) const;
 
+  /// Emit a long long directive and value.
+  void emitInt64(uint64_t Value) const;
+
   /// Emit something like ".long Hi-Lo" where the size in bytes of the directive
   /// is specified by Size and Hi/Lo specify the labels.  This implicitly uses
   /// .set if it is available.
@@ -535,16 +546,16 @@ public:
   ///
   /// \p Value - The value to emit.
   /// \p Size - The size of the integer (in bytes) to emit.
-  virtual void EmitDebugThreadLocal(const MCExpr *Value, unsigned Size) const;
+  virtual void EmitDebugValue(const MCExpr *Value, unsigned Size) const;
 
   //===------------------------------------------------------------------===//
   // Dwarf Lowering Routines
   //===------------------------------------------------------------------===//
 
-  /// \brief Emit frame instruction to describe the layout of the frame.
+  /// Emit frame instruction to describe the layout of the frame.
   void emitCFIInstruction(const MCCFIInstruction &Inst) const;
 
-  /// \brief Emit Dwarf abbreviation table.
+  /// Emit Dwarf abbreviation table.
   template <typename T> void emitDwarfAbbrevs(const T &Abbrevs) const {
     // For each abbreviation.
     for (const auto &Abbrev : Abbrevs)
@@ -556,7 +567,7 @@ public:
 
   void emitDwarfAbbrev(const DIEAbbrev &Abbrev) const;
 
-  /// \brief Recursively emit Dwarf DIE tree.
+  /// Recursively emit Dwarf DIE tree.
   void emitDwarfDIE(const DIE &Die) const;
 
   //===------------------------------------------------------------------===//
@@ -624,6 +635,11 @@ private:
   /// inline asm.
   void EmitInlineAsm(const MachineInstr *MI) const;
 
+  /// Add inline assembly info to the diagnostics machinery, so we can
+  /// emit file and position info. Returns SrcMgr memory buffer position.
+  unsigned addInlineAsmDiagBuffer(StringRef AsmStr,
+                                  const MDNode *LocMDNode) const;
+
   //===------------------------------------------------------------------===//
   // Internal Implementation Details
   //===------------------------------------------------------------------===//
@@ -640,10 +656,12 @@ private:
   void EmitLLVMUsedList(const ConstantArray *InitList);
   /// Emit llvm.ident metadata in an '.ident' directive.
   void EmitModuleIdents(Module &M);
+  /// Emit bytes for llvm.commandline metadata.
+  void EmitModuleCommandLines(Module &M);
   void EmitXXStructorList(const DataLayout &DL, const Constant *List,
                           bool isCtor);
 
-  GCMetadataPrinter *GetOrCreateGCPrinter(GCStrategy &C);
+  GCMetadataPrinter *GetOrCreateGCPrinter(GCStrategy &S);
   /// Emit GlobalAlias or GlobalIFunc.
   void emitGlobalIndirectSymbol(Module &M, const GlobalIndirectSymbol &GIS);
   void setupCodePaddingContext(const MachineBasicBlock &MBB,

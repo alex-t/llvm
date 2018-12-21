@@ -141,7 +141,8 @@ let isBranch = 1, isTerminator = 1, isBarrier = 1, isIndirectBranch = 1 in {
                      [(brind (loadi64 addr:$dst))]>, Requires<[In64BitMode]>,
                      Sched<[WriteJumpLd]>;
 
-  let isCodeGenOnly = 1, Predicates = [HasIBT] in {
+  // Non-tracking jumps for IBT, use with caution.
+  let isCodeGenOnly = 1 in {
     def JMP16r_NT : I<0xFF, MRM4r, (outs), (ins GR16 : $dst), "jmp{w}\t{*}$dst",
                       [(X86NoTrackBrind GR16 : $dst)]>, Requires<[Not64BitMode]>,
                       OpSize16, Sched<[WriteJump]>, NOTRACK;
@@ -167,7 +168,7 @@ let isBranch = 1, isTerminator = 1, isBarrier = 1, isIndirectBranch = 1 in {
                       Requires<[In64BitMode]>, Sched<[WriteJumpLd]>, NOTRACK;
   }
 
-  let Predicates = [Not64BitMode] in {
+  let Predicates = [Not64BitMode], AsmVariantName = "att" in {
     def FARJMP16i  : Iseg16<0xEA, RawFrmImm16, (outs),
                             (ins i16imm:$off, i16imm:$seg),
                             "ljmp{w}\t$seg, $off", []>,
@@ -177,12 +178,13 @@ let isBranch = 1, isTerminator = 1, isBarrier = 1, isIndirectBranch = 1 in {
                             "ljmp{l}\t$seg, $off", []>,
                             OpSize32, Sched<[WriteJump]>;
   }
-  def FARJMP64   : RI<0xFF, MRM5m, (outs), (ins opaque80mem:$dst),
-                      "ljmp{q}\t{*}$dst", []>, Sched<[WriteJump]>;
+  def FARJMP64   : RI<0xFF, MRM5m, (outs), (ins opaquemem:$dst),
+                      "ljmp{q}\t{*}$dst", []>, Sched<[WriteJump]>, Requires<[In64BitMode]>;
 
-  def FARJMP16m  : I<0xFF, MRM5m, (outs), (ins opaque32mem:$dst),
+  let AsmVariantName = "att" in
+  def FARJMP16m  : I<0xFF, MRM5m, (outs), (ins opaquemem:$dst),
                      "ljmp{w}\t{*}$dst", []>, OpSize16, Sched<[WriteJumpLd]>;
-  def FARJMP32m  : I<0xFF, MRM5m, (outs), (ins opaque48mem:$dst),
+  def FARJMP32m  : I<0xFF, MRM5m, (outs), (ins opaquemem:$dst),
                      "{l}jmp{l}\t{*}$dst", []>, OpSize32, Sched<[WriteJumpLd]>;
 }
 
@@ -220,14 +222,17 @@ let isCall = 1 in
                         Sched<[WriteJumpLd]>;
     def CALL32r     : I<0xFF, MRM2r, (outs), (ins GR32:$dst),
                         "call{l}\t{*}$dst", [(X86call GR32:$dst)]>, OpSize32,
-                        Requires<[Not64BitMode,NotUseRetpoline]>, Sched<[WriteJump]>;
+                        Requires<[Not64BitMode,NotUseRetpolineIndirectCalls]>,
+                        Sched<[WriteJump]>;
     def CALL32m     : I<0xFF, MRM2m, (outs), (ins i32mem:$dst),
                         "call{l}\t{*}$dst", [(X86call (loadi32 addr:$dst))]>,
                         OpSize32,
-                        Requires<[Not64BitMode,FavorMemIndirectCall,NotUseRetpoline]>,
+                        Requires<[Not64BitMode,FavorMemIndirectCall,
+                                  NotUseRetpolineIndirectCalls]>,
                         Sched<[WriteJumpLd]>;
 
-    let isCodeGenOnly = 1, Predicates = [HasIBT] in {
+    // Non-tracking calls for IBT, use with caution.
+    let isCodeGenOnly = 1 in {
       def CALL16r_NT : I<0xFF, MRM2r, (outs), (ins GR16 : $dst),
                         "call{w}\t{*}$dst",[(X86NoTrackCall GR16 : $dst)]>,
                         OpSize16, Requires<[Not64BitMode]>, Sched<[WriteJump]>, NOTRACK;
@@ -244,7 +249,7 @@ let isCall = 1 in
                         Sched<[WriteJumpLd]>, NOTRACK;
     }
 
-    let Predicates = [Not64BitMode] in {
+    let Predicates = [Not64BitMode], AsmVariantName = "att" in {
       def FARCALL16i  : Iseg16<0x9A, RawFrmImm16, (outs),
                                (ins i16imm:$off, i16imm:$seg),
                                "lcall{w}\t$seg, $off", []>,
@@ -255,9 +260,9 @@ let isCall = 1 in
                                OpSize32, Sched<[WriteJump]>;
     }
 
-    def FARCALL16m  : I<0xFF, MRM3m, (outs), (ins opaque32mem:$dst),
+    def FARCALL16m  : I<0xFF, MRM3m, (outs), (ins opaquemem:$dst),
                         "lcall{w}\t{*}$dst", []>, OpSize16, Sched<[WriteJumpLd]>;
-    def FARCALL32m  : I<0xFF, MRM3m, (outs), (ins opaque48mem:$dst),
+    def FARCALL32m  : I<0xFF, MRM3m, (outs), (ins opaquemem:$dst),
                         "{l}call{l}\t{*}$dst", []>, OpSize32, Sched<[WriteJumpLd]>;
   }
 
@@ -317,13 +322,14 @@ let isCall = 1, Uses = [RSP, SSP], SchedRW = [WriteJump] in {
                       Requires<[In64BitMode]>;
   def CALL64r       : I<0xFF, MRM2r, (outs), (ins GR64:$dst),
                         "call{q}\t{*}$dst", [(X86call GR64:$dst)]>,
-                      Requires<[In64BitMode,NotUseRetpoline]>;
+                      Requires<[In64BitMode,NotUseRetpolineIndirectCalls]>;
   def CALL64m       : I<0xFF, MRM2m, (outs), (ins i64mem:$dst),
                         "call{q}\t{*}$dst", [(X86call (loadi64 addr:$dst))]>,
                       Requires<[In64BitMode,FavorMemIndirectCall,
-                                NotUseRetpoline]>;
+                                NotUseRetpolineIndirectCalls]>;
 
-  let isCodeGenOnly = 1, Predicates = [HasIBT] in{
+  // Non-tracking calls for IBT, use with caution.
+  let isCodeGenOnly = 1 in {
     def CALL64r_NT : I<0xFF, MRM2r, (outs), (ins GR64 : $dst),
                       "call{q}\t{*}$dst",[(X86NoTrackCall GR64 : $dst)]>,
                       Requires<[In64BitMode]>, NOTRACK;
@@ -333,7 +339,7 @@ let isCall = 1, Uses = [RSP, SSP], SchedRW = [WriteJump] in {
                        Requires<[In64BitMode,FavorMemIndirectCall]>, NOTRACK;
   }
 
-  def FARCALL64   : RI<0xFF, MRM3m, (outs), (ins opaque80mem:$dst),
+  def FARCALL64   : RI<0xFF, MRM3m, (outs), (ins opaquemem:$dst),
                        "lcall{q}\t{*}$dst", []>;
 }
 
@@ -375,11 +381,11 @@ let isPseudo = 1, isCall = 1, isCodeGenOnly = 1,
     SchedRW = [WriteJump] in {
   def RETPOLINE_CALL32 :
     PseudoI<(outs), (ins GR32:$dst), [(X86call GR32:$dst)]>,
-            Requires<[Not64BitMode,UseRetpoline]>;
+            Requires<[Not64BitMode,UseRetpolineIndirectCalls]>;
 
   def RETPOLINE_CALL64 :
     PseudoI<(outs), (ins GR64:$dst), [(X86call GR64:$dst)]>,
-            Requires<[In64BitMode,UseRetpoline]>;
+            Requires<[In64BitMode,UseRetpolineIndirectCalls]>;
 
   // Retpoline variant of indirect tail calls.
   let isTerminator = 1, isReturn = 1, isBarrier = 1 in {

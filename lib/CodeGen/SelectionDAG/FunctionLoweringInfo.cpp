@@ -23,6 +23,7 @@
 #include "llvm/CodeGen/TargetLowering.h"
 #include "llvm/CodeGen/TargetRegisterInfo.h"
 #include "llvm/CodeGen/TargetSubtargetInfo.h"
+#include "llvm/CodeGen/WasmEHFuncInfo.h"
 #include "llvm/CodeGen/WinEHFuncInfo.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/DerivedTypes.h"
@@ -85,13 +86,16 @@ void FunctionLoweringInfo::set(const Function &fn, MachineFunction &mf,
   RegInfo = &MF->getRegInfo();
   const TargetFrameLowering *TFI = MF->getSubtarget().getFrameLowering();
   unsigned StackAlign = TFI->getStackAlignment();
+  DA = DAG->getDivergenceAnalysis();
 
   // Check whether the function can return without sret-demotion.
   SmallVector<ISD::OutputArg, 4> Outs;
-  GetReturnInfo(Fn->getReturnType(), Fn->getAttributes(), Outs, *TLI,
+  CallingConv::ID CC = Fn->getCallingConv();
+
+  GetReturnInfo(CC, Fn->getReturnType(), Fn->getAttributes(), Outs, *TLI,
                 mf.getDataLayout());
-  CanLowerReturn = TLI->CanLowerReturn(Fn->getCallingConv(), *MF,
-                                       Fn->isVarArg(), Outs, Fn->getContext());
+  CanLowerReturn =
+      TLI->CanLowerReturn(CC, *MF, Fn->isVarArg(), Outs, Fn->getContext());
 
   // If this personality uses funclets, we need to do a bit more work.
   DenseMap<const AllocaInst *, TinyPtrVector<int *>> CatchObjects;
@@ -117,6 +121,10 @@ void FunctionLoweringInfo::set(const Function &fn, MachineFunction &mf,
           H.CatchObj.FrameIndex = INT_MAX;
       }
     }
+  }
+  if (Personality == EHPersonality::Wasm_CXX) {
+    WasmEHFuncInfo &EHInfo = *MF->getWasmEHFuncInfo();
+    calculateWasmEHInfo(&fn, EHInfo);
   }
 
   // Initialize the mapping of values to registers.  This is only set up for
@@ -226,9 +234,10 @@ void FunctionLoweringInfo::set(const Function &fn, MachineFunction &mf,
       const Instruction *PadInst = BB.getFirstNonPHI();
       // If this is a non-landingpad EH pad, mark this function as using
       // funclets.
-      // FIXME: SEH catchpads do not create funclets, so we could avoid setting
-      // this in such cases in order to improve frame layout.
+      // FIXME: SEH catchpads do not create EH scope/funclets, so we could avoid
+      // setting this in such cases in order to improve frame layout.
       if (!isa<LandingPadInst>(PadInst)) {
+        MF->setHasEHScopes(true);
         MF->setHasEHFunclets(true);
         MF->getFrameInfo().setHasOpaqueSPAdjustment(true);
       }
@@ -281,28 +290,46 @@ void FunctionLoweringInfo::set(const Function &fn, MachineFunction &mf,
     }
   }
 
-  if (!isFuncletEHPersonality(Personality))
-    return;
+  if (isFuncletEHPersonality(Personality)) {
+    WinEHFuncInfo &EHInfo = *MF->getWinEHFuncInfo();
 
-  WinEHFuncInfo &EHInfo = *MF->getWinEHFuncInfo();
-
-  // Map all BB references in the WinEH data to MBBs.
-  for (WinEHTryBlockMapEntry &TBME : EHInfo.TryBlockMap) {
-    for (WinEHHandlerType &H : TBME.HandlerArray) {
-      if (H.Handler)
-        H.Handler = MBBMap[H.Handler.get<const BasicBlock *>()];
+    // Map all BB references in the WinEH data to MBBs.
+    for (WinEHTryBlockMapEntry &TBME : EHInfo.TryBlockMap) {
+      for (WinEHHandlerType &H : TBME.HandlerArray) {
+        if (H.Handler)
+          H.Handler = MBBMap[H.Handler.get<const BasicBlock *>()];
+      }
+    }
+    for (CxxUnwindMapEntry &UME : EHInfo.CxxUnwindMap)
+      if (UME.Cleanup)
+        UME.Cleanup = MBBMap[UME.Cleanup.get<const BasicBlock *>()];
+    for (SEHUnwindMapEntry &UME : EHInfo.SEHUnwindMap) {
+      const auto *BB = UME.Handler.get<const BasicBlock *>();
+      UME.Handler = MBBMap[BB];
+    }
+    for (ClrEHUnwindMapEntry &CME : EHInfo.ClrEHUnwindMap) {
+      const auto *BB = CME.Handler.get<const BasicBlock *>();
+      CME.Handler = MBBMap[BB];
     }
   }
-  for (CxxUnwindMapEntry &UME : EHInfo.CxxUnwindMap)
-    if (UME.Cleanup)
-      UME.Cleanup = MBBMap[UME.Cleanup.get<const BasicBlock *>()];
-  for (SEHUnwindMapEntry &UME : EHInfo.SEHUnwindMap) {
-    const BasicBlock *BB = UME.Handler.get<const BasicBlock *>();
-    UME.Handler = MBBMap[BB];
-  }
-  for (ClrEHUnwindMapEntry &CME : EHInfo.ClrEHUnwindMap) {
-    const BasicBlock *BB = CME.Handler.get<const BasicBlock *>();
-    CME.Handler = MBBMap[BB];
+
+  else if (Personality == EHPersonality::Wasm_CXX) {
+    WasmEHFuncInfo &EHInfo = *MF->getWasmEHFuncInfo();
+    // Map all BB references in the WinEH data to MBBs.
+    DenseMap<BBOrMBB, BBOrMBB> NewMap;
+    for (auto &KV : EHInfo.EHPadUnwindMap) {
+      const auto *Src = KV.first.get<const BasicBlock *>();
+      const auto *Dst = KV.second.get<const BasicBlock *>();
+      NewMap[MBBMap[Src]] = MBBMap[Dst];
+    }
+    EHInfo.EHPadUnwindMap = std::move(NewMap);
+    NewMap.clear();
+    for (auto &KV : EHInfo.ThrowUnwindMap) {
+      const auto *Src = KV.first.get<const BasicBlock *>();
+      const auto *Dst = KV.second.get<const BasicBlock *>();
+      NewMap[MBBMap[Src]] = MBBMap[Dst];
+    }
+    EHInfo.ThrowUnwindMap = std::move(NewMap);
   }
 }
 
@@ -326,9 +353,9 @@ void FunctionLoweringInfo::clear() {
 }
 
 /// CreateReg - Allocate a single virtual register for the given type.
-unsigned FunctionLoweringInfo::CreateReg(MVT VT) {
+unsigned FunctionLoweringInfo::CreateReg(MVT VT, bool isDivergent) {
   return RegInfo->createVirtualRegister(
-      MF->getSubtarget().getTargetLowering()->getRegClassFor(VT));
+      MF->getSubtarget().getTargetLowering()->getRegClassFor(VT, isDivergent));
 }
 
 /// CreateRegs - Allocate the appropriate number of virtual registers of
@@ -338,7 +365,7 @@ unsigned FunctionLoweringInfo::CreateReg(MVT VT) {
 /// In the case that the given value has struct or array type, this function
 /// will assign registers for each member or element.
 ///
-unsigned FunctionLoweringInfo::CreateRegs(Type *Ty) {
+unsigned FunctionLoweringInfo::CreateRegs(Type *Ty, bool isDivergent) {
   const TargetLowering *TLI = MF->getSubtarget().getTargetLowering();
 
   SmallVector<EVT, 4> ValueVTs;
@@ -351,11 +378,15 @@ unsigned FunctionLoweringInfo::CreateRegs(Type *Ty) {
 
     unsigned NumRegs = TLI->getNumRegisters(Ty->getContext(), ValueVT);
     for (unsigned i = 0; i != NumRegs; ++i) {
-      unsigned R = CreateReg(RegisterVT);
+      unsigned R = CreateReg(RegisterVT, isDivergent);
       if (!FirstReg) FirstReg = R;
     }
   }
   return FirstReg;
+}
+
+unsigned FunctionLoweringInfo::CreateRegs(const Value * V) {
+  return CreateRegs(V->getType(), !TLI->requiresUniformRegister(V) && DA->isDivergent(V));
 }
 
 /// GetLiveOutRegInfo - Gets LiveOutInfo for a register, returning NULL if the
@@ -485,7 +516,7 @@ int FunctionLoweringInfo::getArgumentFrameIndex(const Argument *A) {
   auto I = ByValArgFrameIndexMap.find(A);
   if (I != ByValArgFrameIndexMap.end())
     return I->second;
-  DEBUG(dbgs() << "Argument does not have assigned frame index!\n");
+  LLVM_DEBUG(dbgs() << "Argument does not have assigned frame index!\n");
   return INT_MAX;
 }
 
@@ -553,9 +584,18 @@ FunctionLoweringInfo::getOrCreateSwiftErrorVRegUseAt(const Instruction *I, const
 const Value *
 FunctionLoweringInfo::getValueFromVirtualReg(unsigned Vreg) {
   if (VirtReg2Value.empty()) {
+    SmallVector<EVT, 4> ValueVTs;
     for (auto &P : ValueMap) {
-      VirtReg2Value[P.second] = P.first;
+      ValueVTs.clear();
+      ComputeValueVTs(*TLI, Fn->getParent()->getDataLayout(),
+                      P.first->getType(), ValueVTs);
+      unsigned Reg = P.second;
+      for (EVT VT : ValueVTs) {
+        unsigned NumRegisters = TLI->getNumRegisters(Fn->getContext(), VT);
+        for (unsigned i = 0, e = NumRegisters; i != e; ++i)
+          VirtReg2Value[Reg++] = P.first;
+      }
     }
   }
-  return VirtReg2Value[Vreg];
+  return VirtReg2Value.lookup(Vreg);
 }

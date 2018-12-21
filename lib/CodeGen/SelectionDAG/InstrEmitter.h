@@ -84,7 +84,7 @@ class LLVM_LIBRARY_VISIBILITY InstrEmitter {
   /// supports SubIdx sub-registers.  Emit a copy if that isn't possible.
   /// Return the virtual register to use.
   unsigned ConstrainForSubReg(unsigned VReg, unsigned SubIdx, MVT VT,
-                              const DebugLoc &DL);
+                              bool isDivergent, const DebugLoc &DL);
 
   /// EmitSubregNode - Generate machine code for subreg nodes.
   ///
@@ -112,6 +112,9 @@ public:
   ///
   MachineInstr *EmitDbgValue(SDDbgValue *SD,
                              DenseMap<SDValue, unsigned> &VRBaseMap);
+
+  /// Generate machine instruction for a dbg_label node.
+  MachineInstr *EmitDbgLabel(SDDbgLabel *SD);
 
   /// EmitNode - Generate machine code for a node and needed dependencies.
   ///

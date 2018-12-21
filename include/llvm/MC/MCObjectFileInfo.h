@@ -14,8 +14,11 @@
 #ifndef LLVM_MC_MCOBJECTFILEINFO_H
 #define LLVM_MC_MCOBJECTFILEINFO_H
 
+#include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/Triple.h"
+#include "llvm/MC/MCSymbol.h"
 #include "llvm/Support/CodeGen.h"
+#include "llvm/Support/VersionTuple.h"
 
 namespace llvm {
 class MCContext;
@@ -40,12 +43,11 @@ protected:
   /// dwarf unwind.
   bool OmitDwarfIfHaveCompactUnwind;
 
-  /// PersonalityEncoding, LSDAEncoding, TTypeEncoding - Some encoding values
-  /// for EH.
-  unsigned PersonalityEncoding;
-  unsigned LSDAEncoding;
-  unsigned FDECFIEncoding;
-  unsigned TTypeEncoding;
+  /// FDE CFI encoding. Controls the encoding of the begin label in the
+  /// .eh_frame section. Unlike the LSDA encoding, personality encoding, and
+  /// type encodings, this is something that the assembler just "knows" about
+  /// its target
+  unsigned FDECFIEncoding = 0;
 
   /// Compact unwind encoding indicating that we should emit only an EH frame.
   unsigned CompactUnwindDwarfEHFrameOnly;
@@ -114,6 +116,13 @@ protected:
   /// The DWARF v5 string offset and address table sections.
   MCSection *DwarfStrOffSection;
   MCSection *DwarfAddrSection;
+  /// The DWARF v5 range list section.
+  MCSection *DwarfRnglistsSection;
+  /// The DWARF v5 locations list section.
+  MCSection *DwarfLoclistsSection;
+
+  /// The DWARF v5 range list section for fission.
+  MCSection *DwarfRnglistsDWOSection;
 
   // These are for Fission DWP files.
   MCSection *DwarfCUIndexSection;
@@ -158,6 +167,7 @@ protected:
 
   /// Section containing metadata on function stack sizes.
   MCSection *StackSizesSection;
+  mutable DenseMap<const MCSymbol *, unsigned> StackSizesUniquing;
 
   // ELF specific sections.
   MCSection *DataRelROSection;
@@ -218,10 +228,7 @@ public:
     return CommDirectiveSupportsAlignment;
   }
 
-  unsigned getPersonalityEncoding() const { return PersonalityEncoding; }
-  unsigned getLSDAEncoding() const { return LSDAEncoding; }
   unsigned getFDEEncoding() const { return FDECFIEncoding; }
-  unsigned getTTypeEncoding() const { return TTypeEncoding; }
 
   unsigned getCompactUnwindDwarfEHFrameOnly() const {
     return CompactUnwindDwarfEHFrameOnly;
@@ -235,6 +242,9 @@ public:
   MCSection *getCompactUnwindSection() const { return CompactUnwindSection; }
   MCSection *getDwarfAbbrevSection() const { return DwarfAbbrevSection; }
   MCSection *getDwarfInfoSection() const { return DwarfInfoSection; }
+  MCSection *getDwarfInfoSection(uint64_t Hash) const {
+    return getDwarfComdatSection(".debug_info", Hash);
+  }
   MCSection *getDwarfLineSection() const { return DwarfLineSection; }
   MCSection *getDwarfLineStrSection() const { return DwarfLineStrSection; }
   MCSection *getDwarfFrameSection() const { return DwarfFrameSection; }
@@ -253,6 +263,8 @@ public:
   MCSection *getDwarfLocSection() const { return DwarfLocSection; }
   MCSection *getDwarfARangesSection() const { return DwarfARangesSection; }
   MCSection *getDwarfRangesSection() const { return DwarfRangesSection; }
+  MCSection *getDwarfRnglistsSection() const { return DwarfRnglistsSection; }
+  MCSection *getDwarfLoclistsSection() const { return DwarfLoclistsSection; }
   MCSection *getDwarfMacinfoSection() const { return DwarfMacinfoSection; }
 
   MCSection *getDwarfDebugNamesSection() const {
@@ -269,7 +281,9 @@ public:
     return DwarfAccelTypesSection;
   }
   MCSection *getDwarfInfoDWOSection() const { return DwarfInfoDWOSection; }
-  MCSection *getDwarfTypesSection(uint64_t Hash) const;
+  MCSection *getDwarfTypesSection(uint64_t Hash) const {
+    return getDwarfComdatSection(".debug_types", Hash);
+  }
   MCSection *getDwarfTypesDWOSection() const { return DwarfTypesDWOSection; }
   MCSection *getDwarfAbbrevDWOSection() const { return DwarfAbbrevDWOSection; }
   MCSection *getDwarfStrDWOSection() const { return DwarfStrDWOSection; }
@@ -278,6 +292,9 @@ public:
   MCSection *getDwarfStrOffDWOSection() const { return DwarfStrOffDWOSection; }
   MCSection *getDwarfStrOffSection() const { return DwarfStrOffSection; }
   MCSection *getDwarfAddrSection() const { return DwarfAddrSection; }
+  MCSection *getDwarfRnglistsDWOSection() const {
+    return DwarfRnglistsDWOSection;
+  }
   MCSection *getDwarfCUIndexSection() const { return DwarfCUIndexSection; }
   MCSection *getDwarfTUIndexSection() const { return DwarfTUIndexSection; }
   MCSection *getDwarfSwiftASTSection() const { return DwarfSwiftASTSection; }
@@ -299,7 +316,7 @@ public:
   MCSection *getStackMapSection() const { return StackMapSection; }
   MCSection *getFaultMapSection() const { return FaultMapSection; }
 
-  MCSection *getStackSizesSection() const { return StackSizesSection; }
+  MCSection *getStackSizesSection(const MCSection &TextSec) const;
 
   // ELF specific sections.
   MCSection *getDataRelROSection() const { return DataRelROSection; }
@@ -374,14 +391,22 @@ private:
   bool PositionIndependent;
   MCContext *Ctx;
   Triple TT;
+  VersionTuple SDKVersion;
 
   void initMachOMCObjectFileInfo(const Triple &T);
   void initELFMCObjectFileInfo(const Triple &T, bool Large);
   void initCOFFMCObjectFileInfo(const Triple &T);
   void initWasmMCObjectFileInfo(const Triple &T);
+  MCSection *getDwarfComdatSection(const char *Name, uint64_t Hash) const;
 
 public:
   const Triple &getTargetTriple() const { return TT; }
+
+  void setSDKVersion(const VersionTuple &TheSDKVersion) {
+    SDKVersion = TheSDKVersion;
+  }
+
+  const VersionTuple &getSDKVersion() const { return SDKVersion; }
 };
 
 } // end namespace llvm
