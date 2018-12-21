@@ -19,8 +19,12 @@ class raw_ostream;
 namespace pdb {
 
 class PDBSymbolTypeDimension : public PDBSymbol {
-  DECLARE_PDB_SYMBOL_CONCRETE_TYPE(PDB_SymType::Dimension)
 public:
+  PDBSymbolTypeDimension(const IPDBSession &PDBSession,
+                         std::unique_ptr<IPDBRawSymbol> Symbol);
+
+  DECLARE_PDB_SYMBOL_CONCRETE_TYPE(PDB_SymType::Dimension)
+
   void dump(PDBSymDumper &Dumper) const override;
 
   FORWARD_SYMBOL_METHOD(getLowerBoundId)

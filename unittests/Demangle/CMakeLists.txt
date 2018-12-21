@@ -1,9 +1,11 @@
 set(LLVM_LINK_COMPONENTS
   Demangle
-  Support
+)
+
+set(DemangleSources
+  PartialDemangleTest.cpp
 )
 
 add_llvm_unittest(DemangleTests
-  ItaniumDemangleTest.cpp
-  PartialDemangleTest.cpp
+  ${DemangleSources}
 )

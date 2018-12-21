@@ -8,15 +8,11 @@
 vaddps  %xmm0, %xmm0, %xmm1
 vmulps  (%rdi), %xmm1, %xmm2
 
-# CHECK:      Iterations:        1
-# CHECK-NEXT: Instructions:      2
-# CHECK-NEXT: Total Cycles:      10
-# CHECK-NEXT: Total uOps:        2
-
-# CHECK:      Dispatch Width:    2
-# CHECK-NEXT: uOps Per Cycle:    0.20
-# CHECK-NEXT: IPC:               0.20
-# CHECK-NEXT: Block RThroughput: 1.0
+# CHECK:      Iterations:     1
+# CHECK-NEXT: Instructions:   2
+# CHECK-NEXT: Total Cycles:   10
+# CHECK-NEXT: Dispatch Width: 2
+# CHECK-NEXT: IPC:            0.20
 
 # CHECK:      Instruction Info:
 # CHECK-NEXT: [1]: #uOps
@@ -24,17 +20,18 @@ vmulps  (%rdi), %xmm1, %xmm2
 # CHECK-NEXT: [3]: RThroughput
 # CHECK-NEXT: [4]: MayLoad
 # CHECK-NEXT: [5]: MayStore
-# CHECK-NEXT: [6]: HasSideEffects (U)
+# CHECK-NEXT: [6]: HasSideEffects
 
-# CHECK:      [1]    [2]    [3]    [4]    [5]    [6]    Instructions:
-# CHECK-NEXT:  1      3     1.00                        vaddps	%xmm0, %xmm0, %xmm1
-# CHECK-NEXT:  1      7     1.00    *                   vmulps	(%rdi), %xmm1, %xmm2
+# CHECK:      [1]    [2]    [3]    [4]    [5]    [6]	Instructions:
+# CHECK-NEXT:  1      3     1.00                    	vaddps	%xmm0, %xmm0, %xmm1
+# CHECK-NEXT:  1      7     1.00    *               	vmulps	(%rdi), %xmm1, %xmm2
 
 # CHECK:      Timeline view:
-# CHECK-NEXT: Index     0123456789
 
-# CHECK:      [0,0]     DeeeER   .   vaddps	%xmm0, %xmm0, %xmm1
-# CHECK-NEXT: [0,1]     DeeeeeeeER   vmulps	(%rdi), %xmm1, %xmm2
+# CHECK:      Index	0123456789
+
+# CHECK:      [0,0]	DeeeER   .	vaddps	%xmm0, %xmm0, %xmm1
+# CHECK-NEXT: [0,1]	DeeeeeeeER	vmulps	(%rdi), %xmm1, %xmm2
 
 # CHECK:      Average Wait times (based on the timeline view):
 # CHECK-NEXT: [0]: Executions
@@ -43,5 +40,6 @@ vmulps  (%rdi), %xmm1, %xmm2
 # CHECK-NEXT: [3]: Average time elapsed from WB until retire stage
 
 # CHECK:            [0]    [1]    [2]    [3]
-# CHECK-NEXT: 0.     1     1.0    1.0    0.0       vaddps	%xmm0, %xmm0, %xmm1
-# CHECK-NEXT: 1.     1     1.0    0.0    0.0       vmulps	(%rdi), %xmm1, %xmm2
+# CHECK-NEXT: 0.     1     1.0    1.0    0.0    	vaddps	%xmm0, %xmm0, %xmm1
+# CHECK-NEXT: 1.     1     1.0    0.0    0.0    	vmulps	(%rdi), %xmm1, %xmm2
+

@@ -10,7 +10,6 @@
 #ifndef LLVM_MC_MCWINEH_H
 #define LLVM_MC_MCWINEH_H
 
-#include "llvm/ADT/MapVector.h"
 #include <vector>
 
 namespace llvm {
@@ -21,9 +20,9 @@ class MCSymbol;
 namespace WinEH {
 struct Instruction {
   const MCSymbol *Label;
-  unsigned Offset;
-  unsigned Register;
-  unsigned Operation;
+  const unsigned Offset;
+  const unsigned Register;
+  const unsigned Operation;
 
   Instruction(unsigned Op, MCSymbol *L, unsigned Reg, unsigned Off)
     : Label(L), Offset(Off), Register(Reg), Operation(Op) {}
@@ -32,7 +31,6 @@ struct Instruction {
 struct FrameInfo {
   const MCSymbol *Begin = nullptr;
   const MCSymbol *End = nullptr;
-  const MCSymbol *FuncletOrFuncEnd = nullptr;
   const MCSymbol *ExceptionHandler = nullptr;
   const MCSymbol *Function = nullptr;
   const MCSymbol *PrologEnd = nullptr;
@@ -45,7 +43,6 @@ struct FrameInfo {
   int LastFrameInst = -1;
   const FrameInfo *ChainedParent = nullptr;
   std::vector<Instruction> Instructions;
-  MapVector<MCSymbol*, std::vector<Instruction>> EpilogMap;
 
   FrameInfo() = default;
   FrameInfo(const MCSymbol *Function, const MCSymbol *BeginFuncEHLabel)

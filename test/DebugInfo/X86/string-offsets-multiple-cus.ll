@@ -31,40 +31,12 @@
 ; with the correct offsets. Check that strings referenced by compile units 2 and 3
 ; are displayed correctly.
 ;
-; BOTH:        .debug_info contents:
-;
-; Verify that all 3 type units have the proper DW_AT_str_offsets_base attribute.
-; TYPEUNITS-NOT:  contents:
-; TYPEUNITS:      DW_TAG_type_unit
-; TYPEUNITS-NOT:  {{DW_TAG|NULL}}
-; TYPEUNITS:      DW_AT_str_offsets_base [DW_FORM_sec_offset] (0x[[CU1_STROFF:[0-9a-f]+]])
-; TYPEUNITS-NOT:  NULL
-; TYPEUNITS:      DW_TAG_enumerator
-; TYPEUNITS-NOT:  NULL
-; TYPEUNITS:      DW_TAG_enumerator
-; TYPEUNITS-NOT:  {{DW_TAG|NULL}}
-; TYPEUNITS:      DW_AT_name [DW_FORM_strx1] ( indexed (00000005) string = "b")
-; TYPEUNITS-NOT:  contents:
-; TYPEUNITS:      DW_TAG_type_unit
-; TYPEUNITS-NOT:  {{DW_TAG|NULL}}
-; TYPEUNITS:      DW_AT_str_offsets_base [DW_FORM_sec_offset] (0x[[CU1_STROFF]])
-; TYPEUNITS-NOT:  NULL
-; TYPEUNITS:      DW_TAG_enumeration_type
-; TYPEUNITS:      DW_AT_name [DW_FORM_strx1] ( indexed (0000000d) string = "E2")
-; TYPEUNITS-NOT:  contents:
-; TYPEUNITS:      DW_TAG_type_unit
-; TYPEUNITS-NOT:  {{DW_TAG|NULL}}
-; TYPEUNITS:      DW_AT_str_offsets_base [DW_FORM_sec_offset] (0x[[CU1_STROFF]])
-; TYPEUNITS-NOT:  NULL
-; TYPEUNITS:      DW_TAG_enumeration_type
-; TYPEUNITS:      DW_AT_name [DW_FORM_strx1] ( indexed (00000013) string = "E3")
-
 ; CU 1
+; BOTH:        .debug_info contents:
 ; BOTH-NOT:    .contents:
 ; BOTH:        DW_TAG_compile_unit
 ; BOTH-NOT:    {{DW_TAG|NULL}}
-; DEFAULT:     DW_AT_str_offsets_base [DW_FORM_sec_offset] (0x[[CU1_STROFF:[0-9a-f]+]])
-; TYPEUNITS:   DW_AT_str_offsets_base [DW_FORM_sec_offset] (0x[[CU1_STROFF]])
+; BOTH:        DW_AT_str_offsets_base [DW_FORM_sec_offset] (0x[[CU1_STROFF:[0-9a-f]+]])
 ;
 ; CU 2
 ; BOTH-NOT:    contents:
@@ -86,6 +58,33 @@
 ; BOTH-NOT:    {{DW_TAG|NULL}}
 ; BOTH:        DW_AT_name [DW_FORM_strx1] ( indexed (0000000f) string = "glob3")
 ;
+; Verify that all 3 type units have the proper DW_AT_str_offsets_base attribute.
+; TYPEUNITS:      .debug_types contents:
+; TYPEUNITS-NOT:  contents:
+; TYPEUNITS:      DW_TAG_type_unit
+; TYPEUNITS-NOT:  {{DW_TAG|NULL}}
+; TYPEUNITS:      DW_AT_str_offsets_base [DW_FORM_sec_offset] (0x[[CU1_STROFF]])
+; TYPEUNITS-NOT:  NULL
+; TYPEUNITS:      DW_TAG_enumerator
+; TYPEUNITS-NOT:  NULL
+; TYPEUNITS:      DW_TAG_enumerator
+; TYPEUNITS-NOT:  {{DW_TAG|NULL}}
+; TYPEUNITS:      DW_AT_name [DW_FORM_strx1] ( indexed (00000005) string = "b")
+; TYPEUNITS-NOT:  contents:
+; TYPEUNITS:      DW_TAG_type_unit
+; TYPEUNITS-NOT:  {{DW_TAG|NULL}}
+; TYPEUNITS:      DW_AT_str_offsets_base [DW_FORM_sec_offset] (0x[[CU1_STROFF]])
+; TYPEUNITS-NOT:  NULL
+; TYPEUNITS:      DW_TAG_enumeration_type
+; TYPEUNITS:      DW_AT_name [DW_FORM_strx1] ( indexed (0000000d) string = "E2")
+; TYPEUNITS-NOT:  contents:
+; TYPEUNITS:      DW_TAG_type_unit
+; TYPEUNITS-NOT:  {{DW_TAG|NULL}}
+; TYPEUNITS:      DW_AT_str_offsets_base [DW_FORM_sec_offset] (0x[[CU1_STROFF]])
+; TYPEUNITS-NOT:  NULL
+; TYPEUNITS:      DW_TAG_enumeration_type
+; TYPEUNITS:      DW_AT_name [DW_FORM_strx1] ( indexed (00000013) string = "E3")
+;
 ; Extract the offset of a string to verify that it is referenced in the string
 ; offsets section.
 ; BOTH:           .debug_str contents:
@@ -95,7 +94,7 @@
 ; Check the .debug_str_offsets section header and make sure the referenced string
 ; has the correct offset.
 ; BOTH:           .debug_str_offsets contents:
-; BOTH-NEXT:      0x00000000: Contribution size = 84, Format = DWARF32, Version = 5
+; BOTH-NEXT:      0x00000000: Contribution size = 80, Format = DWARF32, Version = 5
 ; BOTH-NEXT:      0x[[CU1_STROFF]]:
 ; BOTH-NEXT:      {{.*:}}
 ; BOTH-NEXT:      {{.*:}}

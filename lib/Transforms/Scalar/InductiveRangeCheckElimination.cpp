@@ -716,13 +716,12 @@ static bool isSafeDecreasingBound(const SCEV *Start,
 
   assert(SE.isKnownNegative(Step) && "expecting negative step");
 
-  LLVM_DEBUG(dbgs() << "irce: isSafeDecreasingBound with:\n");
-  LLVM_DEBUG(dbgs() << "irce: Start: " << *Start << "\n");
-  LLVM_DEBUG(dbgs() << "irce: Step: " << *Step << "\n");
-  LLVM_DEBUG(dbgs() << "irce: BoundSCEV: " << *BoundSCEV << "\n");
-  LLVM_DEBUG(dbgs() << "irce: Pred: " << ICmpInst::getPredicateName(Pred)
-                    << "\n");
-  LLVM_DEBUG(dbgs() << "irce: LatchExitBrIdx: " << LatchBrExitIdx << "\n");
+  DEBUG(dbgs() << "irce: isSafeDecreasingBound with:\n");
+  DEBUG(dbgs() << "irce: Start: " << *Start << "\n");
+  DEBUG(dbgs() << "irce: Step: " << *Step << "\n");
+  DEBUG(dbgs() << "irce: BoundSCEV: " << *BoundSCEV << "\n");
+  DEBUG(dbgs() << "irce: Pred: " << ICmpInst::getPredicateName(Pred) << "\n");
+  DEBUG(dbgs() << "irce: LatchExitBrIdx: " << LatchBrExitIdx << "\n");
 
   bool IsSigned = ICmpInst::isSigned(Pred);
   // The predicate that we need to check that the induction variable lies
@@ -735,7 +734,7 @@ static bool isSafeDecreasingBound(const SCEV *Start,
 
   assert(LatchBrExitIdx == 0 &&
          "LatchBrExitIdx should be either 0 or 1");
-
+            
   const SCEV *StepPlusOne = SE.getAddExpr(Step, SE.getOne(Step->getType()));
   unsigned BitWidth = cast<IntegerType>(BoundSCEV->getType())->getBitWidth();
   APInt Min = IsSigned ? APInt::getSignedMinValue(BitWidth) :
@@ -764,13 +763,12 @@ static bool isSafeIncreasingBound(const SCEV *Start,
   if (!SE.isAvailableAtLoopEntry(BoundSCEV, L))
     return false;
 
-  LLVM_DEBUG(dbgs() << "irce: isSafeIncreasingBound with:\n");
-  LLVM_DEBUG(dbgs() << "irce: Start: " << *Start << "\n");
-  LLVM_DEBUG(dbgs() << "irce: Step: " << *Step << "\n");
-  LLVM_DEBUG(dbgs() << "irce: BoundSCEV: " << *BoundSCEV << "\n");
-  LLVM_DEBUG(dbgs() << "irce: Pred: " << ICmpInst::getPredicateName(Pred)
-                    << "\n");
-  LLVM_DEBUG(dbgs() << "irce: LatchExitBrIdx: " << LatchBrExitIdx << "\n");
+  DEBUG(dbgs() << "irce: isSafeIncreasingBound with:\n");
+  DEBUG(dbgs() << "irce: Start: " << *Start << "\n");
+  DEBUG(dbgs() << "irce: Step: " << *Step << "\n");
+  DEBUG(dbgs() << "irce: BoundSCEV: " << *BoundSCEV << "\n");
+  DEBUG(dbgs() << "irce: Pred: " << ICmpInst::getPredicateName(Pred) << "\n");
+  DEBUG(dbgs() << "irce: LatchExitBrIdx: " << LatchBrExitIdx << "\n");
 
   bool IsSigned = ICmpInst::isSigned(Pred);
   // The predicate that we need to check that the induction variable lies
@@ -786,7 +784,7 @@ static bool isSafeIncreasingBound(const SCEV *Start,
   const SCEV *StepMinusOne =
     SE.getMinusSCEV(Step, SE.getOne(Step->getType()));
   unsigned BitWidth = cast<IntegerType>(BoundSCEV->getType())->getBitWidth();
-  APInt Max = IsSigned ? APInt::getSignedMaxValue(BitWidth) :
+  APInt Max = IsSigned ? APInt::getSignedMaxValue(BitWidth) : 
     APInt::getMaxValue(BitWidth);
   const SCEV *Limit = SE.getMinusSCEV(SE.getConstant(Max), StepMinusOne);
 
@@ -798,7 +796,7 @@ static bool isSafeIncreasingBound(const SCEV *Start,
 static bool CannotBeMinInLoop(const SCEV *BoundSCEV, Loop *L,
                               ScalarEvolution &SE, bool Signed) {
   unsigned BitWidth = cast<IntegerType>(BoundSCEV->getType())->getBitWidth();
-  APInt Min = Signed ? APInt::getSignedMinValue(BitWidth) :
+  APInt Min = Signed ? APInt::getSignedMinValue(BitWidth) : 
     APInt::getMinValue(BitWidth);
   auto Predicate = Signed ? ICmpInst::ICMP_SGT : ICmpInst::ICMP_UGT;
   return SE.isAvailableAtLoopEntry(BoundSCEV, L) &&
@@ -806,18 +804,11 @@ static bool CannotBeMinInLoop(const SCEV *BoundSCEV, Loop *L,
                                      SE.getConstant(Min));
 }
 
-static bool isKnownNonNegativeInLoop(const SCEV *BoundSCEV, const Loop *L,
+static bool isKnownNonNegativeInLoop(const SCEV *BoundSCEV, Loop *L,
                                      ScalarEvolution &SE) {
   const SCEV *Zero = SE.getZero(BoundSCEV->getType());
   return SE.isAvailableAtLoopEntry(BoundSCEV, L) &&
          SE.isLoopEntryGuardedByCond(L, ICmpInst::ICMP_SGE, BoundSCEV, Zero);
-}
-
-static bool isKnownNegativeInLoop(const SCEV *BoundSCEV, const Loop *L,
-                                  ScalarEvolution &SE) {
-  const SCEV *Zero = SE.getZero(BoundSCEV->getType());
-  return SE.isAvailableAtLoopEntry(BoundSCEV, L) &&
-         SE.isLoopEntryGuardedByCond(L, ICmpInst::ICMP_SLT, BoundSCEV, Zero);
 }
 
 Optional<LoopStructure>
@@ -934,12 +925,11 @@ LoopStructure::parseLoopStructure(ScalarEvolution &SE,
     return None;
   }
   const SCEV* StepRec = IndVarBase->getStepRecurrence(SE);
-  if (!isa<SCEVConstant>(StepRec)) {
+  ConstantInt *StepCI = dyn_cast<SCEVConstant>(StepRec)->getValue();
+  if (!StepCI) {
     FailureReason = "LHS in icmp not induction variable";
     return None;
   }
-  ConstantInt *StepCI = cast<SCEVConstant>(StepRec)->getValue();
-
   if (ICI->isEquality() && !HasNoSignedWrap(IndVarBase)) {
     FailureReason = "LHS in icmp needs nsw for equality predicates";
     return None;
@@ -1482,7 +1472,7 @@ bool LoopConstrainer::run() {
   bool IsSignedPredicate = MainLoopStructure.IsSignedPredicate;
   Optional<SubRanges> MaybeSR = calculateSubRanges(IsSignedPredicate);
   if (!MaybeSR.hasValue()) {
-    LLVM_DEBUG(dbgs() << "irce: could not compute subranges\n");
+    DEBUG(dbgs() << "irce: could not compute subranges\n");
     return false;
   }
 
@@ -1518,18 +1508,17 @@ bool LoopConstrainer::run() {
                             IsSignedPredicate))
         ExitPreLoopAtSCEV = SE.getAddExpr(*SR.HighLimit, MinusOneS);
       else {
-        LLVM_DEBUG(dbgs() << "irce: could not prove no-overflow when computing "
-                          << "preloop exit limit.  HighLimit = "
-                          << *(*SR.HighLimit) << "\n");
+        DEBUG(dbgs() << "irce: could not prove no-overflow when computing "
+                     << "preloop exit limit.  HighLimit = " << *(*SR.HighLimit)
+                     << "\n");
         return false;
       }
     }
 
     if (!isSafeToExpandAt(ExitPreLoopAtSCEV, InsertPt, SE)) {
-      LLVM_DEBUG(dbgs() << "irce: could not prove that it is safe to expand the"
-                        << " preloop exit limit " << *ExitPreLoopAtSCEV
-                        << " at block " << InsertPt->getParent()->getName()
-                        << "\n");
+      DEBUG(dbgs() << "irce: could not prove that it is safe to expand the"
+                   << " preloop exit limit " << *ExitPreLoopAtSCEV
+                   << " at block " << InsertPt->getParent()->getName() << "\n");
       return false;
     }
 
@@ -1547,18 +1536,17 @@ bool LoopConstrainer::run() {
                             IsSignedPredicate))
         ExitMainLoopAtSCEV = SE.getAddExpr(*SR.LowLimit, MinusOneS);
       else {
-        LLVM_DEBUG(dbgs() << "irce: could not prove no-overflow when computing "
-                          << "mainloop exit limit.  LowLimit = "
-                          << *(*SR.LowLimit) << "\n");
+        DEBUG(dbgs() << "irce: could not prove no-overflow when computing "
+                     << "mainloop exit limit.  LowLimit = " << *(*SR.LowLimit)
+                     << "\n");
         return false;
       }
     }
 
     if (!isSafeToExpandAt(ExitMainLoopAtSCEV, InsertPt, SE)) {
-      LLVM_DEBUG(dbgs() << "irce: could not prove that it is safe to expand the"
-                        << " main loop exit limit " << *ExitMainLoopAtSCEV
-                        << " at block " << InsertPt->getParent()->getName()
-                        << "\n");
+      DEBUG(dbgs() << "irce: could not prove that it is safe to expand the"
+                   << " main loop exit limit " << *ExitMainLoopAtSCEV
+                   << " at block " << InsertPt->getParent()->getName() << "\n");
       return false;
     }
 
@@ -1707,10 +1695,6 @@ InductiveRangeCheck::computeSafeIterationSpace(
   // values, depending on type of latch condition that defines IV iteration
   // space.
   auto ClampedSubtract = [&](const SCEV *X, const SCEV *Y) {
-    // FIXME: The current implementation assumes that X is in [0, SINT_MAX].
-    // This is required to ensure that SINT_MAX - X does not overflow signed and
-    // that X - Y does not overflow unsigned if Y is negative. Can we lift this
-    // restriction and make it work for negative X either?
     if (IsLatchSigned) {
       // X is a number from signed range, Y is interpreted as signed.
       // Even if Y is SINT_MAX, (X - Y) does not reach SINT_MIN. So the only
@@ -1740,34 +1724,8 @@ InductiveRangeCheck::computeSafeIterationSpace(
   };
   const SCEV *M = SE.getMinusSCEV(C, A);
   const SCEV *Zero = SE.getZero(M->getType());
-
-  // This function returns SCEV equal to 1 if X is non-negative 0 otherwise.
-  auto SCEVCheckNonNegative = [&](const SCEV *X) {
-    const Loop *L = IndVar->getLoop();
-    const SCEV *One = SE.getOne(X->getType());
-    // Can we trivially prove that X is a non-negative or negative value?
-    if (isKnownNonNegativeInLoop(X, L, SE))
-      return One;
-    else if (isKnownNegativeInLoop(X, L, SE))
-      return Zero;
-    // If not, we will have to figure it out during the execution.
-    // Function smax(smin(X, 0), -1) + 1 equals to 1 if X >= 0 and 0 if X < 0.
-    const SCEV *NegOne = SE.getNegativeSCEV(One);
-    return SE.getAddExpr(SE.getSMaxExpr(SE.getSMinExpr(X, Zero), NegOne), One);
-  };
-  // FIXME: Current implementation of ClampedSubtract implicitly assumes that
-  // X is non-negative (in sense of a signed value). We need to re-implement
-  // this function in a way that it will correctly handle negative X as well.
-  // We use it twice: for X = 0 everything is fine, but for X = getEnd() we can
-  // end up with a negative X and produce wrong results. So currently we ensure
-  // that if getEnd() is negative then both ends of the safe range are zero.
-  // Note that this may pessimize elimination of unsigned range checks against
-  // negative values.
-  const SCEV *REnd = getEnd();
-  const SCEV *EndIsNonNegative = SCEVCheckNonNegative(REnd);
-
-  const SCEV *Begin = SE.getMulExpr(ClampedSubtract(Zero, M), EndIsNonNegative);
-  const SCEV *End = SE.getMulExpr(ClampedSubtract(REnd, M), EndIsNonNegative);
+  const SCEV *Begin = ClampedSubtract(Zero, M);
+  const SCEV *End = ClampedSubtract(getEnd(), M);
   return InductiveRangeCheck::Range(Begin, End);
 }
 
@@ -1867,13 +1825,13 @@ bool IRCELegacyPass::runOnLoop(Loop *L, LPPassManager &LPM) {
 bool InductiveRangeCheckElimination::run(
     Loop *L, function_ref<void(Loop *, bool)> LPMAddNewLoop) {
   if (L->getBlocks().size() >= LoopSizeCutoff) {
-    LLVM_DEBUG(dbgs() << "irce: giving up constraining loop, too large\n");
+    DEBUG(dbgs() << "irce: giving up constraining loop, too large\n");
     return false;
   }
 
   BasicBlock *Preheader = L->getLoopPreheader();
   if (!Preheader) {
-    LLVM_DEBUG(dbgs() << "irce: loop has no preheader, leaving\n");
+    DEBUG(dbgs() << "irce: loop has no preheader, leaving\n");
     return false;
   }
 
@@ -1896,7 +1854,7 @@ bool InductiveRangeCheckElimination::run(
       IRC.print(OS);
   };
 
-  LLVM_DEBUG(PrintRecognizedRangeChecks(dbgs()));
+  DEBUG(PrintRecognizedRangeChecks(dbgs()));
 
   if (PrintRangeChecks)
     PrintRecognizedRangeChecks(errs());
@@ -1905,8 +1863,8 @@ bool InductiveRangeCheckElimination::run(
   Optional<LoopStructure> MaybeLoopStructure =
       LoopStructure::parseLoopStructure(SE, BPI, *L, FailureReason);
   if (!MaybeLoopStructure.hasValue()) {
-    LLVM_DEBUG(dbgs() << "irce: could not parse loop structure: "
-                      << FailureReason << "\n";);
+    DEBUG(dbgs() << "irce: could not parse loop structure: " << FailureReason
+                 << "\n";);
     return false;
   }
   LoopStructure LS = MaybeLoopStructure.getValue();
@@ -1956,7 +1914,7 @@ bool InductiveRangeCheckElimination::run(
       L->print(dbgs());
     };
 
-    LLVM_DEBUG(PrintConstrainedLoopInfo());
+    DEBUG(PrintConstrainedLoopInfo());
 
     if (PrintChangedLoops)
       PrintConstrainedLoopInfo();

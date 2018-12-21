@@ -10,7 +10,6 @@
 #include "MipsTargetObjectFile.h"
 #include "MipsSubtarget.h"
 #include "MipsTargetMachine.h"
-#include "MCTargetDesc/MipsMCExpr.h"
 #include "llvm/BinaryFormat/ELF.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/DerivedTypes.h"
@@ -190,7 +189,6 @@ const MCExpr *
 MipsTargetObjectFile::getDebugThreadLocalSymbol(const MCSymbol *Sym) const {
   const MCExpr *Expr =
       MCSymbolRefExpr::create(Sym, MCSymbolRefExpr::VK_None, getContext());
-  Expr = MCBinaryExpr::createAdd(
+  return MCBinaryExpr::createAdd(
       Expr, MCConstantExpr::create(0x8000, getContext()), getContext());
-  return MipsMCExpr::create(MipsMCExpr::MEK_DTPREL, Expr, getContext());
 }

@@ -12,9 +12,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LLVM_LIB_TARGET_X86_X86MACROFUSION_H
-#define LLVM_LIB_TARGET_X86_X86MACROFUSION_H
-
 #include "llvm/CodeGen/MachineScheduler.h"
 
 namespace llvm {
@@ -26,5 +23,3 @@ std::unique_ptr<ScheduleDAGMutation>
 createX86MacroFusionDAGMutation();
 
 } // end namespace llvm
-
-#endif

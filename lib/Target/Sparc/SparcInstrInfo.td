@@ -56,11 +56,6 @@ def HasHardQuad : Predicate<"Subtarget->hasHardQuad()">;
 // instruction
 def HasLeonCASA : Predicate<"Subtarget->hasLeonCasa()">;
 
-// HasPWRPSR - This is true when the target processor supports partial
-// writes to the PSR register that only affects the ET field.
-def HasPWRPSR : Predicate<"Subtarget->hasPWRPSR()">,
-                AssemblerPredicate<"FeaturePWRPSR">;
-
 // HasUMAC_SMAC - This is true when the target processor supports the
 // UMAC and SMAC instructions
 def HasUMAC_SMAC : Predicate<"Subtarget->hasUmacSmac()">;
@@ -94,21 +89,9 @@ def HI22 : SDNodeXForm<imm, [{
                                    MVT::i32);
 }]>;
 
-// Return the complement of a HI22 immediate value.
-def HI22_not : SDNodeXForm<imm, [{
-  return CurDAG->getTargetConstant(~(unsigned)N->getZExtValue() >> 10, SDLoc(N),
-                                   MVT::i32);
-}]>;
-
 def SETHIimm : PatLeaf<(imm), [{
   return isShiftedUInt<22, 10>(N->getZExtValue());
 }], HI22>;
-
-// The N->hasOneUse() prevents the immediate from being instantiated in both
-// normal and complement form.
-def SETHIimm_not : PatLeaf<(i32 imm), [{
-  return N->hasOneUse() && isShiftedUInt<22, 10>(~(unsigned)N->getZExtValue());
-}], HI22_not>;
 
 // Addressing modes.
 def ADDRrr : ComplexPattern<iPTR, 2, "SelectADDRrr", [], []>;
@@ -137,16 +120,6 @@ def MEMri : Operand<iPTR> {
 }
 
 def TLSSym : Operand<iPTR>;
-
-def SparcMembarTagAsmOperand : AsmOperandClass {
-  let Name = "MembarTag";
-  let ParserMethod = "parseMembarTag";
-}
-
-def MembarTag : Operand<i32> {
-  let PrintMethod = "printMembarTag";
-  let ParserMatchClass = SparcMembarTagAsmOperand;
-}
 
 // Branch targets have OtherVT type.
 def brtarget : Operand<OtherVT> {
@@ -196,6 +169,9 @@ SDTypeProfile<1, 3, [SDTCisInt<0>, SDTCisSameAs<0, 1>, SDTCisPtrTy<2>]>;
 def SDTSPtlsld :
 SDTypeProfile<1, 2, [SDTCisPtrTy<0>, SDTCisPtrTy<1>]>;
 
+def SDTSPeh_sjlj_setjmp : SDTypeProfile<1, 1, [SDTCisInt<0>, SDTCisPtrTy<1>]>;
+def SDTSPeh_sjlj_longjmp: SDTypeProfile<0, 1, [SDTCisPtrTy<0>]>;
+
 def SPcmpicc : SDNode<"SPISD::CMPICC", SDTSPcmpicc, [SDNPOutGlue]>;
 def SPcmpfcc : SDNode<"SPISD::CMPFCC", SDTSPcmpfcc, [SDNPOutGlue]>;
 def SPbricc : SDNode<"SPISD::BRICC", SDTSPbrcc, [SDNPHasChain, SDNPInGlue]>;
@@ -213,6 +189,13 @@ def SPxtof  : SDNode<"SPISD::XTOF", SDTSPXTOF>;
 def SPselecticc : SDNode<"SPISD::SELECT_ICC", SDTSPselectcc, [SDNPInGlue]>;
 def SPselectxcc : SDNode<"SPISD::SELECT_XCC", SDTSPselectcc, [SDNPInGlue]>;
 def SPselectfcc : SDNode<"SPISD::SELECT_FCC", SDTSPselectcc, [SDNPInGlue]>;
+
+def SPsjlj_setjmp: SDNode<"SPISD::EH_SJLJ_SETJMP",
+                          SDTSPeh_sjlj_setjmp,
+                          [SDNPHasChain, SDNPSideEffect]>;
+def SPsjlj_longjmp: SDNode<"SPISD::EH_SJLJ_LONGJMP",
+                           SDTSPeh_sjlj_longjmp,
+                           [SDNPHasChain, SDNPSideEffect]>;
 
 //  These are target-independent nodes, but have target-specific formats.
 def SDT_SPCallSeqStart : SDCallSeqStart<[ SDTCisVT<0, i32>,
@@ -438,7 +421,7 @@ let hasSideEffects = 1, mayStore = 1 in {
     def FLUSHW : F3_1<0b10, 0b101011, (outs), (ins),
                       "flushw",
                       [(flushw)]>, Requires<[HasV9]>;
-  let rd = 8, rs1 = 0, simm13 = 3 in
+  let rd = 0, rs1 = 1, simm13 = 3 in
     def TA3 : F3_2<0b10, 0b111010, (outs), (ins),
                    "ta 3",
                    [(flushw)]>;
@@ -488,6 +471,27 @@ let usesCustomInserter = 1, Uses = [FCC0] in {
    : Pseudo<(outs QFPRegs:$dst), (ins QFPRegs:$T, QFPRegs:$F, i32imm:$Cond),
             "; SELECT_CC_QFP_FCC PSEUDO!",
             [(set f128:$dst, (SPselectfcc f128:$T, f128:$F, imm:$Cond))]>;
+}
+
+let hasSideEffects = 1, isBarrier = 1, usesCustomInserter = 1 in {
+  let Defs = [WIM] in
+  def EH_SJLJ_SETJMP32ri  : Pseudo<(outs IntRegs:$dst), (ins MEMri:$buf),
+                            "#EH_SJLJ_SETJMP32",
+                            [(set i32:$dst, (SPsjlj_setjmp ADDRri:$buf))]>,
+                            Requires<[Is32Bit]>;
+  def EH_SJLJ_SETJMP32rr  : Pseudo<(outs IntRegs:$dst), (ins MEMrr:$buf),
+                            "#EH_SJLJ_SETJMP32",
+                            [(set i32:$dst, (SPsjlj_setjmp ADDRrr:$buf))]>,
+                            Requires<[Is32Bit]>;
+  let isTerminator = 1 in
+  def EH_SJLJ_LONGJMP32ri : Pseudo<(outs), (ins MEMri:$buf),
+                            "#EH_SJLJ_LONGJMP32",
+                            [(SPsjlj_longjmp ADDRri:$buf)]>,
+                            Requires<[Is32Bit]>;
+  def EH_SJLJ_LONGJMP32rr : Pseudo<(outs), (ins MEMrr:$buf),
+                            "#EH_SJLJ_LONGJMP32",
+                            [(SPsjlj_longjmp ADDRrr:$buf)]>,
+                            Requires<[Is32Bit]>;
 }
 
 // Section B.1 - Load Integer Instructions, p. 90
@@ -675,12 +679,6 @@ def XNORrr  : F3_1<2, 0b000111,
 def XNORri  : F3_2<2, 0b000111,
                    (outs IntRegs:$rd), (ins IntRegs:$rs1, simm13Op:$simm13),
                    "xnor $rs1, $simm13, $rd", []>;
-
-def : Pat<(and IntRegs:$rs1, SETHIimm_not:$rs2),
-          (ANDNrr i32:$rs1, (SETHIi SETHIimm_not:$rs2))>;
-
-def : Pat<(or IntRegs:$rs1, SETHIimm_not:$rs2),
-          (ORNrr i32:$rs1,  (SETHIi SETHIimm_not:$rs2))>;
 
 let Defs = [ICC] in {
   defm ANDCC  : F3_12np<"andcc",  0b010001>;
@@ -1011,9 +1009,6 @@ let DecoderNamespace = "SparcV9", DecoderMethod = "DecodeTRAP", Predicates = [Ha
 let isBarrier = 1, isTerminator = 1, rd = 0b01000, rs1 = 0, simm13 = 5 in
   def TA5 : F3_2<0b10, 0b111010, (outs), (ins), "ta 5", [(trap)]>;
 
-let hasSideEffects = 1, rd = 0b01000, rs1 = 0, simm13 = 1 in
-  def TA1 : F3_2<0b10, 0b111010, (outs), (ins), "ta 1", [(debugtrap)]>;
-
 // Section B.28 - Read State Register Instructions
 let rs2 = 0 in
   def RDASR : F3_1<2, 0b101000,
@@ -1318,7 +1313,7 @@ let Defs = [FCC0], rd = 0, isCodeGenOnly = 1 in {
 //===----------------------------------------------------------------------===//
 // Instructions for Thread Local Storage(TLS).
 //===----------------------------------------------------------------------===//
-let isAsmParserOnly = 1 in {
+let isCodeGenOnly = 1, isAsmParserOnly = 1 in {
 def TLS_ADDrr : F3_1<2, 0b000000,
                     (outs IntRegs:$rd),
                     (ins IntRegs:$rs1, IntRegs:$rs2, TLSSym:$sym),
@@ -1513,7 +1508,7 @@ def : Pat<(ctpop i32:$src),
           (POPCrr (SRLri $src, 0))>;
 
 let Predicates = [HasV9], hasSideEffects = 1, rd = 0, rs1 = 0b01111 in
- def MEMBARi : F3_2<2, 0b101000, (outs), (ins MembarTag:$simm13),
+ def MEMBARi : F3_2<2, 0b101000, (outs), (ins simm13Op:$simm13),
                     "membar $simm13", []>;
 
 // The CAS instruction, unlike other instructions, only comes in a 
@@ -1569,17 +1564,6 @@ let Predicates = [HasUMAC_SMAC], Defs = [Y, ASR18], Uses = [Y, ASR18] in {
                   (outs IntRegs:$rd), (ins IntRegs:$rs1, simm13Op:$simm13, ASRRegs:$asr18),
                    "umac $rs1, $simm13, $rd",
                    [], IIC_smac_umac>;
-}
-
-// The partial write WRPSR instruction has a non-zero destination
-// register value to separate it from the standard instruction.
-let Predicates = [HasPWRPSR], Defs = [PSR], rd=1 in {
-  def PWRPSRrr : F3_1<2, 0b110001,
-     (outs), (ins IntRegs:$rs1, IntRegs:$rs2),
-     "pwr $rs1, $rs2, %psr", []>;
-  def PWRPSRri : F3_2<2, 0b110001,
-     (outs), (ins IntRegs:$rs1, simm13Op:$simm13),
-     "pwr $rs1, $simm13, %psr", []>;
 }
 
 let Defs = [ICC] in {

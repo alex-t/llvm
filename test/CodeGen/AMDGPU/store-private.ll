@@ -32,9 +32,7 @@ entry:
 ; EG: AND_INT * T{{[0-9]}}.[[BI_CHAN:[XYZW]]], KC0[2].Y, literal.x
 ; EG: LSHL * T{{[0-9]}}.[[SHIFT_CHAN:[XYZW]]], PV.[[BI_CHAN]], literal.x
 ; EG-NEXT: 3(4.203895e-45)
-
-
-; EG: LSHL * T{{[0-9]}}.[[TRUNC_CHAN:[XYZW]]], literal.x, PV.W
+; EG: AND_INT * T{{[0-9]}}.[[TRUNC_CHAN:[XYZW]]], KC0[2].Z, literal.x
 ; EG-NEXT: 255(3.573311e-43)
 
 ; EG: NOT_INT
@@ -59,12 +57,12 @@ entry:
 ; EG: MOVA_INT * AR.x (MASKED)
 ; EG: MOV [[OLD:T[0-9]\.[XYZW]]], {{.*}}AR.x
 
-; EG: VTX_READ_16
-
 ; IG 0: Get the byte index and truncate the value
 ; EG: AND_INT * T{{[0-9]}}.[[BI_CHAN:[XYZW]]], KC0[2].Y, literal.x
 ; EG: LSHL * T{{[0-9]}}.[[SHIFT_CHAN:[XYZW]]], PV.[[BI_CHAN]], literal.x
 ; EG-NEXT: 3(4.203895e-45)
+; EG: AND_INT * T{{[0-9]}}.[[TRUNC_CHAN:[XYZW]]], KC0[2].Z, literal.x
+; EG-NEXT: 65535(9.183409e-41)
 
 ; EG: NOT_INT
 ; EG: AND_INT {{[\* ]*}}[[CLR_CHAN:T[0-9]\.[XYZW]]], {{.*}}[[OLD]]

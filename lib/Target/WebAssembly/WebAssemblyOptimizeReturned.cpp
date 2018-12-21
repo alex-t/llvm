@@ -8,7 +8,7 @@
 //===----------------------------------------------------------------------===//
 ///
 /// \file
-/// Optimize calls with "returned" attributes for WebAssembly.
+/// \brief Optimize calls with "returned" attributes for WebAssembly.
 ///
 //===----------------------------------------------------------------------===//
 

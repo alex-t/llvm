@@ -118,8 +118,7 @@ void RISCVInstrInfo::storeRegToStackSlot(MachineBasicBlock &MBB,
   unsigned Opcode;
 
   if (RISCV::GPRRegClass.hasSubClassEq(RC))
-    Opcode = TRI->getRegSizeInBits(RISCV::GPRRegClass) == 32 ?
-             RISCV::SW : RISCV::SD;
+    Opcode = RISCV::SW;
   else if (RISCV::FPR32RegClass.hasSubClassEq(RC))
     Opcode = RISCV::FSW;
   else if (RISCV::FPR64RegClass.hasSubClassEq(RC))
@@ -145,8 +144,7 @@ void RISCVInstrInfo::loadRegFromStackSlot(MachineBasicBlock &MBB,
   unsigned Opcode;
 
   if (RISCV::GPRRegClass.hasSubClassEq(RC))
-    Opcode = TRI->getRegSizeInBits(RISCV::GPRRegClass) == 32 ?
-             RISCV::LW : RISCV::LD;
+    Opcode = RISCV::LW;
   else if (RISCV::FPR32RegClass.hasSubClassEq(RC))
     Opcode = RISCV::FLW;
   else if (RISCV::FPR64RegClass.hasSubClassEq(RC))
@@ -362,8 +360,9 @@ unsigned RISCVInstrInfo::insertIndirectBranch(MachineBasicBlock &MBB,
   MachineFunction *MF = MBB.getParent();
   MachineRegisterInfo &MRI = MF->getRegInfo();
   const auto &TM = static_cast<const RISCVTargetMachine &>(MF->getTarget());
+  const auto &STI = MF->getSubtarget<RISCVSubtarget>();
 
-  if (TM.isPositionIndependent())
+  if (TM.isPositionIndependent() || STI.is64Bit())
     report_fatal_error("Unable to insert indirect branch");
 
   if (!isInt<32>(BrOffset))
@@ -438,7 +437,6 @@ unsigned RISCVInstrInfo::getInstSizeInBytes(const MachineInstr &MI) const {
   case TargetOpcode::DBG_VALUE:
     return 0;
   case RISCV::PseudoCALL:
-  case RISCV::PseudoTAIL:
     return 8;
   case TargetOpcode::INLINEASM: {
     const MachineFunction &MF = *MI.getParent()->getParent();

@@ -463,7 +463,7 @@ union Auxiliary {
   AuxiliarySectionDefinition SectionDefinition;
 };
 
-/// The Import Directory Table.
+/// @brief The Import Directory Table.
 ///
 /// There is a single array of these and one entry per imported DLL.
 struct ImportDirectoryTableEntry {
@@ -474,7 +474,7 @@ struct ImportDirectoryTableEntry {
   uint32_t ImportAddressTableRVA;
 };
 
-/// The PE32 Import Lookup Table.
+/// @brief The PE32 Import Lookup Table.
 ///
 /// There is an array of these for each imported DLL. It represents either
 /// the ordinal to import from the target DLL, or a name to lookup and import
@@ -485,32 +485,32 @@ struct ImportDirectoryTableEntry {
 struct ImportLookupTableEntry32 {
   uint32_t data;
 
-  /// Is this entry specified by ordinal, or name?
+  /// @brief Is this entry specified by ordinal, or name?
   bool isOrdinal() const { return data & 0x80000000; }
 
-  /// Get the ordinal value of this entry. isOrdinal must be true.
+  /// @brief Get the ordinal value of this entry. isOrdinal must be true.
   uint16_t getOrdinal() const {
     assert(isOrdinal() && "ILT entry is not an ordinal!");
     return data & 0xFFFF;
   }
 
-  /// Set the ordinal value and set isOrdinal to true.
+  /// @brief Set the ordinal value and set isOrdinal to true.
   void setOrdinal(uint16_t o) {
     data = o;
     data |= 0x80000000;
   }
 
-  /// Get the Hint/Name entry RVA. isOrdinal must be false.
+  /// @brief Get the Hint/Name entry RVA. isOrdinal must be false.
   uint32_t getHintNameRVA() const {
     assert(!isOrdinal() && "ILT entry is not a Hint/Name RVA!");
     return data;
   }
 
-  /// Set the Hint/Name entry RVA and set isOrdinal to false.
+  /// @brief Set the Hint/Name entry RVA and set isOrdinal to false.
   void setHintNameRVA(uint32_t rva) { data = rva; }
 };
 
-/// The DOS compatible header at the front of all PEs.
+/// @brief The DOS compatible header at the front of all PEs.
 struct DOSHeader {
   uint16_t Magic;
   uint16_t UsedBytesInTheLastPage;

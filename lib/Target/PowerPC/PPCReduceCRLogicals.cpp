@@ -24,7 +24,6 @@
 #include "llvm/CodeGen/MachineFunctionPass.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
-#include "llvm/Config/llvm-config.h"
 #include "llvm/Support/Debug.h"
 
 using namespace llvm;
@@ -67,7 +66,7 @@ static void updatePHIs(MachineBasicBlock *Successor, MachineBasicBlock *OrigMBB,
     for (unsigned i = 2, e = MI.getNumOperands() + 1; i != e; i += 2) {
       MachineOperand &MO = MI.getOperand(i);
       if (MO.getMBB() == OrigMBB) {
-        // Check if the instruction is actually defined in NewMBB.
+        // Check if the instruction is actualy defined in NewMBB.
         if (MI.getOperand(i - 1).isReg()) {
           MachineInstr *DefMI = MRI->getVRegDef(MI.getOperand(i - 1).getReg());
           if (DefMI->getParent() == NewMBB ||
@@ -91,7 +90,7 @@ static void addIncomingValuesToPHIs(MachineBasicBlock *Successor,
                                     MachineBasicBlock *NewMBB,
                                     MachineRegisterInfo *MRI) {
   assert(OrigMBB->isSuccessor(NewMBB) &&
-         "NewMBB must be a successor of OrigMBB");
+         "NewMBB must be a sucessor of OrigMBB");
   for (auto &MI : Successor->instrs()) {
     if (!MI.isPHI())
       continue;
@@ -150,9 +149,8 @@ static bool splitMBB(BlockSplitInfo &BSI) {
   MachineRegisterInfo *MRI = &MF->getRegInfo();
   assert(MRI->isSSA() && "Can only do this while the function is in SSA form.");
   if (ThisMBB->succ_size() != 2) {
-    LLVM_DEBUG(
-        dbgs() << "Don't know how to handle blocks that don't have exactly"
-               << " two successors.\n");
+    DEBUG(dbgs() << "Don't know how to handle blocks that don't have exactly"
+                 << " two succesors.\n");
     return false;
   }
 
@@ -219,9 +217,9 @@ static bool splitMBB(BlockSplitInfo &BSI) {
   }
   addIncomingValuesToPHIs(NewBRTarget, ThisMBB, NewMBB, MRI);
 
-  LLVM_DEBUG(dbgs() << "After splitting, ThisMBB:\n"; ThisMBB->dump());
-  LLVM_DEBUG(dbgs() << "NewMBB:\n"; NewMBB->dump());
-  LLVM_DEBUG(dbgs() << "New branch-to block:\n"; NewBRTarget->dump());
+  DEBUG(dbgs() << "After splitting, ThisMBB:\n"; ThisMBB->dump());
+  DEBUG(dbgs() << "NewMBB:\n"; NewMBB->dump());
+  DEBUG(dbgs() << "New branch-to block:\n"; NewBRTarget->dump());
   return true;
 }
 
@@ -492,7 +490,7 @@ PPCReduceCRLogicals::createCRLogicalOpInfo(MachineInstr &MIParam) {
       Ret.ContainedInBlock &=
         (MIParam.getParent() == Ret.TrueDefs.second->getParent());
   }
-  LLVM_DEBUG(Ret.dump());
+  DEBUG(Ret.dump());
   if (Ret.IsBinary && Ret.ContainedInBlock && Ret.SingleUse) {
     NumContainedSingleUseBinOps++;
     if (Ret.FeedsBR && Ret.DefsSingleUse)
@@ -501,7 +499,7 @@ PPCReduceCRLogicals::createCRLogicalOpInfo(MachineInstr &MIParam) {
   return Ret;
 }
 
-/// Looks through a COPY instruction to the actual definition of the CR-bit
+/// Looks trhough a COPY instruction to the actual definition of the CR-bit
 /// register and returns the instruction that defines it.
 /// FIXME: This currently handles what is by-far the most common case:
 /// an instruction that defines a CR field followed by a single copy of a bit
@@ -586,15 +584,14 @@ bool PPCReduceCRLogicals::handleCROp(CRLogicalOpInfo &CRI) {
 ///    BC %vr9<kill>, <BB#2>; CRBITRC:%vr9
 bool PPCReduceCRLogicals::splitBlockOnBinaryCROp(CRLogicalOpInfo &CRI) {
   if (CRI.CopyDefs.first == CRI.CopyDefs.second) {
-    LLVM_DEBUG(dbgs() << "Unable to split as the two operands are the same\n");
+    DEBUG(dbgs() << "Unable to split as the two operands are the same\n");
     NumNotSplitIdenticalOperands++;
     return false;
   }
   if (CRI.TrueDefs.first->isCopy() || CRI.TrueDefs.second->isCopy() ||
       CRI.TrueDefs.first->isPHI() || CRI.TrueDefs.second->isPHI()) {
-    LLVM_DEBUG(
-        dbgs() << "Unable to split because one of the operands is a PHI or "
-                  "chain of copies.\n");
+    DEBUG(dbgs() << "Unable to split because one of the operands is a PHI or "
+          "chain of copies.\n");
     NumNotSplitChainCopies++;
     return false;
   }
@@ -605,11 +602,11 @@ bool PPCReduceCRLogicals::splitBlockOnBinaryCROp(CRLogicalOpInfo &CRI) {
       CRI.MI->getOpcode() != PPC::CRNAND &&
       CRI.MI->getOpcode() != PPC::CRORC &&
       CRI.MI->getOpcode() != PPC::CRANDC) {
-    LLVM_DEBUG(dbgs() << "Unable to split blocks on this opcode.\n");
+    DEBUG(dbgs() << "Unable to split blocks on this opcode.\n");
     NumNotSplitWrongOpcode++;
     return false;
   }
-  LLVM_DEBUG(dbgs() << "Splitting the following CR op:\n"; CRI.dump());
+  DEBUG(dbgs() << "Splitting the following CR op:\n"; CRI.dump());
   MachineBasicBlock::iterator Def1It = CRI.TrueDefs.first;
   MachineBasicBlock::iterator Def2It = CRI.TrueDefs.second;
 
@@ -623,9 +620,9 @@ bool PPCReduceCRLogicals::splitBlockOnBinaryCROp(CRLogicalOpInfo &CRI) {
     }
   }
 
-  LLVM_DEBUG(dbgs() << "We will split the following block:\n";);
-  LLVM_DEBUG(CRI.MI->getParent()->dump());
-  LLVM_DEBUG(dbgs() << "Before instruction:\n"; SplitBefore->dump());
+  DEBUG(dbgs() << "We will split the following block:\n";);
+  DEBUG(CRI.MI->getParent()->dump());
+  DEBUG(dbgs() << "Before instruction:\n"; SplitBefore->dump());
 
   // Get the branch instruction.
   MachineInstr *Branch =
@@ -658,11 +655,10 @@ bool PPCReduceCRLogicals::splitBlockOnBinaryCROp(CRLogicalOpInfo &CRI) {
                                   TargetIsFallThrough);
   MachineInstr *SplitCond =
     UsingDef1 ? CRI.CopyDefs.second : CRI.CopyDefs.first;
-  LLVM_DEBUG(dbgs() << "We will " << (InvertNewBranch ? "invert" : "copy"));
-  LLVM_DEBUG(dbgs() << " the original branch and the target is the "
-                    << (TargetIsFallThrough ? "fallthrough block\n"
-                                            : "orig. target block\n"));
-  LLVM_DEBUG(dbgs() << "Original branch instruction: "; Branch->dump());
+  DEBUG(dbgs() << "We will " <<  (InvertNewBranch ? "invert" : "copy"));
+  DEBUG(dbgs() << " the original branch and the target is the " <<
+        (TargetIsFallThrough ? "fallthrough block\n" : "orig. target block\n"));
+  DEBUG(dbgs() << "Original branch instruction: "; Branch->dump());
   BlockSplitInfo BSI { Branch, SplitBefore, SplitCond, InvertNewBranch,
     InvertOrigBranch, TargetIsFallThrough, MBPI, CRI.MI,
     UsingDef1 ? CRI.CopyDefs.first : CRI.CopyDefs.second };
@@ -699,7 +695,7 @@ void PPCReduceCRLogicals::collectCRLogicals() {
   }
 }
 
-} // end anonymous namespace
+} // end annonymous namespace
 
 INITIALIZE_PASS_BEGIN(PPCReduceCRLogicals, DEBUG_TYPE,
                       "PowerPC Reduce CR logical Operation", false, false)

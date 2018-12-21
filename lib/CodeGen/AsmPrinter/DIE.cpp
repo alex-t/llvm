@@ -17,7 +17,6 @@
 #include "DwarfUnit.h"
 #include "llvm/ADT/Twine.h"
 #include "llvm/CodeGen/AsmPrinter.h"
-#include "llvm/Config/llvm-config.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/MC/MCAsmInfo.h"
 #include "llvm/MC/MCContext.h"
@@ -87,9 +86,8 @@ void DIEAbbrev::Emit(const AsmPrinter *AP) const {
     // easily, which helps track down where it came from.
     if (!dwarf::isValidFormForVersion(AttrData.getForm(),
                                       AP->getDwarfVersion())) {
-      LLVM_DEBUG(dbgs() << "Invalid form " << format("0x%x", AttrData.getForm())
-                        << " for DWARF version " << AP->getDwarfVersion()
-                        << "\n");
+      DEBUG(dbgs() << "Invalid form " << format("0x%x", AttrData.getForm())
+                   << " for DWARF version " << AP->getDwarfVersion() << "\n");
       llvm_unreachable("Invalid form for specified DWARF version");
     }
 #endif
@@ -414,8 +412,6 @@ void DIEInteger::EmitValue(const AsmPrinter *Asm, dwarf::Form Form) const {
   case dwarf::DW_FORM_GNU_addr_index:
   case dwarf::DW_FORM_ref_udata:
   case dwarf::DW_FORM_strx:
-  case dwarf::DW_FORM_addrx:
-  case dwarf::DW_FORM_rnglistx:
   case dwarf::DW_FORM_udata:
     Asm->EmitULEB128(Integer);
     return;
@@ -442,8 +438,6 @@ unsigned DIEInteger::SizeOf(const AsmPrinter *AP, dwarf::Form Form) const {
   case dwarf::DW_FORM_GNU_addr_index:
   case dwarf::DW_FORM_ref_udata:
   case dwarf::DW_FORM_strx:
-  case dwarf::DW_FORM_addrx:
-  case dwarf::DW_FORM_rnglistx:
   case dwarf::DW_FORM_udata:
     return getULEB128Size(Integer);
   case dwarf::DW_FORM_sdata:
@@ -465,7 +459,7 @@ void DIEInteger::print(raw_ostream &O) const {
 /// EmitValue - Emit expression value.
 ///
 void DIEExpr::EmitValue(const AsmPrinter *AP, dwarf::Form Form) const {
-  AP->EmitDebugValue(Expr, SizeOf(AP, Form));
+  AP->EmitDebugThreadLocal(Expr, SizeOf(AP, Form));
 }
 
 /// SizeOf - Determine size of expression value in bytes.
@@ -589,7 +583,8 @@ void DIEString::print(raw_ostream &O) const {
 //===----------------------------------------------------------------------===//
 void DIEInlineString::EmitValue(const AsmPrinter *AP, dwarf::Form Form) const {
   if (Form == dwarf::DW_FORM_string) {
-    AP->OutStreamer->EmitBytes(S);
+    for (char ch : S)
+      AP->emitInt8(ch);
     AP->emitInt8(0);
     return;
   }

@@ -14,7 +14,6 @@
 #include "llvm/Support/Process.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringExtras.h"
-#include "llvm/Config/llvm-config.h"
 #include "llvm/Config/config.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/Path.h"
@@ -83,16 +82,17 @@ static const char colorcodes[2][2][8][10] = {
  { ALLCOLORS("4",""), ALLCOLORS("4","1;") }
 };
 
-// A CMake option controls wheter we emit core dumps by default. An application
-// may disable core dumps by calling Process::PreventCoreFiles().
-static bool coreFilesPrevented = !LLVM_ENABLE_CRASH_DUMPS;
+// This is set to true when Process::PreventCoreFiles() is called.
+static bool coreFilesPrevented = false;
 
-bool Process::AreCoreFilesPrevented() { return coreFilesPrevented; }
+bool Process::AreCoreFilesPrevented() {
+  return coreFilesPrevented;
+}
 
 // Include the platform-specific parts of this class.
 #ifdef LLVM_ON_UNIX
 #include "Unix/Process.inc"
 #endif
-#ifdef _WIN32
+#ifdef LLVM_ON_WIN32
 #include "Windows/Process.inc"
 #endif

@@ -169,19 +169,19 @@ protected:
 #define STATISTIC(VARNAME, DESC)                                               \
   static llvm::Statistic VARNAME = {DEBUG_TYPE, #VARNAME, DESC, {0}, {false}}
 
-/// Enable the collection and printing of statistics.
+/// \brief Enable the collection and printing of statistics.
 void EnableStatistics(bool PrintOnExit = true);
 
-/// Check if statistics are enabled.
+/// \brief Check if statistics are enabled.
 bool AreStatisticsEnabled();
 
-/// Return a file stream to print our output on.
+/// \brief Return a file stream to print our output on.
 std::unique_ptr<raw_fd_ostream> CreateInfoOutputFile();
 
-/// Print statistics to the file returned by CreateInfoOutputFile().
+/// \brief Print statistics to the file returned by CreateInfoOutputFile().
 void PrintStatistics();
 
-/// Print statistics to the given output stream.
+/// \brief Print statistics to the given output stream.
 void PrintStatistics(raw_ostream &OS);
 
 /// Print statistics in JSON format. This does include all global timers (\see
@@ -190,7 +190,7 @@ void PrintStatistics(raw_ostream &OS);
 /// PrintStatisticsJSON().
 void PrintStatisticsJSON(raw_ostream &OS);
 
-/// Get the statistics. This can be used to look up the value of
+/// \brief Get the statistics. This can be used to look up the value of
 /// statistics without needing to parse JSON.
 ///
 /// This function does not prevent statistics being updated by other threads
@@ -199,7 +199,7 @@ void PrintStatisticsJSON(raw_ostream &OS);
 /// completes.
 const std::vector<std::pair<StringRef, unsigned>> GetStatistics();
 
-/// Reset the statistics. This can be used to zero and de-register the
+/// \brief Reset the statistics. This can be used to zero and de-register the
 /// statistics in order to measure a compilation.
 ///
 /// When this function begins to call destructors prior to returning, all

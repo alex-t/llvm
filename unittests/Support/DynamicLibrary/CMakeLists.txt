@@ -1,30 +1,14 @@
-# Needed by LLVM's CMake checks because this file defines multiple targets.
-set(LLVM_OPTIONAL_SOURCES ExportedFuncs.cpp PipSqueak.cpp)
-
 set(LLVM_LINK_COMPONENTS Support)
 
-add_library(DynamicLibraryLib STATIC
-  ExportedFuncs.cpp
-  )
+add_library(DynamicLibraryLib STATIC ExportedFuncs.cxx)
 set_target_properties(DynamicLibraryLib PROPERTIES FOLDER "Tests")
 
-# extract_symbols.py relies on all its library arguments being in the same
-# directory, so we must set the output directory in the same way as if
-# add_llvm_library was used.
-set_output_directory(DynamicLibraryLib
-  LIBRARY_DIR ${LLVM_LIBRARY_OUTPUT_INTDIR}
-  )
-
-add_llvm_unittest(DynamicLibraryTests
-  DynamicLibraryTest.cpp
-  )
+add_llvm_unittest(DynamicLibraryTests DynamicLibraryTest.cpp)
 target_link_libraries(DynamicLibraryTests PRIVATE DynamicLibraryLib)
 export_executable_symbols(DynamicLibraryTests)
 
 function(dynlib_add_module NAME)
-  add_library(${NAME} SHARED
-    PipSqueak.cpp
-    )
+  add_library(${NAME} SHARED PipSqueak.cxx)
   set_target_properties(${NAME} PROPERTIES FOLDER "Tests")
 
   set_output_directory(${NAME}
@@ -34,7 +18,7 @@ function(dynlib_add_module NAME)
 
   set_target_properties(${NAME}
     PROPERTIES PREFIX ""
-    SUFFIX ${LTDL_SHLIB_EXT}
+    SUFFIX ".so"
     )
 
   add_dependencies(DynamicLibraryTests ${NAME})

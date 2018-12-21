@@ -77,21 +77,6 @@ FunctionPass *llvm::createScalarizeMaskedMemIntrinPass() {
   return new ScalarizeMaskedMemIntrin();
 }
 
-static bool isConstantIntVector(Value *Mask) {
-  Constant *C = dyn_cast<Constant>(Mask);
-  if (!C)
-    return false;
-
-  unsigned NumElts = Mask->getType()->getVectorNumElements();
-  for (unsigned i = 0; i != NumElts; ++i) {
-    Constant *CElt = C->getAggregateElement(i);
-    if (!CElt || !isa<ConstantInt>(CElt))
-      return false;
-  }
-
-  return true;
-}
-
 // Translate a masked load intrinsic like
 // <16 x i32 > @llvm.masked.load( <16 x i32>* %addr, i32 align,
 //                               <16 x i1> %mask, <16 x i32> %passthru)
@@ -100,29 +85,32 @@ static bool isConstantIntVector(Value *Mask) {
 //
 //  %1 = bitcast i8* %addr to i32*
 //  %2 = extractelement <16 x i1> %mask, i32 0
-//  br i1 %2, label %cond.load, label %else
+//  %3 = icmp eq i1 %2, true
+//  br i1 %3, label %cond.load, label %else
 //
 // cond.load:                                        ; preds = %0
-//  %3 = getelementptr i32* %1, i32 0
-//  %4 = load i32* %3
-//  %5 = insertelement <16 x i32> %passthru, i32 %4, i32 0
+//  %4 = getelementptr i32* %1, i32 0
+//  %5 = load i32* %4
+//  %6 = insertelement <16 x i32> undef, i32 %5, i32 0
 //  br label %else
 //
 // else:                                             ; preds = %0, %cond.load
-//  %res.phi.else = phi <16 x i32> [ %5, %cond.load ], [ undef, %0 ]
-//  %6 = extractelement <16 x i1> %mask, i32 1
-//  br i1 %6, label %cond.load1, label %else2
+//  %res.phi.else = phi <16 x i32> [ %6, %cond.load ], [ undef, %0 ]
+//  %7 = extractelement <16 x i1> %mask, i32 1
+//  %8 = icmp eq i1 %7, true
+//  br i1 %8, label %cond.load1, label %else2
 //
 // cond.load1:                                       ; preds = %else
-//  %7 = getelementptr i32* %1, i32 1
-//  %8 = load i32* %7
-//  %9 = insertelement <16 x i32> %res.phi.else, i32 %8, i32 1
+//  %9 = getelementptr i32* %1, i32 1
+//  %10 = load i32* %9
+//  %11 = insertelement <16 x i32> %res.phi.else, i32 %10, i32 1
 //  br label %else2
 //
 // else2:                                          ; preds = %else, %cond.load1
-//  %res.phi.else3 = phi <16 x i32> [ %9, %cond.load1 ], [ %res.phi.else, %else ]
-//  %10 = extractelement <16 x i1> %mask, i32 2
-//  br i1 %10, label %cond.load4, label %else5
+//  %res.phi.else3 = phi <16 x i32> [ %11, %cond.load1 ], [ %res.phi.else, %else ]
+//  %12 = extractelement <16 x i1> %mask, i32 2
+//  %13 = icmp eq i1 %12, true
+//  br i1 %13, label %cond.load4, label %else5
 //
 static void scalarizeMaskedLoad(CallInst *CI) {
   Value *Ptr = CI->getArgOperand(0);
@@ -131,19 +119,25 @@ static void scalarizeMaskedLoad(CallInst *CI) {
   Value *Src0 = CI->getArgOperand(3);
 
   unsigned AlignVal = cast<ConstantInt>(Alignment)->getZExtValue();
-  VectorType *VecType = cast<VectorType>(CI->getType());
+  VectorType *VecType = dyn_cast<VectorType>(CI->getType());
+  assert(VecType && "Unexpected return type of masked load intrinsic");
 
-  Type *EltTy = VecType->getElementType();
+  Type *EltTy = CI->getType()->getVectorElementType();
 
   IRBuilder<> Builder(CI->getContext());
   Instruction *InsertPt = CI;
   BasicBlock *IfBlock = CI->getParent();
+  BasicBlock *CondBlock = nullptr;
+  BasicBlock *PrevIfBlock = CI->getParent();
 
   Builder.SetInsertPoint(InsertPt);
   Builder.SetCurrentDebugLocation(CI->getDebugLoc());
 
   // Short-cut if the mask is all-true.
-  if (isa<Constant>(Mask) && cast<Constant>(Mask)->isAllOnesValue()) {
+  bool IsAllOnesMask =
+      isa<Constant>(Mask) && cast<Constant>(Mask)->isAllOnesValue();
+
+  if (IsAllOnesMask) {
     Value *NewI = Builder.CreateAlignedLoad(Ptr, AlignVal);
     CI->replaceAllUsesWith(NewI);
     CI->eraseFromParent();
@@ -151,19 +145,21 @@ static void scalarizeMaskedLoad(CallInst *CI) {
   }
 
   // Adjust alignment for the scalar instruction.
-  AlignVal = MinAlign(AlignVal, EltTy->getPrimitiveSizeInBits() / 8);
+  AlignVal = std::min(AlignVal, VecType->getScalarSizeInBits() / 8);
   // Bitcast %addr fron i8* to EltTy*
   Type *NewPtrType =
       EltTy->getPointerTo(cast<PointerType>(Ptr->getType())->getAddressSpace());
   Value *FirstEltPtr = Builder.CreateBitCast(Ptr, NewPtrType);
   unsigned VectorWidth = VecType->getNumElements();
 
-  // The result vector
-  Value *VResult = Src0;
+  Value *UndefVal = UndefValue::get(VecType);
 
-  if (isConstantIntVector(Mask)) {
+  // The result vector
+  Value *VResult = UndefVal;
+
+  if (isa<ConstantVector>(Mask)) {
     for (unsigned Idx = 0; Idx < VectorWidth; ++Idx) {
-      if (cast<Constant>(Mask)->getAggregateElement(Idx)->isNullValue())
+      if (cast<ConstantVector>(Mask)->getOperand(Idx)->isNullValue())
         continue;
       Value *Gep =
           Builder.CreateInBoundsGEP(EltTy, FirstEltPtr, Builder.getInt32(Idx));
@@ -171,21 +167,35 @@ static void scalarizeMaskedLoad(CallInst *CI) {
       VResult =
           Builder.CreateInsertElement(VResult, Load, Builder.getInt32(Idx));
     }
-    CI->replaceAllUsesWith(VResult);
+    Value *NewI = Builder.CreateSelect(Mask, VResult, Src0);
+    CI->replaceAllUsesWith(NewI);
     CI->eraseFromParent();
     return;
   }
+
+  PHINode *Phi = nullptr;
+  Value *PrevPhi = UndefVal;
 
   for (unsigned Idx = 0; Idx < VectorWidth; ++Idx) {
     // Fill the "else" block, created in the previous iteration
     //
     //  %res.phi.else3 = phi <16 x i32> [ %11, %cond.load1 ], [ %res.phi.else, %else ]
     //  %mask_1 = extractelement <16 x i1> %mask, i32 Idx
-    //  br i1 %mask_1, label %cond.load, label %else
+    //  %to_load = icmp eq i1 %mask_1, true
+    //  br i1 %to_load, label %cond.load, label %else
     //
+    if (Idx > 0) {
+      Phi = Builder.CreatePHI(VecType, 2, "res.phi.else");
+      Phi->addIncoming(VResult, CondBlock);
+      Phi->addIncoming(PrevPhi, PrevIfBlock);
+      PrevPhi = Phi;
+      VResult = Phi;
+    }
 
     Value *Predicate =
         Builder.CreateExtractElement(Mask, Builder.getInt32(Idx));
+    Value *Cmp = Builder.CreateICmp(ICmpInst::ICMP_EQ, Predicate,
+                                    ConstantInt::get(Predicate->getType(), 1));
 
     // Create "cond" block
     //
@@ -193,34 +203,30 @@ static void scalarizeMaskedLoad(CallInst *CI) {
     //  %Elt = load i32* %EltAddr
     //  VResult = insertelement <16 x i32> VResult, i32 %Elt, i32 Idx
     //
-    BasicBlock *CondBlock = IfBlock->splitBasicBlock(InsertPt->getIterator(),
-                                                     "cond.load");
+    CondBlock = IfBlock->splitBasicBlock(InsertPt->getIterator(), "cond.load");
     Builder.SetInsertPoint(InsertPt);
 
     Value *Gep =
         Builder.CreateInBoundsGEP(EltTy, FirstEltPtr, Builder.getInt32(Idx));
     LoadInst *Load = Builder.CreateAlignedLoad(Gep, AlignVal);
-    Value *NewVResult = Builder.CreateInsertElement(VResult, Load,
-                                                    Builder.getInt32(Idx));
+    VResult = Builder.CreateInsertElement(VResult, Load, Builder.getInt32(Idx));
 
     // Create "else" block, fill it in the next iteration
     BasicBlock *NewIfBlock =
         CondBlock->splitBasicBlock(InsertPt->getIterator(), "else");
     Builder.SetInsertPoint(InsertPt);
     Instruction *OldBr = IfBlock->getTerminator();
-    BranchInst::Create(CondBlock, NewIfBlock, Predicate, OldBr);
+    BranchInst::Create(CondBlock, NewIfBlock, Cmp, OldBr);
     OldBr->eraseFromParent();
-    BasicBlock *PrevIfBlock = IfBlock;
+    PrevIfBlock = IfBlock;
     IfBlock = NewIfBlock;
-
-    // Create the phi to join the new and previous value.
-    PHINode *Phi = Builder.CreatePHI(VecType, 2, "res.phi.else");
-    Phi->addIncoming(NewVResult, CondBlock);
-    Phi->addIncoming(VResult, PrevIfBlock);
-    VResult = Phi;
   }
 
-  CI->replaceAllUsesWith(VResult);
+  Phi = Builder.CreatePHI(VecType, 2, "res.phi.select");
+  Phi->addIncoming(VResult, CondBlock);
+  Phi->addIncoming(PrevPhi, PrevIfBlock);
+  Value *NewI = Builder.CreateSelect(Mask, Phi, Src0);
+  CI->replaceAllUsesWith(NewI);
   CI->eraseFromParent();
 }
 
@@ -232,22 +238,24 @@ static void scalarizeMaskedLoad(CallInst *CI) {
 //
 //   %1 = bitcast i8* %addr to i32*
 //   %2 = extractelement <16 x i1> %mask, i32 0
-//   br i1 %2, label %cond.store, label %else
+//   %3 = icmp eq i1 %2, true
+//   br i1 %3, label %cond.store, label %else
 //
 // cond.store:                                       ; preds = %0
-//   %3 = extractelement <16 x i32> %val, i32 0
-//   %4 = getelementptr i32* %1, i32 0
-//   store i32 %3, i32* %4
+//   %4 = extractelement <16 x i32> %val, i32 0
+//   %5 = getelementptr i32* %1, i32 0
+//   store i32 %4, i32* %5
 //   br label %else
 //
 // else:                                             ; preds = %0, %cond.store
-//   %5 = extractelement <16 x i1> %mask, i32 1
-//   br i1 %5, label %cond.store1, label %else2
+//   %6 = extractelement <16 x i1> %mask, i32 1
+//   %7 = icmp eq i1 %6, true
+//   br i1 %7, label %cond.store1, label %else2
 //
 // cond.store1:                                      ; preds = %else
-//   %6 = extractelement <16 x i32> %val, i32 1
-//   %7 = getelementptr i32* %1, i32 1
-//   store i32 %6, i32* %7
+//   %8 = extractelement <16 x i32> %val, i32 1
+//   %9 = getelementptr i32* %1, i32 1
+//   store i32 %8, i32* %9
 //   br label %else2
 //   . . .
 static void scalarizeMaskedStore(CallInst *CI) {
@@ -257,7 +265,8 @@ static void scalarizeMaskedStore(CallInst *CI) {
   Value *Mask = CI->getArgOperand(3);
 
   unsigned AlignVal = cast<ConstantInt>(Alignment)->getZExtValue();
-  VectorType *VecType = cast<VectorType>(Src->getType());
+  VectorType *VecType = dyn_cast<VectorType>(Src->getType());
+  assert(VecType && "Unexpected data type in masked store intrinsic");
 
   Type *EltTy = VecType->getElementType();
 
@@ -268,23 +277,26 @@ static void scalarizeMaskedStore(CallInst *CI) {
   Builder.SetCurrentDebugLocation(CI->getDebugLoc());
 
   // Short-cut if the mask is all-true.
-  if (isa<Constant>(Mask) && cast<Constant>(Mask)->isAllOnesValue()) {
+  bool IsAllOnesMask =
+      isa<Constant>(Mask) && cast<Constant>(Mask)->isAllOnesValue();
+
+  if (IsAllOnesMask) {
     Builder.CreateAlignedStore(Src, Ptr, AlignVal);
     CI->eraseFromParent();
     return;
   }
 
   // Adjust alignment for the scalar instruction.
-  AlignVal = MinAlign(AlignVal, EltTy->getPrimitiveSizeInBits() / 8);
+  AlignVal = std::max(AlignVal, VecType->getScalarSizeInBits() / 8);
   // Bitcast %addr fron i8* to EltTy*
   Type *NewPtrType =
       EltTy->getPointerTo(cast<PointerType>(Ptr->getType())->getAddressSpace());
   Value *FirstEltPtr = Builder.CreateBitCast(Ptr, NewPtrType);
   unsigned VectorWidth = VecType->getNumElements();
 
-  if (isConstantIntVector(Mask)) {
+  if (isa<ConstantVector>(Mask)) {
     for (unsigned Idx = 0; Idx < VectorWidth; ++Idx) {
-      if (cast<Constant>(Mask)->getAggregateElement(Idx)->isNullValue())
+      if (cast<ConstantVector>(Mask)->getOperand(Idx)->isNullValue())
         continue;
       Value *OneElt = Builder.CreateExtractElement(Src, Builder.getInt32(Idx));
       Value *Gep =
@@ -299,10 +311,13 @@ static void scalarizeMaskedStore(CallInst *CI) {
     // Fill the "else" block, created in the previous iteration
     //
     //  %mask_1 = extractelement <16 x i1> %mask, i32 Idx
-    //  br i1 %mask_1, label %cond.store, label %else
+    //  %to_store = icmp eq i1 %mask_1, true
+    //  br i1 %to_store, label %cond.store, label %else
     //
     Value *Predicate =
         Builder.CreateExtractElement(Mask, Builder.getInt32(Idx));
+    Value *Cmp = Builder.CreateICmp(ICmpInst::ICMP_EQ, Predicate,
+                                    ConstantInt::get(Predicate->getType(), 1));
 
     // Create "cond" block
     //
@@ -324,7 +339,7 @@ static void scalarizeMaskedStore(CallInst *CI) {
         CondBlock->splitBasicBlock(InsertPt->getIterator(), "else");
     Builder.SetInsertPoint(InsertPt);
     Instruction *OldBr = IfBlock->getTerminator();
-    BranchInst::Create(CondBlock, NewIfBlock, Predicate, OldBr);
+    BranchInst::Create(CondBlock, NewIfBlock, Cmp, OldBr);
     OldBr->eraseFromParent();
     IfBlock = NewIfBlock;
   }
@@ -337,28 +352,30 @@ static void scalarizeMaskedStore(CallInst *CI) {
 // to a chain of basic blocks, with loading element one-by-one if
 // the appropriate mask bit is set
 //
-// %Ptrs = getelementptr i32, i32* %base, <16 x i64> %ind
-// %Mask0 = extractelement <16 x i1> %Mask, i32 0
-// br i1 %Mask0, label %cond.load, label %else
+// % Ptrs = getelementptr i32, i32* %base, <16 x i64> %ind
+// % Mask0 = extractelement <16 x i1> %Mask, i32 0
+// % ToLoad0 = icmp eq i1 % Mask0, true
+// br i1 % ToLoad0, label %cond.load, label %else
 //
 // cond.load:
-// %Ptr0 = extractelement <16 x i32*> %Ptrs, i32 0
-// %Load0 = load i32, i32* %Ptr0, align 4
-// %Res0 = insertelement <16 x i32> undef, i32 %Load0, i32 0
+// % Ptr0 = extractelement <16 x i32*> %Ptrs, i32 0
+// % Load0 = load i32, i32* % Ptr0, align 4
+// % Res0 = insertelement <16 x i32> undef, i32 % Load0, i32 0
 // br label %else
 //
 // else:
-// %res.phi.else = phi <16 x i32>[%Res0, %cond.load], [undef, %0]
-// %Mask1 = extractelement <16 x i1> %Mask, i32 1
-// br i1 %Mask1, label %cond.load1, label %else2
+// %res.phi.else = phi <16 x i32>[% Res0, %cond.load], [undef, % 0]
+// % Mask1 = extractelement <16 x i1> %Mask, i32 1
+// % ToLoad1 = icmp eq i1 % Mask1, true
+// br i1 % ToLoad1, label %cond.load1, label %else2
 //
 // cond.load1:
-// %Ptr1 = extractelement <16 x i32*> %Ptrs, i32 1
-// %Load1 = load i32, i32* %Ptr1, align 4
-// %Res1 = insertelement <16 x i32> %res.phi.else, i32 %Load1, i32 1
+// % Ptr1 = extractelement <16 x i32*> %Ptrs, i32 1
+// % Load1 = load i32, i32* % Ptr1, align 4
+// % Res1 = insertelement <16 x i32> %res.phi.else, i32 % Load1, i32 1
 // br label %else2
 // . . .
-// %Result = select <16 x i1> %Mask, <16 x i32> %res.phi.select, <16 x i32> %Src
+// % Result = select <16 x i1> %Mask, <16 x i32> %res.phi.select, <16 x i32> %Src
 // ret <16 x i32> %Result
 static void scalarizeMaskedGather(CallInst *CI) {
   Value *Ptrs = CI->getArgOperand(0);
@@ -366,24 +383,32 @@ static void scalarizeMaskedGather(CallInst *CI) {
   Value *Mask = CI->getArgOperand(2);
   Value *Src0 = CI->getArgOperand(3);
 
-  VectorType *VecType = cast<VectorType>(CI->getType());
+  VectorType *VecType = dyn_cast<VectorType>(CI->getType());
+
+  assert(VecType && "Unexpected return type of masked load intrinsic");
 
   IRBuilder<> Builder(CI->getContext());
   Instruction *InsertPt = CI;
   BasicBlock *IfBlock = CI->getParent();
+  BasicBlock *CondBlock = nullptr;
+  BasicBlock *PrevIfBlock = CI->getParent();
   Builder.SetInsertPoint(InsertPt);
   unsigned AlignVal = cast<ConstantInt>(Alignment)->getZExtValue();
 
   Builder.SetCurrentDebugLocation(CI->getDebugLoc());
 
+  Value *UndefVal = UndefValue::get(VecType);
+
   // The result vector
-  Value *VResult = Src0;
+  Value *VResult = UndefVal;
   unsigned VectorWidth = VecType->getNumElements();
 
   // Shorten the way if the mask is a vector of constants.
-  if (isConstantIntVector(Mask)) {
+  bool IsConstMask = isa<ConstantVector>(Mask);
+
+  if (IsConstMask) {
     for (unsigned Idx = 0; Idx < VectorWidth; ++Idx) {
-      if (cast<Constant>(Mask)->getAggregateElement(Idx)->isNullValue())
+      if (cast<ConstantVector>(Mask)->getOperand(Idx)->isNullValue())
         continue;
       Value *Ptr = Builder.CreateExtractElement(Ptrs, Builder.getInt32(Idx),
                                                 "Ptr" + Twine(Idx));
@@ -392,20 +417,35 @@ static void scalarizeMaskedGather(CallInst *CI) {
       VResult = Builder.CreateInsertElement(
           VResult, Load, Builder.getInt32(Idx), "Res" + Twine(Idx));
     }
-    CI->replaceAllUsesWith(VResult);
+    Value *NewI = Builder.CreateSelect(Mask, VResult, Src0);
+    CI->replaceAllUsesWith(NewI);
     CI->eraseFromParent();
     return;
   }
+
+  PHINode *Phi = nullptr;
+  Value *PrevPhi = UndefVal;
 
   for (unsigned Idx = 0; Idx < VectorWidth; ++Idx) {
     // Fill the "else" block, created in the previous iteration
     //
     //  %Mask1 = extractelement <16 x i1> %Mask, i32 1
-    //  br i1 %Mask1, label %cond.load, label %else
+    //  %ToLoad1 = icmp eq i1 %Mask1, true
+    //  br i1 %ToLoad1, label %cond.load, label %else
     //
+    if (Idx > 0) {
+      Phi = Builder.CreatePHI(VecType, 2, "res.phi.else");
+      Phi->addIncoming(VResult, CondBlock);
+      Phi->addIncoming(PrevPhi, PrevIfBlock);
+      PrevPhi = Phi;
+      VResult = Phi;
+    }
 
     Value *Predicate = Builder.CreateExtractElement(Mask, Builder.getInt32(Idx),
                                                     "Mask" + Twine(Idx));
+    Value *Cmp = Builder.CreateICmp(ICmpInst::ICMP_EQ, Predicate,
+                                    ConstantInt::get(Predicate->getType(), 1),
+                                    "ToLoad" + Twine(Idx));
 
     // Create "cond" block
     //
@@ -413,33 +453,31 @@ static void scalarizeMaskedGather(CallInst *CI) {
     //  %Elt = load i32* %EltAddr
     //  VResult = insertelement <16 x i32> VResult, i32 %Elt, i32 Idx
     //
-    BasicBlock *CondBlock = IfBlock->splitBasicBlock(InsertPt, "cond.load");
+    CondBlock = IfBlock->splitBasicBlock(InsertPt, "cond.load");
     Builder.SetInsertPoint(InsertPt);
 
     Value *Ptr = Builder.CreateExtractElement(Ptrs, Builder.getInt32(Idx),
                                               "Ptr" + Twine(Idx));
     LoadInst *Load =
         Builder.CreateAlignedLoad(Ptr, AlignVal, "Load" + Twine(Idx));
-    Value *NewVResult = Builder.CreateInsertElement(VResult, Load,
-                                                    Builder.getInt32(Idx),
-                                                    "Res" + Twine(Idx));
+    VResult = Builder.CreateInsertElement(VResult, Load, Builder.getInt32(Idx),
+                                          "Res" + Twine(Idx));
 
     // Create "else" block, fill it in the next iteration
     BasicBlock *NewIfBlock = CondBlock->splitBasicBlock(InsertPt, "else");
     Builder.SetInsertPoint(InsertPt);
     Instruction *OldBr = IfBlock->getTerminator();
-    BranchInst::Create(CondBlock, NewIfBlock, Predicate, OldBr);
+    BranchInst::Create(CondBlock, NewIfBlock, Cmp, OldBr);
     OldBr->eraseFromParent();
-    BasicBlock *PrevIfBlock = IfBlock;
+    PrevIfBlock = IfBlock;
     IfBlock = NewIfBlock;
-
-    PHINode *Phi = Builder.CreatePHI(VecType, 2, "res.phi.else");
-    Phi->addIncoming(NewVResult, CondBlock);
-    Phi->addIncoming(VResult, PrevIfBlock);
-    VResult = Phi;
   }
 
-  CI->replaceAllUsesWith(VResult);
+  Phi = Builder.CreatePHI(VecType, 2, "res.phi.select");
+  Phi->addIncoming(VResult, CondBlock);
+  Phi->addIncoming(PrevPhi, PrevIfBlock);
+  Value *NewI = Builder.CreateSelect(Mask, Phi, Src0);
+  CI->replaceAllUsesWith(NewI);
   CI->eraseFromParent();
 }
 
@@ -449,24 +487,26 @@ static void scalarizeMaskedGather(CallInst *CI) {
 // to a chain of basic blocks, that stores element one-by-one if
 // the appropriate mask bit is set.
 //
-// %Ptrs = getelementptr i32, i32* %ptr, <16 x i64> %ind
-// %Mask0 = extractelement <16 x i1> %Mask, i32 0
-// br i1 %Mask0, label %cond.store, label %else
+// % Ptrs = getelementptr i32, i32* %ptr, <16 x i64> %ind
+// % Mask0 = extractelement <16 x i1> % Mask, i32 0
+// % ToStore0 = icmp eq i1 % Mask0, true
+// br i1 %ToStore0, label %cond.store, label %else
 //
 // cond.store:
-// %Elt0 = extractelement <16 x i32> %Src, i32 0
-// %Ptr0 = extractelement <16 x i32*> %Ptrs, i32 0
-// store i32 %Elt0, i32* %Ptr0, align 4
+// % Elt0 = extractelement <16 x i32> %Src, i32 0
+// % Ptr0 = extractelement <16 x i32*> %Ptrs, i32 0
+// store i32 %Elt0, i32* % Ptr0, align 4
 // br label %else
 //
 // else:
-// %Mask1 = extractelement <16 x i1> %Mask, i32 1
-// br i1 %Mask1, label %cond.store1, label %else2
+// % Mask1 = extractelement <16 x i1> % Mask, i32 1
+// % ToStore1 = icmp eq i1 % Mask1, true
+// br i1 % ToStore1, label %cond.store1, label %else2
 //
 // cond.store1:
-// %Elt1 = extractelement <16 x i32> %Src, i32 1
-// %Ptr1 = extractelement <16 x i32*> %Ptrs, i32 1
-// store i32 %Elt1, i32* %Ptr1, align 4
+// % Elt1 = extractelement <16 x i32> %Src, i32 1
+// % Ptr1 = extractelement <16 x i32*> %Ptrs, i32 1
+// store i32 % Elt1, i32* % Ptr1, align 4
 // br label %else2
 //   . . .
 static void scalarizeMaskedScatter(CallInst *CI) {
@@ -491,9 +531,11 @@ static void scalarizeMaskedScatter(CallInst *CI) {
   unsigned VectorWidth = Src->getType()->getVectorNumElements();
 
   // Shorten the way if the mask is a vector of constants.
-  if (isConstantIntVector(Mask)) {
+  bool IsConstMask = isa<ConstantVector>(Mask);
+
+  if (IsConstMask) {
     for (unsigned Idx = 0; Idx < VectorWidth; ++Idx) {
-      if (cast<ConstantVector>(Mask)->getAggregateElement(Idx)->isNullValue())
+      if (cast<ConstantVector>(Mask)->getOperand(Idx)->isNullValue())
         continue;
       Value *OneElt = Builder.CreateExtractElement(Src, Builder.getInt32(Idx),
                                                    "Elt" + Twine(Idx));
@@ -504,21 +546,24 @@ static void scalarizeMaskedScatter(CallInst *CI) {
     CI->eraseFromParent();
     return;
   }
-
   for (unsigned Idx = 0; Idx < VectorWidth; ++Idx) {
     // Fill the "else" block, created in the previous iteration
     //
-    //  %Mask1 = extractelement <16 x i1> %Mask, i32 Idx
-    //  br i1 %Mask1, label %cond.store, label %else
+    //  % Mask1 = extractelement <16 x i1> % Mask, i32 Idx
+    //  % ToStore = icmp eq i1 % Mask1, true
+    //  br i1 % ToStore, label %cond.store, label %else
     //
     Value *Predicate = Builder.CreateExtractElement(Mask, Builder.getInt32(Idx),
                                                     "Mask" + Twine(Idx));
+    Value *Cmp = Builder.CreateICmp(ICmpInst::ICMP_EQ, Predicate,
+                                    ConstantInt::get(Predicate->getType(), 1),
+                                    "ToStore" + Twine(Idx));
 
     // Create "cond" block
     //
-    //  %Elt1 = extractelement <16 x i32> %Src, i32 1
-    //  %Ptr1 = extractelement <16 x i32*> %Ptrs, i32 1
-    //  %store i32 %Elt1, i32* %Ptr1
+    //  % Elt1 = extractelement <16 x i32> %Src, i32 1
+    //  % Ptr1 = extractelement <16 x i32*> %Ptrs, i32 1
+    //  %store i32 % Elt1, i32* % Ptr1
     //
     BasicBlock *CondBlock = IfBlock->splitBasicBlock(InsertPt, "cond.store");
     Builder.SetInsertPoint(InsertPt);
@@ -533,7 +578,7 @@ static void scalarizeMaskedScatter(CallInst *CI) {
     BasicBlock *NewIfBlock = CondBlock->splitBasicBlock(InsertPt, "else");
     Builder.SetInsertPoint(InsertPt);
     Instruction *OldBr = IfBlock->getTerminator();
-    BranchInst::Create(CondBlock, NewIfBlock, Predicate, OldBr);
+    BranchInst::Create(CondBlock, NewIfBlock, Cmp, OldBr);
     OldBr->eraseFromParent();
     IfBlock = NewIfBlock;
   }

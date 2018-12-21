@@ -24,7 +24,6 @@
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/StringSwitch.h"
 #include "llvm/ADT/Twine.h"
-#include "llvm/Analysis/MemoryLocation.h"
 #include "llvm/AsmParser/Parser.h"
 #include "llvm/AsmParser/SlotMapping.h"
 #include "llvm/CodeGen/MIRPrinter.h"
@@ -55,7 +54,6 @@
 #include "llvm/IR/Value.h"
 #include "llvm/IR/ValueSymbolTable.h"
 #include "llvm/MC/LaneBitmask.h"
-#include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCDwarf.h"
 #include "llvm/MC/MCInstrDesc.h"
 #include "llvm/MC/MCRegisterInfo.h"
@@ -205,7 +203,7 @@ public:
   bool parseRegisterOperand(MachineOperand &Dest,
                             Optional<unsigned> &TiedDefIdx, bool IsDef = false);
   bool parseImmediateOperand(MachineOperand &Dest);
-  bool parseIRConstant(StringRef::iterator Loc, StringRef StringValue,
+  bool parseIRConstant(StringRef::iterator Loc, StringRef Source,
                        const Constant *&C);
   bool parseIRConstant(StringRef::iterator Loc, const Constant *&C);
   bool parseLowLevelType(StringRef::iterator Loc, LLT &Ty);
@@ -223,10 +221,8 @@ public:
   bool parseSubRegisterIndexOperand(MachineOperand &Dest);
   bool parseJumpTableIndexOperand(MachineOperand &Dest);
   bool parseExternalSymbolOperand(MachineOperand &Dest);
-  bool parseMCSymbolOperand(MachineOperand &Dest);
   bool parseMDNode(MDNode *&Node);
-  bool parseDIExpression(MDNode *&Expr);
-  bool parseDILocation(MDNode *&Expr);
+  bool parseDIExpression(MDNode *&Node);
   bool parseMetadataOperand(MachineOperand &Dest);
   bool parseCFIOffset(int &Offset);
   bool parseCFIRegister(unsigned &Reg);
@@ -254,7 +250,6 @@ public:
   bool parseOptionalScope(LLVMContext &Context, SyncScope::ID &SSID);
   bool parseOptionalAtomicOrdering(AtomicOrdering &Order);
   bool parseMachineMemoryOperand(MachineMemOperand *&Dest);
-  bool parsePreOrPostInstrSymbol(MCSymbol *&Symbol);
 
 private:
   /// Convert the integer literal in the current token into an unsigned integer.
@@ -350,9 +345,6 @@ private:
   ///
   /// Return true if the name isn't a name of a target MMO flag.
   bool getMMOTargetFlag(StringRef Name, MachineMemOperand::Flags &Flag);
-
-  /// Get or create an MCSymbol for a given name.
-  MCSymbol *getOrCreateMCSymbol(StringRef Name);
 
   /// parseStringConstant
   ///   ::= StringConstant
@@ -745,16 +737,12 @@ bool MIParser::parse(MachineInstr *&MI) {
     return true;
 
   // Parse the remaining machine operands.
-  while (!Token.isNewlineOrEOF() && Token.isNot(MIToken::kw_pre_instr_symbol) &&
-         Token.isNot(MIToken::kw_post_instr_symbol) &&
-         Token.isNot(MIToken::kw_debug_location) &&
+  while (!Token.isNewlineOrEOF() && Token.isNot(MIToken::kw_debug_location) &&
          Token.isNot(MIToken::coloncolon) && Token.isNot(MIToken::lbrace)) {
     auto Loc = Token.location();
     Optional<unsigned> TiedDefIdx;
     if (parseMachineOperandAndTargetFlags(MO, TiedDefIdx))
       return true;
-    if (OpCode == TargetOpcode::DBG_VALUE && MO.isReg())
-      MO.setIsDebug();
     Operands.push_back(
         ParsedMachineOperand(MO, Loc, Token.location(), TiedDefIdx));
     if (Token.isNewlineOrEOF() || Token.is(MIToken::coloncolon) ||
@@ -765,29 +753,14 @@ bool MIParser::parse(MachineInstr *&MI) {
     lex();
   }
 
-  MCSymbol *PreInstrSymbol = nullptr;
-  if (Token.is(MIToken::kw_pre_instr_symbol))
-    if (parsePreOrPostInstrSymbol(PreInstrSymbol))
-      return true;
-  MCSymbol *PostInstrSymbol = nullptr;
-  if (Token.is(MIToken::kw_post_instr_symbol))
-    if (parsePreOrPostInstrSymbol(PostInstrSymbol))
-      return true;
-
   DebugLoc DebugLocation;
   if (Token.is(MIToken::kw_debug_location)) {
     lex();
-    MDNode *Node = nullptr;
-    if (Token.is(MIToken::exclaim)) {
-      if (parseMDNode(Node))
-        return true;
-    } else if (Token.is(MIToken::md_dilocation)) {
-      if (parseDILocation(Node))
-        return true;
-    } else
+    if (Token.isNot(MIToken::exclaim))
       return error("expected a metadata node after 'debug-location'");
-    if (!isa<DILocation>(Node))
-      return error("referenced metadata is not a DILocation");
+    MDNode *Node = nullptr;
+    if (parseMDNode(Node))
+      return true;
     DebugLocation = DebugLoc(Node);
   }
 
@@ -822,12 +795,12 @@ bool MIParser::parse(MachineInstr *&MI) {
     MI->addOperand(MF, Operand.Operand);
   if (assignRegisterTies(*MI, Operands))
     return true;
-  if (PreInstrSymbol)
-    MI->setPreInstrSymbol(MF, PreInstrSymbol);
-  if (PostInstrSymbol)
-    MI->setPostInstrSymbol(MF, PostInstrSymbol);
-  if (!MemOperands.empty())
-    MI->setMemRefs(MF, MemOperands);
+  if (MemOperands.empty())
+    return false;
+  MachineInstr::mmo_iterator MemRefs =
+      MF.allocateMemRefsArray(MemOperands.size());
+  std::copy(MemOperands.begin(), MemOperands.end(), MemRefs);
+  MI->setMemRefs(MemRefs, MemRefs + MemOperands.size());
   return false;
 }
 
@@ -903,9 +876,6 @@ bool MIParser::parseStandaloneMDNode(MDNode *&Node) {
   } else if (Token.is(MIToken::md_diexpr)) {
     if (parseDIExpression(Node))
       return true;
-  } else if (Token.is(MIToken::md_dilocation)) {
-    if (parseDILocation(Node))
-      return true;
   } else
     return error("expected a metadata node");
   if (Token.isNot(MIToken::Eof))
@@ -959,52 +929,20 @@ bool MIParser::verifyImplicitOperands(ArrayRef<ParsedMachineOperand> Operands,
       continue;
     return error(Operands.empty() ? Token.location() : Operands.back().End,
                  Twine("missing implicit register operand '") +
-                     printImplicitRegisterFlag(I) + " $" +
+                     printImplicitRegisterFlag(I) + " %" +
                      getRegisterName(TRI, I.getReg()) + "'");
   }
   return false;
 }
 
 bool MIParser::parseInstruction(unsigned &OpCode, unsigned &Flags) {
-  // Allow frame and fast math flags for OPCODE
+  // Allow both:
+  // * frame-setup frame-destroy OPCODE
+  // * frame-destroy frame-setup OPCODE
   while (Token.is(MIToken::kw_frame_setup) ||
-         Token.is(MIToken::kw_frame_destroy) ||
-         Token.is(MIToken::kw_nnan) ||
-         Token.is(MIToken::kw_ninf) ||
-         Token.is(MIToken::kw_nsz) ||
-         Token.is(MIToken::kw_arcp) ||
-         Token.is(MIToken::kw_contract) ||
-         Token.is(MIToken::kw_afn) ||
-         Token.is(MIToken::kw_reassoc) ||
-         Token.is(MIToken::kw_nuw) ||
-         Token.is(MIToken::kw_nsw) ||
-         Token.is(MIToken::kw_exact)) {
-    // Mine frame and fast math flags
-    if (Token.is(MIToken::kw_frame_setup))
-      Flags |= MachineInstr::FrameSetup;
-    if (Token.is(MIToken::kw_frame_destroy))
-      Flags |= MachineInstr::FrameDestroy;
-    if (Token.is(MIToken::kw_nnan))
-      Flags |= MachineInstr::FmNoNans;
-    if (Token.is(MIToken::kw_ninf))
-      Flags |= MachineInstr::FmNoInfs;
-    if (Token.is(MIToken::kw_nsz))
-      Flags |= MachineInstr::FmNsz;
-    if (Token.is(MIToken::kw_arcp))
-      Flags |= MachineInstr::FmArcp;
-    if (Token.is(MIToken::kw_contract))
-      Flags |= MachineInstr::FmContract;
-    if (Token.is(MIToken::kw_afn))
-      Flags |= MachineInstr::FmAfn;
-    if (Token.is(MIToken::kw_reassoc))
-      Flags |= MachineInstr::FmReassoc;
-    if (Token.is(MIToken::kw_nuw))
-      Flags |= MachineInstr::NoUWrap;
-    if (Token.is(MIToken::kw_nsw))
-      Flags |= MachineInstr::NoSWrap;
-    if (Token.is(MIToken::kw_exact))
-      Flags |= MachineInstr::IsExact;
-
+         Token.is(MIToken::kw_frame_destroy)) {
+    Flags |= Token.is(MIToken::kw_frame_setup) ? MachineInstr::FrameSetup
+                                               : MachineInstr::FrameDestroy;
     lex();
   }
   if (Token.isNot(MIToken::Identifier))
@@ -1342,17 +1280,11 @@ bool MIParser::parseIRConstant(StringRef::iterator Loc, const Constant *&C) {
 }
 
 bool MIParser::parseLowLevelType(StringRef::iterator Loc, LLT &Ty) {
-  if (Token.range().front() == 's' || Token.range().front() == 'p') {
-    StringRef SizeStr = Token.range().drop_front();
-    if (SizeStr.size() == 0 || !llvm::all_of(SizeStr, isdigit))
-      return error("expected integers after 's'/'p' type character");
-  }
-
-  if (Token.range().front() == 's') {
+  if (Token.is(MIToken::ScalarType)) {
     Ty = LLT::scalar(APSInt(Token.range().drop_front()).getZExtValue());
     lex();
     return false;
-  } else if (Token.range().front() == 'p') {
+  } else if (Token.is(MIToken::PointerType)) {
     const DataLayout &DL = MF.getDataLayout();
     unsigned AS = APSInt(Token.range().drop_front()).getZExtValue();
     Ty = LLT::pointer(AS, DL.getPointerSizeInBits(AS));
@@ -1363,60 +1295,38 @@ bool MIParser::parseLowLevelType(StringRef::iterator Loc, LLT &Ty) {
   // Now we're looking for a vector.
   if (Token.isNot(MIToken::less))
     return error(Loc,
-                 "expected sN, pA, <M x sN>, or <M x pA> for GlobalISel type");
+                 "expected unsized, pN, sN or <N x sM> for GlobalISel type");
+
   lex();
 
   if (Token.isNot(MIToken::IntegerLiteral))
-    return error(Loc, "expected <M x sN> or <M x pA> for vector type");
+    return error(Loc, "expected <N x sM> for vctor type");
   uint64_t NumElements = Token.integerValue().getZExtValue();
   lex();
 
   if (Token.isNot(MIToken::Identifier) || Token.stringValue() != "x")
-    return error(Loc, "expected <M x sN> or <M x pA> for vector type");
+    return error(Loc, "expected '<N x sM>' for vector type");
   lex();
 
-  if (Token.range().front() != 's' && Token.range().front() != 'p')
-    return error(Loc, "expected <M x sN> or <M x pA> for vector type");
-  StringRef SizeStr = Token.range().drop_front();
-  if (SizeStr.size() == 0 || !llvm::all_of(SizeStr, isdigit))
-    return error("expected integers after 's'/'p' type character");
-
-  if (Token.range().front() == 's')
-    Ty = LLT::scalar(APSInt(Token.range().drop_front()).getZExtValue());
-  else if (Token.range().front() == 'p') {
-    const DataLayout &DL = MF.getDataLayout();
-    unsigned AS = APSInt(Token.range().drop_front()).getZExtValue();
-    Ty = LLT::pointer(AS, DL.getPointerSizeInBits(AS));
-  } else
-    return error(Loc, "expected <M x sN> or <M x pA> for vector type");
+  if (Token.isNot(MIToken::ScalarType))
+    return error(Loc, "expected '<N x sM>' for vector type");
+  uint64_t ScalarSize = APSInt(Token.range().drop_front()).getZExtValue();
   lex();
 
   if (Token.isNot(MIToken::greater))
-    return error(Loc, "expected <M x sN> or <M x pA> for vector type");
+    return error(Loc, "expected '<N x sM>' for vector type");
   lex();
 
-  Ty = LLT::vector(NumElements, Ty);
+  Ty = LLT::vector(NumElements, ScalarSize);
   return false;
 }
 
 bool MIParser::parseTypedImmediateOperand(MachineOperand &Dest) {
-  assert(Token.is(MIToken::Identifier));
-  StringRef TypeStr = Token.range();
-  if (TypeStr.front() != 'i' && TypeStr.front() != 's' &&
-      TypeStr.front() != 'p')
-    return error(
-        "a typed immediate operand should start with one of 'i', 's', or 'p'");
-  StringRef SizeStr = Token.range().drop_front();
-  if (SizeStr.size() == 0 || !llvm::all_of(SizeStr, isdigit))
-    return error("expected integers after 'i'/'s'/'p' type character");
-
+  assert(Token.is(MIToken::IntegerType));
   auto Loc = Token.location();
   lex();
-  if (Token.isNot(MIToken::IntegerLiteral)) {
-    if (Token.isNot(MIToken::Identifier) ||
-        !(Token.range() == "true" || Token.range() == "false"))
-      return error("expected an integer literal");
-  }
+  if (Token.isNot(MIToken::IntegerLiteral))
+    return error("expected an integer literal");
   const Constant *C = nullptr;
   if (parseIRConstant(Loc, C))
     return true;
@@ -1612,16 +1522,6 @@ bool MIParser::parseExternalSymbolOperand(MachineOperand &Dest) {
   return false;
 }
 
-bool MIParser::parseMCSymbolOperand(MachineOperand &Dest) {
-  assert(Token.is(MIToken::MCSymbol));
-  MCSymbol *Symbol = getOrCreateMCSymbol(Token.stringValue());
-  lex();
-  Dest = MachineOperand::CreateMCSymbol(Symbol);
-  if (parseOperandsOffset(Dest))
-    return true;
-  return false;
-}
-
 bool MIParser::parseSubRegisterIndexOperand(MachineOperand &Dest) {
   assert(Token.is(MIToken::SubRegisterIndex));
   StringRef Name = Token.stringValue();
@@ -1689,109 +1589,6 @@ bool MIParser::parseDIExpression(MDNode *&Expr) {
     return true;
 
   Expr = DIExpression::get(MF.getFunction().getContext(), Elements);
-  return false;
-}
-
-bool MIParser::parseDILocation(MDNode *&Loc) {
-  assert(Token.is(MIToken::md_dilocation));
-  lex();
-
-  bool HaveLine = false;
-  unsigned Line = 0;
-  unsigned Column = 0;
-  MDNode *Scope = nullptr;
-  MDNode *InlinedAt = nullptr;
-  bool ImplicitCode = false;
-
-  if (expectAndConsume(MIToken::lparen))
-    return true;
-
-  if (Token.isNot(MIToken::rparen)) {
-    do {
-      if (Token.is(MIToken::Identifier)) {
-        if (Token.stringValue() == "line") {
-          lex();
-          if (expectAndConsume(MIToken::colon))
-            return true;
-          if (Token.isNot(MIToken::IntegerLiteral) ||
-              Token.integerValue().isSigned())
-            return error("expected unsigned integer");
-          Line = Token.integerValue().getZExtValue();
-          HaveLine = true;
-          lex();
-          continue;
-        }
-        if (Token.stringValue() == "column") {
-          lex();
-          if (expectAndConsume(MIToken::colon))
-            return true;
-          if (Token.isNot(MIToken::IntegerLiteral) ||
-              Token.integerValue().isSigned())
-            return error("expected unsigned integer");
-          Column = Token.integerValue().getZExtValue();
-          lex();
-          continue;
-        }
-        if (Token.stringValue() == "scope") {
-          lex();
-          if (expectAndConsume(MIToken::colon))
-            return true;
-          if (parseMDNode(Scope))
-            return error("expected metadata node");
-          if (!isa<DIScope>(Scope))
-            return error("expected DIScope node");
-          continue;
-        }
-        if (Token.stringValue() == "inlinedAt") {
-          lex();
-          if (expectAndConsume(MIToken::colon))
-            return true;
-          if (Token.is(MIToken::exclaim)) {
-            if (parseMDNode(InlinedAt))
-              return true;
-          } else if (Token.is(MIToken::md_dilocation)) {
-            if (parseDILocation(InlinedAt))
-              return true;
-          } else
-            return error("expected metadata node");
-          if (!isa<DILocation>(InlinedAt))
-            return error("expected DILocation node");
-          continue;
-        }
-        if (Token.stringValue() == "isImplicitCode") {
-          lex();
-          if (expectAndConsume(MIToken::colon))
-            return true;
-          if (!Token.is(MIToken::Identifier))
-            return error("expected true/false");
-          // As far as I can see, we don't have any existing need for parsing
-          // true/false in MIR yet. Do it ad-hoc until there's something else
-          // that needs it.
-          if (Token.stringValue() == "true")
-            ImplicitCode = true;
-          else if (Token.stringValue() == "false")
-            ImplicitCode = false;
-          else
-            return error("expected true/false");
-          lex();
-          continue;
-        }
-      }
-      return error(Twine("invalid DILocation argument '") +
-                   Token.stringValue() + "'");
-    } while (consumeIfPresent(MIToken::comma));
-  }
-
-  if (expectAndConsume(MIToken::rparen))
-    return true;
-
-  if (!HaveLine)
-    return error("DILocation requires line number");
-  if (!Scope)
-    return error("DILocation requires a scope");
-
-  Loc = DILocation::get(MF.getFunction().getContext(), Line, Column, Scope,
-                        InlinedAt, ImplicitCode);
   return false;
 }
 
@@ -2110,11 +1907,13 @@ bool MIParser::parseTargetIndexOperand(MachineOperand &Dest) {
 
 bool MIParser::parseCustomRegisterMaskOperand(MachineOperand &Dest) {
   assert(Token.stringValue() == "CustomRegMask" && "Expected a custom RegMask");
+  const TargetRegisterInfo *TRI = MF.getSubtarget().getRegisterInfo();
+  assert(TRI && "Expected target register info");
   lex();
   if (expectAndConsume(MIToken::lparen))
     return true;
 
-  uint32_t *Mask = MF.allocateRegMask();
+  uint32_t *Mask = MF.allocateRegisterMask(TRI->getNumRegs());
   while (true) {
     if (Token.isNot(MIToken::NamedRegister))
       return error("expected a named register");
@@ -2137,7 +1936,9 @@ bool MIParser::parseCustomRegisterMaskOperand(MachineOperand &Dest) {
 
 bool MIParser::parseLiveoutRegisterMaskOperand(MachineOperand &Dest) {
   assert(Token.is(MIToken::kw_liveout));
-  uint32_t *Mask = MF.allocateRegMask();
+  const auto *TRI = MF.getSubtarget().getRegisterInfo();
+  assert(TRI && "Expected target register info");
+  uint32_t *Mask = MF.allocateRegisterMask(TRI->getNumRegs());
   lex();
   if (expectAndConsume(MIToken::lparen))
     return true;
@@ -2180,6 +1981,8 @@ bool MIParser::parseMachineOperand(MachineOperand &Dest,
     return parseRegisterOperand(Dest, TiedDefIdx);
   case MIToken::IntegerLiteral:
     return parseImmediateOperand(Dest);
+  case MIToken::IntegerType:
+    return parseTypedImmediateOperand(Dest);
   case MIToken::kw_half:
   case MIToken::kw_float:
   case MIToken::kw_double:
@@ -2202,8 +2005,6 @@ bool MIParser::parseMachineOperand(MachineOperand &Dest,
     return parseJumpTableIndexOperand(Dest);
   case MIToken::ExternalSymbol:
     return parseExternalSymbolOperand(Dest);
-  case MIToken::MCSymbol:
-    return parseMCSymbolOperand(Dest);
   case MIToken::SubRegisterIndex:
     return parseSubRegisterIndexOperand(Dest);
   case MIToken::md_diexpr:
@@ -2242,10 +2043,8 @@ bool MIParser::parseMachineOperand(MachineOperand &Dest,
       Dest = MachineOperand::CreateRegMask(RegMask);
       lex();
       break;
-    } else if (Token.stringValue() == "CustomRegMask") {
-      return parseCustomRegisterMaskOperand(Dest);
     } else
-      return parseTypedImmediateOperand(Dest);
+      return parseCustomRegisterMaskOperand(Dest);
   default:
     // FIXME: Parse the MCSymbol machine operand.
     return error("expected a machine operand");
@@ -2577,7 +2376,7 @@ bool MIParser::parseOptionalAtomicOrdering(AtomicOrdering &Order) {
     return false;
   }
 
-  return error("expected an atomic scope, ordering or a size specification");
+  return error("expected an atomic scope, ordering or a size integer literal");
 }
 
 bool MIParser::parseMachineMemoryOperand(MachineMemOperand *&Dest) {
@@ -2616,17 +2415,11 @@ bool MIParser::parseMachineMemoryOperand(MachineMemOperand *&Dest) {
   if (parseOptionalAtomicOrdering(FailureOrder))
     return true;
 
-  if (Token.isNot(MIToken::IntegerLiteral) &&
-      Token.isNot(MIToken::kw_unknown_size))
-    return error("expected the size integer literal or 'unknown-size' after "
-                 "memory operation");
+  if (Token.isNot(MIToken::IntegerLiteral))
+    return error("expected the size integer literal after memory operation");
   uint64_t Size;
-  if (Token.is(MIToken::IntegerLiteral)) {
-    if (getUint64(Size))
-      return true;
-  } else if (Token.is(MIToken::kw_unknown_size)) {
-    Size = MemoryLocation::UnknownSize;
-  }
+  if (getUint64(Size))
+    return true;
   lex();
 
   MachinePointerInfo Ptr = MachinePointerInfo();
@@ -2643,7 +2436,7 @@ bool MIParser::parseMachineMemoryOperand(MachineMemOperand *&Dest) {
     if (parseMachinePointerInfo(Ptr))
       return true;
   }
-  unsigned BaseAlignment = (Size != MemoryLocation::UnknownSize ? Size : 1);
+  unsigned BaseAlignment = Size;
   AAMDNodes AAInfo;
   MDNode *Range = nullptr;
   while (consumeIfPresent(MIToken::comma)) {
@@ -2686,24 +2479,6 @@ bool MIParser::parseMachineMemoryOperand(MachineMemOperand *&Dest) {
     return true;
   Dest = MF.getMachineMemOperand(Ptr, Flags, Size, BaseAlignment, AAInfo, Range,
                                  SSID, Order, FailureOrder);
-  return false;
-}
-
-bool MIParser::parsePreOrPostInstrSymbol(MCSymbol *&Symbol) {
-  assert((Token.is(MIToken::kw_pre_instr_symbol) ||
-          Token.is(MIToken::kw_post_instr_symbol)) &&
-         "Invalid token for a pre- post-instruction symbol!");
-  lex();
-  if (Token.isNot(MIToken::MCSymbol))
-    return error("expected a symbol after 'pre-instr-symbol'");
-  Symbol = getOrCreateMCSymbol(Token.stringValue());
-  lex();
-  if (Token.isNewlineOrEOF() || Token.is(MIToken::coloncolon) ||
-      Token.is(MIToken::lbrace))
-    return false;
-  if (Token.isNot(MIToken::comma))
-    return error("expected ',' before the next machine operand");
-  lex();
   return false;
 }
 
@@ -2935,15 +2710,6 @@ bool MIParser::getMMOTargetFlag(StringRef Name,
     return true;
   Flag = FlagInfo->second;
   return false;
-}
-
-MCSymbol *MIParser::getOrCreateMCSymbol(StringRef Name) {
-  // FIXME: Currently we can't recognize temporary or local symbols and call all
-  // of the appropriate forms to create them. However, this handles basic cases
-  // well as most of the special aspects are recognized by a prefix on their
-  // name, and the input names should already be unique. For test cases, keeping
-  // the symbol name out of the symbol table isn't terribly important.
-  return MF.getContext().getOrCreateSymbol(Name);
 }
 
 bool MIParser::parseStringConstant(std::string &Result) {

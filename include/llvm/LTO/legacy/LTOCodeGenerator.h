@@ -48,9 +48,6 @@
 #include <string>
 #include <vector>
 
-/// Enable global value internalization in LTO.
-extern llvm::cl::opt<bool> EnableLTOInternalization;
-
 namespace llvm {
 template <typename T> class ArrayRef;
   class LLVMContext;
@@ -236,7 +233,7 @@ private:
   unsigned OptLevel = 2;
   lto_diagnostic_handler_t DiagHandler = nullptr;
   void *DiagContext = nullptr;
-  bool ShouldInternalize = EnableLTOInternalization;
+  bool ShouldInternalize = true;
   bool ShouldEmbedUselists = false;
   bool ShouldRestoreGlobalsLinkage = false;
   TargetMachine::CodeGenFileType FileType = TargetMachine::CGFT_ObjectFile;

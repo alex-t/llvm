@@ -8,7 +8,7 @@
 //==-----------------------------------------------------------------------===//
 //
 /// \file
-/// Defines an instruction selector for the AMDGPU target.
+/// \brief Defines an instruction selector for the AMDGPU target.
 //
 //===----------------------------------------------------------------------===//
 
@@ -16,7 +16,6 @@
 #include "AMDGPUArgumentUsageInfo.h"
 #include "AMDGPUISelLowering.h" // For AMDGPUISD
 #include "AMDGPUInstrInfo.h"
-#include "AMDGPUPerfHintAnalysis.h"
 #include "AMDGPURegisterInfo.h"
 #include "AMDGPUSubtarget.h"
 #include "AMDGPUTargetMachine.h"
@@ -25,11 +24,10 @@
 #include "SIInstrInfo.h"
 #include "SIMachineFunctionInfo.h"
 #include "SIRegisterInfo.h"
-#include "MCTargetDesc/AMDGPUMCTargetDesc.h"
 #include "llvm/ADT/APInt.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
-#include "llvm/Analysis/LegacyDivergenceAnalysis.h"
+#include "llvm/Analysis/DivergenceAnalysis.h"
 #include "llvm/Analysis/ValueTracking.h"
 #include "llvm/CodeGen/FunctionLoweringInfo.h"
 #include "llvm/CodeGen/ISDOpcodes.h"
@@ -71,21 +69,22 @@ namespace {
 class AMDGPUDAGToDAGISel : public SelectionDAGISel {
   // Subtarget - Keep a pointer to the AMDGPU Subtarget around so that we can
   // make the right decision when generating code for different targets.
-  const GCNSubtarget *Subtarget;
+  const AMDGPUSubtarget *Subtarget;
+  AMDGPUAS AMDGPUASI;
   bool EnableLateStructurizeCFG;
 
 public:
   explicit AMDGPUDAGToDAGISel(TargetMachine *TM = nullptr,
                               CodeGenOpt::Level OptLevel = CodeGenOpt::Default)
     : SelectionDAGISel(*TM, OptLevel) {
+    AMDGPUASI = AMDGPU::getAMDGPUAS(*TM);
     EnableLateStructurizeCFG = AMDGPUTargetMachine::EnableLateStructurizeCFG;
   }
   ~AMDGPUDAGToDAGISel() override = default;
 
   void getAnalysisUsage(AnalysisUsage &AU) const override {
     AU.addRequired<AMDGPUArgumentUsageInfo>();
-    AU.addRequired<AMDGPUPerfHintAnalysis>();
-    AU.addRequired<LegacyDivergenceAnalysis>();
+    AU.addRequired<DivergenceAnalysis>();
     SelectionDAGISel::getAnalysisUsage(AU);
   }
 
@@ -101,15 +100,20 @@ private:
   std::pair<SDValue, SDValue> foldFrameIndex(SDValue N) const;
   bool isNoNanSrc(SDValue N) const;
   bool isInlineImmediate(const SDNode *N) const;
-  bool isVGPRImm(const SDNode *N) const;
-  bool isUniformLoad(const SDNode *N) const;
-  bool isUniformBr(const SDNode *N) const;
+  bool FoldOperand(SDValue &Src, SDValue &Sel, SDValue &Neg, SDValue &Abs,
+                   const R600InstrInfo *TII);
+  bool FoldOperands(unsigned, const R600InstrInfo *, std::vector<SDValue> &);
+  bool FoldDotOperands(unsigned, const R600InstrInfo *, std::vector<SDValue> &);
 
-  MachineSDNode *buildSMovImm64(SDLoc &DL, uint64_t Val, EVT VT) const;
+  bool isConstantLoad(const MemSDNode *N, int cbID) const;
+  bool isUniformBr(const SDNode *N) const;
 
   SDNode *glueCopyToM0(SDNode *N) const;
 
   const TargetRegisterClass *getOperandRegClass(SDNode *N, unsigned OpNo) const;
+  bool SelectGlobalValueConstantOffset(SDValue Addr, SDValue& IntPtr);
+  bool SelectGlobalValueVariableOffset(SDValue Addr, SDValue &BaseReg,
+                                       SDValue& Offset);
   virtual bool SelectADDRVTX_READ(SDValue Addr, SDValue &Base, SDValue &Offset);
   virtual bool SelectADDRIndirect(SDValue Addr, SDValue &Base, SDValue &Offset);
   bool isDSOffsetLegal(const SDValue &Base, unsigned Offset,
@@ -141,6 +145,13 @@ private:
                          SDValue &Offset, SDValue &SLC) const;
   bool SelectMUBUFOffset(SDValue Addr, SDValue &SRsrc, SDValue &Soffset,
                          SDValue &Offset) const;
+  bool SelectMUBUFConstant(SDValue Constant,
+                           SDValue &SOffset,
+                           SDValue &ImmOffset) const;
+  bool SelectMUBUFIntrinsicOffset(SDValue Offset, SDValue &SOffset,
+                                  SDValue &ImmOffset) const;
+  bool SelectMUBUFIntrinsicVOffset(SDValue Offset, SDValue &SOffset,
+                                   SDValue &ImmOffset, SDValue &VOffset) const;
 
   bool SelectFlatAtomic(SDValue Addr, SDValue &VAddr,
                         SDValue &Offset, SDValue &SLC) const;
@@ -208,7 +219,7 @@ private:
   void SelectS_BFE(SDNode *N);
   bool isCBranchSCC(const SDNode *N) const;
   void SelectBRCOND(SDNode *N);
-  void SelectFMAD_FMA(SDNode *N);
+  void SelectFMAD(SDNode *N);
   void SelectATOMIC_CMP_SWAP(SDNode *N);
 
 protected:
@@ -217,12 +228,6 @@ protected:
 };
 
 class R600DAGToDAGISel : public AMDGPUDAGToDAGISel {
-  const R600Subtarget *Subtarget;
-
-  bool isConstantLoad(const MemSDNode *N, int cbID) const;
-  bool SelectGlobalValueConstantOffset(SDValue Addr, SDValue& IntPtr);
-  bool SelectGlobalValueVariableOffset(SDValue Addr, SDValue &BaseReg,
-                                       SDValue& Offset);
 public:
   explicit R600DAGToDAGISel(TargetMachine *TM, CodeGenOpt::Level OptLevel) :
       AMDGPUDAGToDAGISel(TM, OptLevel) {}
@@ -233,31 +238,24 @@ public:
                           SDValue &Offset) override;
   bool SelectADDRVTX_READ(SDValue Addr, SDValue &Base,
                           SDValue &Offset) override;
-
-  bool runOnMachineFunction(MachineFunction &MF) override;
-protected:
-  // Include the pieces autogenerated from the target description.
-#include "R600GenDAGISel.inc"
 };
 
 }  // end anonymous namespace
 
-INITIALIZE_PASS_BEGIN(AMDGPUDAGToDAGISel, "amdgpu-isel",
+INITIALIZE_PASS_BEGIN(AMDGPUDAGToDAGISel, "isel",
                       "AMDGPU DAG->DAG Pattern Instruction Selection", false, false)
 INITIALIZE_PASS_DEPENDENCY(AMDGPUArgumentUsageInfo)
-INITIALIZE_PASS_DEPENDENCY(AMDGPUPerfHintAnalysis)
-INITIALIZE_PASS_DEPENDENCY(LegacyDivergenceAnalysis)
-INITIALIZE_PASS_END(AMDGPUDAGToDAGISel, "amdgpu-isel",
+INITIALIZE_PASS_END(AMDGPUDAGToDAGISel, "isel",
                     "AMDGPU DAG->DAG Pattern Instruction Selection", false, false)
 
-/// This pass converts a legalized DAG into a AMDGPU-specific
+/// \brief This pass converts a legalized DAG into a AMDGPU-specific
 // DAG, ready for instruction scheduling.
 FunctionPass *llvm::createAMDGPUISelDag(TargetMachine *TM,
                                         CodeGenOpt::Level OptLevel) {
   return new AMDGPUDAGToDAGISel(TM, OptLevel);
 }
 
-/// This pass converts a legalized DAG into a R600-specific
+/// \brief This pass converts a legalized DAG into a R600-specific
 // DAG, ready for instruction scheduling.
 FunctionPass *llvm::createR600ISelDag(TargetMachine *TM,
                                       CodeGenOpt::Level OptLevel) {
@@ -265,7 +263,7 @@ FunctionPass *llvm::createR600ISelDag(TargetMachine *TM,
 }
 
 bool AMDGPUDAGToDAGISel::runOnMachineFunction(MachineFunction &MF) {
-  Subtarget = &MF.getSubtarget<GCNSubtarget>();
+  Subtarget = &MF.getSubtarget<AMDGPUSubtarget>();
   return SelectionDAGISel::runOnMachineFunction(MF);
 }
 
@@ -281,7 +279,8 @@ bool AMDGPUDAGToDAGISel::isNoNanSrc(SDValue N) const {
 }
 
 bool AMDGPUDAGToDAGISel::isInlineImmediate(const SDNode *N) const {
-  const SIInstrInfo *TII = Subtarget->getInstrInfo();
+  const SIInstrInfo *TII
+    = static_cast<const SISubtarget *>(Subtarget)->getInstrInfo();
 
   if (const ConstantSDNode *C = dyn_cast<ConstantSDNode>(N))
     return TII->isInlineConstant(C->getAPIntValue());
@@ -292,7 +291,7 @@ bool AMDGPUDAGToDAGISel::isInlineImmediate(const SDNode *N) const {
   return false;
 }
 
-/// Determine the register class for \p OpNo
+/// \brief Determine the register class for \p OpNo
 /// \returns The register class of the virtual register that will be used for
 /// the given operand number \OpNo or NULL if the register class cannot be
 /// determined.
@@ -307,7 +306,7 @@ const TargetRegisterClass *AMDGPUDAGToDAGISel::getOperandRegClass(SDNode *N,
       }
 
       const SIRegisterInfo *TRI
-        = static_cast<const GCNSubtarget *>(Subtarget)->getRegisterInfo();
+        = static_cast<const SISubtarget *>(Subtarget)->getRegisterInfo();
       return TRI->getPhysRegClass(Reg);
     }
 
@@ -341,7 +340,7 @@ const TargetRegisterClass *AMDGPUDAGToDAGISel::getOperandRegClass(SDNode *N,
 }
 
 SDNode *AMDGPUDAGToDAGISel::glueCopyToM0(SDNode *N) const {
-  if (cast<MemSDNode>(N)->getAddressSpace() != AMDGPUAS::LOCAL_ADDRESS ||
+  if (cast<MemSDNode>(N)->getAddressSpace() != AMDGPUASI.LOCAL_ADDRESS ||
       !Subtarget->ldsRequiresM0Init())
     return N;
 
@@ -361,22 +360,6 @@ SDNode *AMDGPUDAGToDAGISel::glueCopyToM0(SDNode *N) const {
   }
   Ops.push_back(Glue);
   return CurDAG->MorphNodeTo(N, N->getOpcode(), N->getVTList(), Ops);
-}
-
-MachineSDNode *AMDGPUDAGToDAGISel::buildSMovImm64(SDLoc &DL, uint64_t Imm,
-                                                  EVT VT) const {
-  SDNode *Lo = CurDAG->getMachineNode(
-      AMDGPU::S_MOV_B32, DL, MVT::i32,
-      CurDAG->getConstant(Imm & 0xFFFFFFFF, DL, MVT::i32));
-  SDNode *Hi =
-      CurDAG->getMachineNode(AMDGPU::S_MOV_B32, DL, MVT::i32,
-                             CurDAG->getConstant(Imm >> 32, DL, MVT::i32));
-  const SDValue Ops[] = {
-      CurDAG->getTargetConstant(AMDGPU::SReg_64RegClassID, DL, MVT::i32),
-      SDValue(Lo, 0), CurDAG->getTargetConstant(AMDGPU::sub0, DL, MVT::i32),
-      SDValue(Hi, 0), CurDAG->getTargetConstant(AMDGPU::sub1, DL, MVT::i32)};
-
-  return CurDAG->getMachineNode(TargetOpcode::REG_SEQUENCE, DL, VT, Ops);
 }
 
 static unsigned selectSGPRVectorRegClassID(unsigned NumVectorElts) {
@@ -414,6 +397,7 @@ void AMDGPUDAGToDAGISel::SelectBuildVector(SDNode *N, unsigned RegClassID) {
   EVT VT = N->getValueType(0);
   unsigned NumVectorElts = VT.getVectorNumElements();
   EVT EltVT = VT.getVectorElementType();
+  const AMDGPURegisterInfo *TRI = Subtarget->getRegisterInfo();
   SDLoc DL(N);
   SDValue RegClass = CurDAG->getTargetConstant(RegClassID, DL, MVT::i32);
 
@@ -439,9 +423,10 @@ void AMDGPUDAGToDAGISel::SelectBuildVector(SDNode *N, unsigned RegClassID) {
       IsRegSeq = false;
       break;
     }
-    unsigned Sub = AMDGPURegisterInfo::getSubRegFromChannel(i);
     RegSeqArgs[1 + (2 * i)] = N->getOperand(i);
-    RegSeqArgs[1 + (2 * i) + 1] = CurDAG->getTargetConstant(Sub, DL, MVT::i32);
+    RegSeqArgs[1 + (2 * i) + 1] =
+            CurDAG->getTargetConstant(TRI->getSubRegFromChannel(i), DL,
+                                      MVT::i32);
   }
   if (NOps != NumVectorElts) {
     // Fill in the missing undef elements if this was a scalar_to_vector.
@@ -449,10 +434,9 @@ void AMDGPUDAGToDAGISel::SelectBuildVector(SDNode *N, unsigned RegClassID) {
     MachineSDNode *ImpDef = CurDAG->getMachineNode(TargetOpcode::IMPLICIT_DEF,
                                                    DL, EltVT);
     for (unsigned i = NOps; i < NumVectorElts; ++i) {
-      unsigned Sub = AMDGPURegisterInfo::getSubRegFromChannel(i);
       RegSeqArgs[1 + (2 * i)] = SDValue(ImpDef, 0);
       RegSeqArgs[1 + (2 * i) + 1] =
-          CurDAG->getTargetConstant(Sub, DL, MVT::i32);
+        CurDAG->getTargetConstant(TRI->getSubRegFromChannel(i), DL, MVT::i32);
     }
   }
 
@@ -509,8 +493,9 @@ void AMDGPUDAGToDAGISel::Select(SDNode *N) {
   case ISD::BUILD_VECTOR: {
     EVT VT = N->getValueType(0);
     unsigned NumVectorElts = VT.getVectorNumElements();
-    if (VT.getScalarSizeInBits() == 16) {
-      if (Opc == ISD::BUILD_VECTOR && NumVectorElts == 2) {
+
+    if (VT == MVT::v2i16 || VT == MVT::v2f16) {
+      if (Opc == ISD::BUILD_VECTOR) {
         uint32_t LHSVal, RHSVal;
         if (getConstantValue(N->getOperand(0), LHSVal) &&
             getConstantValue(N->getOperand(1), RHSVal)) {
@@ -564,13 +549,23 @@ void AMDGPUDAGToDAGISel::Select(SDNode *N) {
     }
 
     SDLoc DL(N);
-    ReplaceNode(N, buildSMovImm64(DL, Imm, N->getValueType(0)));
+    SDNode *Lo = CurDAG->getMachineNode(AMDGPU::S_MOV_B32, DL, MVT::i32,
+                                CurDAG->getConstant(Imm & 0xFFFFFFFF, DL,
+                                                    MVT::i32));
+    SDNode *Hi = CurDAG->getMachineNode(AMDGPU::S_MOV_B32, DL, MVT::i32,
+                                CurDAG->getConstant(Imm >> 32, DL, MVT::i32));
+    const SDValue Ops[] = {
+      CurDAG->getTargetConstant(AMDGPU::SReg_64RegClassID, DL, MVT::i32),
+      SDValue(Lo, 0), CurDAG->getTargetConstant(AMDGPU::sub0, DL, MVT::i32),
+      SDValue(Hi, 0), CurDAG->getTargetConstant(AMDGPU::sub1, DL, MVT::i32)
+    };
+
+    ReplaceNode(N, CurDAG->getMachineNode(TargetOpcode::REG_SEQUENCE, DL,
+                                          N->getValueType(0), Ops));
     return;
   }
   case ISD::LOAD:
-  case ISD::STORE:
-  case ISD::ATOMIC_LOAD:
-  case ISD::ATOMIC_STORE: {
+  case ISD::STORE: {
     N = glueCopyToM0(N);
     break;
   }
@@ -630,29 +625,24 @@ void AMDGPUDAGToDAGISel::Select(SDNode *N) {
     SelectBRCOND(N);
     return;
   case ISD::FMAD:
-  case ISD::FMA:
-    SelectFMAD_FMA(N);
+    SelectFMAD(N);
     return;
   case AMDGPUISD::ATOMIC_CMP_SWAP:
     SelectATOMIC_CMP_SWAP(N);
     return;
-  case AMDGPUISD::CVT_PKRTZ_F16_F32:
-  case AMDGPUISD::CVT_PKNORM_I16_F32:
-  case AMDGPUISD::CVT_PKNORM_U16_F32:
-  case AMDGPUISD::CVT_PK_U16_U32:
-  case AMDGPUISD::CVT_PK_I16_I32: {
-    // Hack around using a legal type if f16 is illegal.
-    if (N->getValueType(0) == MVT::i32) {
-      MVT NewVT = Opc == AMDGPUISD::CVT_PKRTZ_F16_F32 ? MVT::v2f16 : MVT::v2i16;
-      N = CurDAG->MorphNodeTo(N, N->getOpcode(), CurDAG->getVTList(NewVT),
-                              { N->getOperand(0), N->getOperand(1) });
-      SelectCode(N);
-      return;
-    }
-  }
   }
 
   SelectCode(N);
+}
+
+bool AMDGPUDAGToDAGISel::isConstantLoad(const MemSDNode *N, int CbId) const {
+  if (!N->readMem())
+    return false;
+  if (CbId == -1)
+    return N->getAddressSpace() == AMDGPUASI.CONSTANT_ADDRESS ||
+           N->getAddressSpace() == AMDGPUASI.CONSTANT_ADDRESS_32BIT;
+
+  return N->getAddressSpace() == AMDGPUASI.CONSTANT_BUFFER_0 + CbId;
 }
 
 bool AMDGPUDAGToDAGISel::isUniformBr(const SDNode *N) const {
@@ -670,6 +660,26 @@ StringRef AMDGPUDAGToDAGISel::getPassName() const {
 // Complex Patterns
 //===----------------------------------------------------------------------===//
 
+bool AMDGPUDAGToDAGISel::SelectGlobalValueConstantOffset(SDValue Addr,
+                                                         SDValue& IntPtr) {
+  if (ConstantSDNode *Cst = dyn_cast<ConstantSDNode>(Addr)) {
+    IntPtr = CurDAG->getIntPtrConstant(Cst->getZExtValue() / 4, SDLoc(Addr),
+                                       true);
+    return true;
+  }
+  return false;
+}
+
+bool AMDGPUDAGToDAGISel::SelectGlobalValueVariableOffset(SDValue Addr,
+    SDValue& BaseReg, SDValue &Offset) {
+  if (!isa<ConstantSDNode>(Addr)) {
+    BaseReg = Addr;
+    Offset = CurDAG->getIntPtrConstant(0, SDLoc(Addr), true);
+    return true;
+  }
+  return false;
+}
+
 bool AMDGPUDAGToDAGISel::SelectADDRVTX_READ(SDValue Addr, SDValue &Base,
                                             SDValue &Offset) {
   return false;
@@ -681,11 +691,11 @@ bool AMDGPUDAGToDAGISel::SelectADDRIndirect(SDValue Addr, SDValue &Base,
   SDLoc DL(Addr);
 
   if ((C = dyn_cast<ConstantSDNode>(Addr))) {
-    Base = CurDAG->getRegister(R600::INDIRECT_BASE_ADDR, MVT::i32);
+    Base = CurDAG->getRegister(AMDGPU::INDIRECT_BASE_ADDR, MVT::i32);
     Offset = CurDAG->getTargetConstant(C->getZExtValue(), DL, MVT::i32);
   } else if ((Addr.getOpcode() == AMDGPUISD::DWORDADDR) &&
              (C = dyn_cast<ConstantSDNode>(Addr.getOperand(0)))) {
-    Base = CurDAG->getRegister(R600::INDIRECT_BASE_ADDR, MVT::i32);
+    Base = CurDAG->getRegister(AMDGPU::INDIRECT_BASE_ADDR, MVT::i32);
     Offset = CurDAG->getTargetConstant(C->getZExtValue(), DL, MVT::i32);
   } else if ((Addr.getOpcode() == ISD::ADD || Addr.getOpcode() == ISD::OR) &&
             (C = dyn_cast<ConstantSDNode>(Addr.getOperand(1)))) {
@@ -978,6 +988,8 @@ bool AMDGPUDAGToDAGISel::SelectDS64Bit4ByteAligned(SDValue Addr, SDValue &Base,
 
   // default case
 
+  // FIXME: This is broken on SI where we still need to check if the base
+  // pointer is positive here.
   Base = Addr;
   Offset0 = CurDAG->getTargetConstant(0, DL, MVT::i8);
   Offset1 = CurDAG->getTargetConstant(1, DL, MVT::i8);
@@ -1007,72 +1019,55 @@ bool AMDGPUDAGToDAGISel::SelectMUBUF(SDValue Addr, SDValue &Ptr,
   Addr64 = CurDAG->getTargetConstant(0, DL, MVT::i1);
   SOffset = CurDAG->getTargetConstant(0, DL, MVT::i32);
 
-  ConstantSDNode *C1 = nullptr;
-  SDValue N0 = Addr;
   if (CurDAG->isBaseWithConstantOffset(Addr)) {
-    C1 = cast<ConstantSDNode>(Addr.getOperand(1));
-    if (isUInt<32>(C1->getZExtValue()))
-      N0 = Addr.getOperand(0);
-    else
-      C1 = nullptr;
-  }
+    SDValue N0 = Addr.getOperand(0);
+    SDValue N1 = Addr.getOperand(1);
+    ConstantSDNode *C1 = cast<ConstantSDNode>(N1);
 
-  if (N0.getOpcode() == ISD::ADD) {
-    // (add N2, N3) -> addr64, or
-    // (add (add N2, N3), C1) -> addr64
-    SDValue N2 = N0.getOperand(0);
-    SDValue N3 = N0.getOperand(1);
-    Addr64 = CurDAG->getTargetConstant(1, DL, MVT::i1);
-
-    if (N2->isDivergent()) {
-      if (N3->isDivergent()) {
-        // Both N2 and N3 are divergent. Use N0 (the result of the add) as the
-        // addr64, and construct the resource from a 0 address.
-        Ptr = SDValue(buildSMovImm64(DL, 0, MVT::v2i32), 0);
-        VAddr = N0;
-      } else {
-        // N2 is divergent, N3 is not.
-        Ptr = N3;
-        VAddr = N2;
-      }
-    } else {
-      // N2 is not divergent.
+    if (N0.getOpcode() == ISD::ADD) {
+      // (add (add N2, N3), C1) -> addr64
+      SDValue N2 = N0.getOperand(0);
+      SDValue N3 = N0.getOperand(1);
+      Addr64 = CurDAG->getTargetConstant(1, DL, MVT::i1);
       Ptr = N2;
       VAddr = N3;
+    } else {
+      // (add N0, C1) -> offset
+      VAddr = CurDAG->getTargetConstant(0, DL, MVT::i32);
+      Ptr = N0;
     }
-    Offset = CurDAG->getTargetConstant(0, DL, MVT::i16);
-  } else if (N0->isDivergent()) {
-    // N0 is divergent. Use it as the addr64, and construct the resource from a
-    // 0 address.
-    Ptr = SDValue(buildSMovImm64(DL, 0, MVT::v2i32), 0);
-    VAddr = N0;
+
+    if (SIInstrInfo::isLegalMUBUFImmOffset(C1->getZExtValue())) {
+      Offset = CurDAG->getTargetConstant(C1->getZExtValue(), DL, MVT::i16);
+      return true;
+    }
+
+    if (isUInt<32>(C1->getZExtValue())) {
+      // Illegal offset, store it in soffset.
+      Offset = CurDAG->getTargetConstant(0, DL, MVT::i16);
+      SOffset = SDValue(CurDAG->getMachineNode(AMDGPU::S_MOV_B32, DL, MVT::i32,
+                   CurDAG->getTargetConstant(C1->getZExtValue(), DL, MVT::i32)),
+                        0);
+      return true;
+    }
+  }
+
+  if (Addr.getOpcode() == ISD::ADD) {
+    // (add N0, N1) -> addr64
+    SDValue N0 = Addr.getOperand(0);
+    SDValue N1 = Addr.getOperand(1);
     Addr64 = CurDAG->getTargetConstant(1, DL, MVT::i1);
-  } else {
-    // N0 -> offset, or
-    // (N0 + C1) -> offset
-    VAddr = CurDAG->getTargetConstant(0, DL, MVT::i32);
     Ptr = N0;
-  }
-
-  if (!C1) {
-    // No offset.
+    VAddr = N1;
     Offset = CurDAG->getTargetConstant(0, DL, MVT::i16);
     return true;
   }
 
-  if (SIInstrInfo::isLegalMUBUFImmOffset(C1->getZExtValue())) {
-    // Legal offset for instruction.
-    Offset = CurDAG->getTargetConstant(C1->getZExtValue(), DL, MVT::i16);
-    return true;
-  }
-
-  // Illegal offset, store it in soffset.
+  // default case -> offset
+  VAddr = CurDAG->getTargetConstant(0, DL, MVT::i32);
+  Ptr = Addr;
   Offset = CurDAG->getTargetConstant(0, DL, MVT::i16);
-  SOffset =
-      SDValue(CurDAG->getMachineNode(
-                  AMDGPU::S_MOV_B32, DL, MVT::i32,
-                  CurDAG->getTargetConstant(C1->getZExtValue(), DL, MVT::i32)),
-              0);
+
   return true;
 }
 
@@ -1276,6 +1271,101 @@ bool AMDGPUDAGToDAGISel::SelectMUBUFOffset(SDValue Addr, SDValue &SRsrc,
   return SelectMUBUFOffset(Addr, SRsrc, Soffset, Offset, GLC, SLC, TFE);
 }
 
+bool AMDGPUDAGToDAGISel::SelectMUBUFConstant(SDValue Constant,
+                                             SDValue &SOffset,
+                                             SDValue &ImmOffset) const {
+  SDLoc DL(Constant);
+  const uint32_t Align = 4;
+  const uint32_t MaxImm = alignDown(4095, Align);
+  uint32_t Imm = cast<ConstantSDNode>(Constant)->getZExtValue();
+  uint32_t Overflow = 0;
+
+  if (Imm > MaxImm) {
+    if (Imm <= MaxImm + 64) {
+      // Use an SOffset inline constant for 4..64
+      Overflow = Imm - MaxImm;
+      Imm = MaxImm;
+    } else {
+      // Try to keep the same value in SOffset for adjacent loads, so that
+      // the corresponding register contents can be re-used.
+      //
+      // Load values with all low-bits (except for alignment bits) set into
+      // SOffset, so that a larger range of values can be covered using
+      // s_movk_i32.
+      //
+      // Atomic operations fail to work correctly when individual address
+      // components are unaligned, even if their sum is aligned.
+      uint32_t High = (Imm + Align) & ~4095;
+      uint32_t Low = (Imm + Align) & 4095;
+      Imm = Low;
+      Overflow = High - Align;
+    }
+  }
+
+  // There is a hardware bug in SI and CI which prevents address clamping in
+  // MUBUF instructions from working correctly with SOffsets. The immediate
+  // offset is unaffected.
+  if (Overflow > 0 &&
+      Subtarget->getGeneration() <= AMDGPUSubtarget::SEA_ISLANDS)
+    return false;
+
+  ImmOffset = CurDAG->getTargetConstant(Imm, DL, MVT::i16);
+
+  if (Overflow <= 64)
+    SOffset = CurDAG->getTargetConstant(Overflow, DL, MVT::i32);
+  else
+    SOffset = SDValue(CurDAG->getMachineNode(AMDGPU::S_MOV_B32, DL, MVT::i32,
+                      CurDAG->getTargetConstant(Overflow, DL, MVT::i32)),
+                      0);
+
+  return true;
+}
+
+bool AMDGPUDAGToDAGISel::SelectMUBUFIntrinsicOffset(SDValue Offset,
+                                                    SDValue &SOffset,
+                                                    SDValue &ImmOffset) const {
+  SDLoc DL(Offset);
+
+  if (!isa<ConstantSDNode>(Offset))
+    return false;
+
+  return SelectMUBUFConstant(Offset, SOffset, ImmOffset);
+}
+
+bool AMDGPUDAGToDAGISel::SelectMUBUFIntrinsicVOffset(SDValue Offset,
+                                                     SDValue &SOffset,
+                                                     SDValue &ImmOffset,
+                                                     SDValue &VOffset) const {
+  SDLoc DL(Offset);
+
+  // Don't generate an unnecessary voffset for constant offsets.
+  if (isa<ConstantSDNode>(Offset)) {
+    SDValue Tmp1, Tmp2;
+
+    // When necessary, use a voffset in <= CI anyway to work around a hardware
+    // bug.
+    if (Subtarget->getGeneration() > AMDGPUSubtarget::SEA_ISLANDS ||
+        SelectMUBUFConstant(Offset, Tmp1, Tmp2))
+      return false;
+  }
+
+  if (CurDAG->isBaseWithConstantOffset(Offset)) {
+    SDValue N0 = Offset.getOperand(0);
+    SDValue N1 = Offset.getOperand(1);
+    if (cast<ConstantSDNode>(N1)->getSExtValue() >= 0 &&
+        SelectMUBUFConstant(N1, SOffset, ImmOffset)) {
+      VOffset = N0;
+      return true;
+    }
+  }
+
+  SOffset = CurDAG->getTargetConstant(0, DL, MVT::i32);
+  ImmOffset = CurDAG->getTargetConstant(0, DL, MVT::i16);
+  VOffset = Offset;
+
+  return true;
+}
+
 template <bool IsSigned>
 bool AMDGPUDAGToDAGISel::SelectFlatOffset(SDValue Addr,
                                           SDValue &VAddr,
@@ -1326,7 +1416,7 @@ bool AMDGPUDAGToDAGISel::SelectSMRDOffset(SDValue ByteOffsetNode,
     return false;
 
   SDLoc SL(ByteOffsetNode);
-  GCNSubtarget::Generation Gen = Subtarget->getGeneration();
+  AMDGPUSubtarget::Generation Gen = Subtarget->getGeneration();
   int64_t ByteOffset = C->getSExtValue();
   int64_t EncodedOffset = AMDGPU::getSMRDEncodedOffset(*Subtarget, ByteOffset);
 
@@ -1380,11 +1470,7 @@ bool AMDGPUDAGToDAGISel::SelectSMRD(SDValue Addr, SDValue &SBase,
                                      SDValue &Offset, bool &Imm) const {
   SDLoc SL(Addr);
 
-  // A 32-bit (address + offset) should not cause unsigned 32-bit integer
-  // wraparound, because s_load instructions perform the addition in 64 bits.
-  if ((Addr.getValueType() != MVT::i32 ||
-       Addr->getFlags().hasNoUnsignedWrap()) &&
-      CurDAG->isBaseWithConstantOffset(Addr)) {
+  if (CurDAG->isBaseWithConstantOffset(Addr)) {
     SDValue N0 = Addr.getOperand(0);
     SDValue N1 = Addr.getOperand(1);
 
@@ -1597,7 +1683,7 @@ bool AMDGPUDAGToDAGISel::isCBranchSCC(const SDNode *N) const {
     return true;
 
   if (VT == MVT::i64) {
-    auto ST = static_cast<const GCNSubtarget *>(Subtarget);
+    auto ST = static_cast<const SISubtarget *>(Subtarget);
 
     ISD::CondCode CC = cast<CondCodeSDNode>(Cond.getOperand(2))->get();
     return (CC == ISD::SETEQ || CC == ISD::SETNE) && ST->hasScalarCompareEq64();
@@ -1646,13 +1732,9 @@ void AMDGPUDAGToDAGISel::SelectBRCOND(SDNode *N) {
                        VCC.getValue(0));
 }
 
-void AMDGPUDAGToDAGISel::SelectFMAD_FMA(SDNode *N) {
+void AMDGPUDAGToDAGISel::SelectFMAD(SDNode *N) {
   MVT VT = N->getSimpleValueType(0);
-  bool IsFMA = N->getOpcode() == ISD::FMA;
-  if (VT != MVT::f32 || (!Subtarget->hasMadMixInsts() &&
-                         !Subtarget->hasFmaMixInsts()) ||
-      ((IsFMA && Subtarget->hasMadMixInsts()) ||
-       (!IsFMA && Subtarget->hasFmaMixInsts()))) {
+  if (VT != MVT::f32 || !Subtarget->hasMadMixInsts()) {
     SelectCode(N);
     return;
   }
@@ -1662,13 +1744,13 @@ void AMDGPUDAGToDAGISel::SelectFMAD_FMA(SDNode *N) {
   SDValue Src2 = N->getOperand(2);
   unsigned Src0Mods, Src1Mods, Src2Mods;
 
-  // Avoid using v_mad_mix_f32/v_fma_mix_f32 unless there is actually an operand
-  // using the conversion from f16.
+  // Avoid using v_mad_mix_f32 unless there is actually an operand using the
+  // conversion from f16.
   bool Sel0 = SelectVOP3PMadMixModsImpl(Src0, Src0, Src0Mods);
   bool Sel1 = SelectVOP3PMadMixModsImpl(Src1, Src1, Src1Mods);
   bool Sel2 = SelectVOP3PMadMixModsImpl(Src2, Src2, Src2Mods);
 
-  assert((IsFMA || !Subtarget->hasFP32Denormals()) &&
+  assert(!Subtarget->hasFP32Denormals() &&
          "fmad selected with denormals enabled");
   // TODO: We can select this with f32 denormals enabled if all the sources are
   // converted from f16 (in which case fmad isn't legal).
@@ -1684,9 +1766,7 @@ void AMDGPUDAGToDAGISel::SelectFMAD_FMA(SDNode *N) {
       Zero, Zero
     };
 
-    CurDAG->SelectNodeTo(N,
-                         IsFMA ? AMDGPU::V_FMA_MIX_F32 : AMDGPU::V_MAD_MIX_F32,
-                         MVT::f32, Ops);
+    CurDAG->SelectNodeTo(N, AMDGPU::V_MAD_MIX_F32, MVT::f32, Ops);
   } else {
     SelectCode(N);
   }
@@ -1697,7 +1777,7 @@ void AMDGPUDAGToDAGISel::SelectFMAD_FMA(SDNode *N) {
 void AMDGPUDAGToDAGISel::SelectATOMIC_CMP_SWAP(SDNode *N) {
   MemSDNode *Mem = cast<MemSDNode>(N);
   unsigned AS = Mem->getAddressSpace();
-  if (AS == AMDGPUAS::FLAT_ADDRESS) {
+  if (AS == AMDGPUASI.FLAT_ADDRESS) {
     SelectCode(N);
     return;
   }
@@ -1745,8 +1825,9 @@ void AMDGPUDAGToDAGISel::SelectATOMIC_CMP_SWAP(SDNode *N) {
     return;
   }
 
-  MachineMemOperand *MMO = Mem->getMemOperand();
-  CurDAG->setNodeMemRefs(CmpSwap, {MMO});
+  MachineSDNode::mmo_iterator MMOs = MF->allocateMemRefsArray(1);
+  *MMOs = Mem->getMemOperand();
+  CmpSwap->setMemRefs(MMOs, MMOs + 1);
 
   unsigned SubReg = Is32 ? AMDGPU::sub0 : AMDGPU::sub0_sub1;
   SDValue Extract
@@ -2045,80 +2126,6 @@ bool AMDGPUDAGToDAGISel::SelectHi16Elt(SDValue In, SDValue &Src) const {
   return isExtractHiElt(In, Src);
 }
 
-bool AMDGPUDAGToDAGISel::isVGPRImm(const SDNode * N) const {
-  if (Subtarget->getGeneration() < AMDGPUSubtarget::SOUTHERN_ISLANDS) {
-    return false;
-  }
-  const SIRegisterInfo *SIRI =
-    static_cast<const SIRegisterInfo *>(Subtarget->getRegisterInfo());
-  const SIInstrInfo * SII =
-    static_cast<const SIInstrInfo *>(Subtarget->getInstrInfo());
-
-  unsigned Limit = 0;
-  bool AllUsesAcceptSReg = true;
-  for (SDNode::use_iterator U = N->use_begin(), E = SDNode::use_end();
-    Limit < 10 && U != E; ++U, ++Limit) {
-    const TargetRegisterClass *RC = getOperandRegClass(*U, U.getOperandNo());
-
-    // If the register class is unknown, it could be an unknown
-    // register class that needs to be an SGPR, e.g. an inline asm
-    // constraint
-    if (!RC || SIRI->isSGPRClass(RC))
-      return false;
-
-    if (RC != &AMDGPU::VS_32RegClass) {
-      AllUsesAcceptSReg = false;
-      SDNode * User = *U;
-      if (User->isMachineOpcode()) {
-        unsigned Opc = User->getMachineOpcode();
-        MCInstrDesc Desc = SII->get(Opc);
-        if (Desc.isCommutable()) {
-          unsigned OpIdx = Desc.getNumDefs() + U.getOperandNo();
-          unsigned CommuteIdx1 = TargetInstrInfo::CommuteAnyOperandIndex;
-          if (SII->findCommutedOpIndices(Desc, OpIdx, CommuteIdx1)) {
-            unsigned CommutedOpNo = CommuteIdx1 - Desc.getNumDefs();
-            const TargetRegisterClass *CommutedRC = getOperandRegClass(*U, CommutedOpNo);
-            if (CommutedRC == &AMDGPU::VS_32RegClass)
-              AllUsesAcceptSReg = true;
-          }
-        }
-      }
-      // If "AllUsesAcceptSReg == false" so far we haven't suceeded
-      // commuting current user. This means have at least one use
-      // that strictly require VGPR. Thus, we will not attempt to commute
-      // other user instructions.
-      if (!AllUsesAcceptSReg)
-        break;
-    }
-  }
-  return !AllUsesAcceptSReg && (Limit < 10);
-}
-
-bool AMDGPUDAGToDAGISel::isUniformLoad(const SDNode * N) const {
-  auto Ld = cast<LoadSDNode>(N);
-
-  return Ld->getAlignment() >= 4 &&
-        (
-          (
-            (
-              Ld->getAddressSpace() == AMDGPUAS::CONSTANT_ADDRESS       ||
-              Ld->getAddressSpace() == AMDGPUAS::CONSTANT_ADDRESS_32BIT
-            )
-            &&
-            !N->isDivergent()
-          )
-          ||
-          (
-            Subtarget->getScalarizeGlobalBehavior() &&
-            Ld->getAddressSpace() == AMDGPUAS::GLOBAL_ADDRESS &&
-            !Ld->isVolatile() &&
-            !N->isDivergent() &&
-            static_cast<const SITargetLowering *>(
-              getTargetLowering())->isMemOpHasNoClobberedMemOperand(N)
-          )
-        );
-}
-
 void AMDGPUDAGToDAGISel::PostprocessISelDAG() {
   const AMDGPUTargetLowering& Lowering =
     *static_cast<const AMDGPUTargetLowering*>(getTargetLowering());
@@ -2145,41 +2152,6 @@ void AMDGPUDAGToDAGISel::PostprocessISelDAG() {
   } while (IsModified);
 }
 
-bool R600DAGToDAGISel::runOnMachineFunction(MachineFunction &MF) {
-  Subtarget = &MF.getSubtarget<R600Subtarget>();
-  return SelectionDAGISel::runOnMachineFunction(MF);
-}
-
-bool R600DAGToDAGISel::isConstantLoad(const MemSDNode *N, int CbId) const {
-  if (!N->readMem())
-    return false;
-  if (CbId == -1)
-    return N->getAddressSpace() == AMDGPUAS::CONSTANT_ADDRESS ||
-           N->getAddressSpace() == AMDGPUAS::CONSTANT_ADDRESS_32BIT;
-
-  return N->getAddressSpace() == AMDGPUAS::CONSTANT_BUFFER_0 + CbId;
-}
-
-bool R600DAGToDAGISel::SelectGlobalValueConstantOffset(SDValue Addr,
-                                                         SDValue& IntPtr) {
-  if (ConstantSDNode *Cst = dyn_cast<ConstantSDNode>(Addr)) {
-    IntPtr = CurDAG->getIntPtrConstant(Cst->getZExtValue() / 4, SDLoc(Addr),
-                                       true);
-    return true;
-  }
-  return false;
-}
-
-bool R600DAGToDAGISel::SelectGlobalValueVariableOffset(SDValue Addr,
-    SDValue& BaseReg, SDValue &Offset) {
-  if (!isa<ConstantSDNode>(Addr)) {
-    BaseReg = Addr;
-    Offset = CurDAG->getIntPtrConstant(0, SDLoc(Addr), true);
-    return true;
-  }
-  return false;
-}
-
 void R600DAGToDAGISel::Select(SDNode *N) {
   unsigned int Opc = N->getOpcode();
   if (N->isMachineOpcode()) {
@@ -2200,12 +2172,12 @@ void R600DAGToDAGISel::Select(SDNode *N) {
     // pass. We want to avoid 128 bits copies as much as possible because they
     // can't be bundled by our scheduler.
     switch(NumVectorElts) {
-    case 2: RegClassID = R600::R600_Reg64RegClassID; break;
+    case 2: RegClassID = AMDGPU::R600_Reg64RegClassID; break;
     case 4:
       if (Opc == AMDGPUISD::BUILD_VERTICAL_VECTOR)
-        RegClassID = R600::R600_Reg128VerticalRegClassID;
+        RegClassID = AMDGPU::R600_Reg128VerticalRegClassID;
       else
-        RegClassID = R600::R600_Reg128RegClassID;
+        RegClassID = AMDGPU::R600_Reg128RegClassID;
       break;
     default: llvm_unreachable("Do not know how to lower this BUILD_VECTOR");
     }
@@ -2223,11 +2195,11 @@ bool R600DAGToDAGISel::SelectADDRIndirect(SDValue Addr, SDValue &Base,
   SDLoc DL(Addr);
 
   if ((C = dyn_cast<ConstantSDNode>(Addr))) {
-    Base = CurDAG->getRegister(R600::INDIRECT_BASE_ADDR, MVT::i32);
+    Base = CurDAG->getRegister(AMDGPU::INDIRECT_BASE_ADDR, MVT::i32);
     Offset = CurDAG->getTargetConstant(C->getZExtValue(), DL, MVT::i32);
   } else if ((Addr.getOpcode() == AMDGPUISD::DWORDADDR) &&
              (C = dyn_cast<ConstantSDNode>(Addr.getOperand(0)))) {
-    Base = CurDAG->getRegister(R600::INDIRECT_BASE_ADDR, MVT::i32);
+    Base = CurDAG->getRegister(AMDGPU::INDIRECT_BASE_ADDR, MVT::i32);
     Offset = CurDAG->getTargetConstant(C->getZExtValue(), DL, MVT::i32);
   } else if ((Addr.getOpcode() == ISD::ADD || Addr.getOpcode() == ISD::OR) &&
             (C = dyn_cast<ConstantSDNode>(Addr.getOperand(1)))) {
@@ -2258,7 +2230,7 @@ bool R600DAGToDAGISel::SelectADDRVTX_READ(SDValue Addr, SDValue &Base,
              && isInt<16>(IMMOffset->getZExtValue())) {
     Base = CurDAG->getCopyFromReg(CurDAG->getEntryNode(),
                                   SDLoc(CurDAG->getEntryNode()),
-                                  R600::ZERO, MVT::i32);
+                                  AMDGPU::ZERO, MVT::i32);
     Offset = CurDAG->getTargetConstant(IMMOffset->getZExtValue(), SDLoc(Addr),
                                        MVT::i32);
     return true;

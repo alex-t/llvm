@@ -12,8 +12,6 @@
 
 #include "llvm/ADT/Triple.h"
 #include "llvm/BinaryFormat/ELF.h"
-#include "llvm/MC/MCObjectWriter.h"
-#include "llvm/MC/MCSectionELF.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/raw_ostream.h"
 #include <cstdint>
@@ -52,7 +50,7 @@ struct ELFRelocationEntry {
   void dump() const { print(errs()); }
 };
 
-class MCELFObjectTargetWriter : public MCObjectTargetWriter {
+class MCELFObjectTargetWriter {
   const uint8_t OSABI;
   const uint16_t EMachine;
   const unsigned HasRelocationAddend : 1;
@@ -65,17 +63,10 @@ protected:
 public:
   virtual ~MCELFObjectTargetWriter() = default;
 
-  virtual Triple::ObjectFormatType getFormat() const { return Triple::ELF; }
-  static bool classof(const MCObjectTargetWriter *W) {
-    return W->getFormat() == Triple::ELF;
-  }
-
   static uint8_t getOSABI(Triple::OSType OSType) {
     switch (OSType) {
       case Triple::CloudABI:
         return ELF::ELFOSABI_CLOUDABI;
-      case Triple::HermitCore:
-        return ELF::ELFOSABI_STANDALONE;
       case Triple::PS4:
       case Triple::FreeBSD:
         return ELF::ELFOSABI_FREEBSD;
@@ -92,8 +83,6 @@ public:
 
   virtual void sortRelocs(const MCAssembler &Asm,
                           std::vector<ELFRelocationEntry> &Relocs);
-
-  virtual void addTargetSectionFlags(MCContext &Ctx, MCSectionELF &Sec);
 
   /// \name Accessors
   /// @{
@@ -143,7 +132,7 @@ public:
   }
 };
 
-/// Construct a new ELF writer instance.
+/// \brief Construct a new ELF writer instance.
 ///
 /// \param MOTW - The target specific ELF writer subclass.
 /// \param OS - The stream to write to.
@@ -151,11 +140,6 @@ public:
 std::unique_ptr<MCObjectWriter>
 createELFObjectWriter(std::unique_ptr<MCELFObjectTargetWriter> MOTW,
                       raw_pwrite_stream &OS, bool IsLittleEndian);
-
-std::unique_ptr<MCObjectWriter>
-createELFDwoObjectWriter(std::unique_ptr<MCELFObjectTargetWriter> MOTW,
-                         raw_pwrite_stream &OS, raw_pwrite_stream &DwoOS,
-                         bool IsLittleEndian);
 
 } // end namespace llvm
 

@@ -50,7 +50,6 @@ var components = []string{
 	"bitwriter",
 	"codegen",
 	"core",
-	"coroutines",
 	"debuginfodwarf",
 	"executionengine",
 	"instrumentation",

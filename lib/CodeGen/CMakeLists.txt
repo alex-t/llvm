@@ -39,7 +39,6 @@ add_llvm_library(LLVMCodeGen
   InlineSpiller.cpp
   InterferenceCache.cpp
   InterleavedAccessPass.cpp
-  InterleavedLoadCombinePass.cpp
   IntrinsicLowering.cpp
   LatencyPriorityQueue.cpp
   LazyMachineBlockFrequencyInfo.cpp
@@ -84,6 +83,7 @@ add_llvm_library(LLVMCodeGen
   MachineOperand.cpp
   MachineOptimizationRemarkEmitter.cpp
   MachineOutliner.cpp
+  MachinePassRegistry.cpp
   MachinePipeliner.cpp
   MachinePostDominators.cpp
   MachineRegionInfo.cpp
@@ -158,7 +158,6 @@ add_llvm_library(LLVMCodeGen
   UnreachableBlockElim.cpp
   ValueTypes.cpp
   VirtRegMap.cpp
-  WasmEHPrepare.cpp
   WinEHPrepare.cpp
   XRayInstrumentation.cpp
 

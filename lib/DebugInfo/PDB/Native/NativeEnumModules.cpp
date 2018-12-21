@@ -10,35 +10,42 @@
 #include "llvm/DebugInfo/PDB/Native/NativeEnumModules.h"
 
 #include "llvm/DebugInfo/PDB/IPDBEnumChildren.h"
+#include "llvm/DebugInfo/PDB/Native/DbiModuleList.h"
 #include "llvm/DebugInfo/PDB/Native/NativeCompilandSymbol.h"
-#include "llvm/DebugInfo/PDB/Native/NativeExeSymbol.h"
 #include "llvm/DebugInfo/PDB/Native/NativeSession.h"
 #include "llvm/DebugInfo/PDB/PDBSymbol.h"
 #include "llvm/DebugInfo/PDB/PDBSymbolCompiland.h"
-#include "llvm/DebugInfo/PDB/PDBSymbolExe.h"
 
 namespace llvm {
 namespace pdb {
 
-NativeEnumModules::NativeEnumModules(NativeSession &PDBSession, uint32_t Index)
-    : Session(PDBSession), Index(Index) {}
+NativeEnumModules::NativeEnumModules(NativeSession &PDBSession,
+                                     const DbiModuleList &Modules,
+                                     uint32_t Index)
+    : Session(PDBSession), Modules(Modules), Index(Index) {}
 
 uint32_t NativeEnumModules::getChildCount() const {
-  return Session.getSymbolCache().getNumCompilands();
+  return static_cast<uint32_t>(Modules.getModuleCount());
 }
 
 std::unique_ptr<PDBSymbol>
-NativeEnumModules::getChildAtIndex(uint32_t N) const {
-  return Session.getSymbolCache().getOrCreateCompiland(N);
+NativeEnumModules::getChildAtIndex(uint32_t Index) const {
+  if (Index >= Modules.getModuleCount())
+    return nullptr;
+  return Session.createCompilandSymbol(Modules.getModuleDescriptor(Index));
 }
 
 std::unique_ptr<PDBSymbol> NativeEnumModules::getNext() {
-  if (Index >= getChildCount())
+  if (Index >= Modules.getModuleCount())
     return nullptr;
   return getChildAtIndex(Index++);
 }
 
 void NativeEnumModules::reset() { Index = 0; }
+
+NativeEnumModules *NativeEnumModules::clone() const {
+  return new NativeEnumModules(Session, Modules, Index);
+}
 
 }
 }

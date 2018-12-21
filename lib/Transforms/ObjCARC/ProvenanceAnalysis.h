@@ -28,7 +28,6 @@
 
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/Analysis/AliasAnalysis.h"
-#include "llvm/IR/ValueHandle.h"
 #include <utility>
 
 namespace llvm {
@@ -40,7 +39,7 @@ class Value;
 
 namespace objcarc {
 
-/// This is similar to BasicAliasAnalysis, and it uses many of the same
+/// \brief This is similar to BasicAliasAnalysis, and it uses many of the same
 /// techniques, except it uses special ObjC-specific reasoning about pointer
 /// relationships.
 ///
@@ -57,7 +56,7 @@ class ProvenanceAnalysis {
 
   CachedResultsTy CachedResults;
 
-  DenseMap<const Value *, WeakTrackingVH> UnderlyingObjCPtrCache;
+  DenseMap<const Value *, const Value *> UnderlyingObjCPtrCache;
 
   bool relatedCheck(const Value *A, const Value *B, const DataLayout &DL);
   bool relatedSelect(const SelectInst *A, const Value *B);

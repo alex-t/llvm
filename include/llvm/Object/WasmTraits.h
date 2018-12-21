@@ -24,20 +24,14 @@ template <typename T> struct DenseMapInfo;
 // Traits for using WasmSignature in a DenseMap.
 template <> struct DenseMapInfo<wasm::WasmSignature> {
   static wasm::WasmSignature getEmptyKey() {
-    wasm::WasmSignature Sig;
-    Sig.State = wasm::WasmSignature::Empty;
-    return Sig;
+    return wasm::WasmSignature{{}, 1};
   }
   static wasm::WasmSignature getTombstoneKey() {
-    wasm::WasmSignature Sig;
-    Sig.State = wasm::WasmSignature::Tombstone;
-    return Sig;
+    return wasm::WasmSignature{{}, 2};
   }
   static unsigned getHashValue(const wasm::WasmSignature &Sig) {
-    uintptr_t H = hash_value(Sig.State);
-    for (auto Ret : Sig.Returns)
-      H = hash_combine(H, Ret);
-    for (auto Param : Sig.Params)
+    unsigned H = hash_value(Sig.ReturnType);
+    for (int32_t Param : Sig.ParamTypes)
       H = hash_combine(H, Param);
     return H;
   }

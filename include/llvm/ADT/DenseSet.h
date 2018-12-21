@@ -16,9 +16,8 @@
 
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DenseMapInfo.h"
-#include "llvm/Support/MathExtras.h"
 #include "llvm/Support/type_traits.h"
-#include <algorithm>
+#include <algorithm> 
 #include <cstddef>
 #include <initializer_list>
 #include <iterator>
@@ -68,7 +67,7 @@ public:
   explicit DenseSetImpl(unsigned InitialReserve = 0) : TheMap(InitialReserve) {}
 
   DenseSetImpl(std::initializer_list<ValueT> Elems)
-      : DenseSetImpl(PowerOf2Ceil(Elems.size())) {
+      : DenseSetImpl(Elems.size()) {
     insert(Elems.begin(), Elems.end());
   }
 
@@ -137,8 +136,8 @@ public:
   public:
     using difference_type = typename MapTy::const_iterator::difference_type;
     using value_type = ValueT;
-    using pointer = const value_type *;
-    using reference = const value_type &;
+    using pointer = value_type *;
+    using reference = value_type &;
     using iterator_category = std::forward_iterator_tag;
 
     ConstIterator() = default;
@@ -214,34 +213,6 @@ public:
       insert(*I);
   }
 };
-
-/// Equality comparison for DenseSet.
-///
-/// Iterates over elements of LHS confirming that each element is also a member
-/// of RHS, and that RHS contains no additional values.
-/// Equivalent to N calls to RHS.count. Amortized complexity is linear, worst
-/// case is O(N^2) (if every hash collides).
-template <typename ValueT, typename MapTy, typename ValueInfoT>
-bool operator==(const DenseSetImpl<ValueT, MapTy, ValueInfoT> &LHS,
-                const DenseSetImpl<ValueT, MapTy, ValueInfoT> &RHS) {
-  if (LHS.size() != RHS.size())
-    return false;
-
-  for (auto &E : LHS)
-    if (!RHS.count(E))
-      return false;
-
-  return true;
-}
-
-/// Inequality comparison for DenseSet.
-///
-/// Equivalent to !(LHS == RHS). See operator== for performance notes.
-template <typename ValueT, typename MapTy, typename ValueInfoT>
-bool operator!=(const DenseSetImpl<ValueT, MapTy, ValueInfoT> &LHS,
-                const DenseSetImpl<ValueT, MapTy, ValueInfoT> &RHS) {
-  return !(LHS == RHS);
-}
 
 } // end namespace detail
 

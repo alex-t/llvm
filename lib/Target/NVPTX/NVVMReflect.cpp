@@ -50,9 +50,7 @@ namespace {
 class NVVMReflect : public FunctionPass {
 public:
   static char ID;
-  unsigned int SmVersion;
-  NVVMReflect() : NVVMReflect(0) {}
-  explicit NVVMReflect(unsigned int Sm) : FunctionPass(ID), SmVersion(Sm) {
+  NVVMReflect() : FunctionPass(ID) {
     initializeNVVMReflectPass(*PassRegistry::getPassRegistry());
   }
 
@@ -60,9 +58,7 @@ public:
 };
 }
 
-FunctionPass *llvm::createNVVMReflectPass(unsigned int SmVersion) {
-  return new NVVMReflect(SmVersion);
-}
+FunctionPass *llvm::createNVVMReflectPass() { return new NVVMReflect(); }
 
 static cl::opt<bool>
 NVVMReflectEnabled("nvvm-reflect-enable", cl::init(true), cl::Hidden,
@@ -157,7 +153,7 @@ bool NVVMReflect::runOnFunction(Function &F) {
 
     StringRef ReflectArg = cast<ConstantDataSequential>(Operand)->getAsString();
     ReflectArg = ReflectArg.substr(0, ReflectArg.size() - 1);
-    LLVM_DEBUG(dbgs() << "Arg of _reflect : " << ReflectArg << "\n");
+    DEBUG(dbgs() << "Arg of _reflect : " << ReflectArg << "\n");
 
     int ReflectVal = 0; // The default value is 0
     if (ReflectArg == "__CUDA_FTZ") {
@@ -167,8 +163,6 @@ bool NVVMReflect::runOnFunction(Function &F) {
       if (auto *Flag = mdconst::extract_or_null<ConstantInt>(
               F.getParent()->getModuleFlag("nvvm-reflect-ftz")))
         ReflectVal = Flag->getSExtValue();
-    } else if (ReflectArg == "__CUDA_ARCH") {
-      ReflectVal = SmVersion * 10;
     }
     Call->replaceAllUsesWith(ConstantInt::get(Call->getType(), ReflectVal));
     ToRemove.push_back(Call);

@@ -37,13 +37,7 @@ private:
     if (!ImageBase) {
       ImageBase = std::numeric_limits<uint64_t>::max();
       for (const SectionEntry &Section : Sections)
-        // The Sections list may contain sections that weren't loaded for
-        // whatever reason: they may be debug sections, and ProcessAllSections
-        // is false, or they may be sections that contain 0 bytes. If the
-        // section isn't loaded, the load address will be 0, and it should not
-        // be included in the ImageBase calculation.
-        if (Section.getLoadAddress() != 0)
-          ImageBase = std::min(ImageBase, Section.getLoadAddress());
+        ImageBase = std::min(ImageBase, Section.getLoadAddress());
     }
     return ImageBase;
   }
@@ -128,13 +122,6 @@ public:
       break;
     }
 
-    case COFF::IMAGE_REL_AMD64_SECREL: {
-      assert(static_cast<int64_t>(RE.Addend) <= INT32_MAX && "Relocation overflow");
-      assert(static_cast<int64_t>(RE.Addend) >= INT32_MIN && "Relocation underflow");
-      writeBytesUnaligned(RE.Addend, Target, 4);
-      break;
-    }
-
     default:
       llvm_unreachable("Relocation type not implemented yet!");
       break;
@@ -156,16 +143,15 @@ public:
 
     auto Stub = Stubs.find(OriginalRelValueRef);
     if (Stub == Stubs.end()) {
-      LLVM_DEBUG(dbgs() << " Create a new stub function for "
-                        << TargetName.data() << "\n");
+      DEBUG(dbgs() << " Create a new stub function for " << TargetName.data()
+                   << "\n");
 
       StubOffset = Section.getStubOffset();
       Stubs[OriginalRelValueRef] = StubOffset;
       createStubFunction(Section.getAddressWithOffset(StubOffset));
       Section.advanceStubOffset(getMaxStubSize());
     } else {
-      LLVM_DEBUG(dbgs() << " Stub function found for " << TargetName.data()
-                        << "\n");
+      DEBUG(dbgs() << " Stub function found for " << TargetName.data() << "\n");
       StubOffset = Stub->second;
     }
 
@@ -246,9 +232,9 @@ public:
       break;
     }
 
-    LLVM_DEBUG(dbgs() << "\t\tIn Section " << SectionID << " Offset " << Offset
-                      << " RelType: " << RelType << " TargetName: "
-                      << TargetName << " Addend " << Addend << "\n");
+    DEBUG(dbgs() << "\t\tIn Section " << SectionID << " Offset " << Offset
+                 << " RelType: " << RelType << " TargetName: " << TargetName
+                 << " Addend " << Addend << "\n");
 
     if (IsExtern) {
       RelocationEntry RE(SectionID, Offset, RelType, Addend);

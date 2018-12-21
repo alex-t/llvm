@@ -9,16 +9,6 @@ g:
   nop
 h:
   .word 0
-k:
-  .long 0
-l:
-  .hword 0
-m:
-  .2byte 0
-n:
-  .4byte 0
-o:
-  .8byte 0
 i:
   nop
 j:
@@ -64,39 +54,5 @@ j:
 # CHECK:     Other: 0
 # CHECK:     Section: .text
 # CHECK:   }
-# CHECK:   Symbol {
-# CHECK:     Name: k
-# CHECK:     Binding: Local
-# CHECK:     Type: None
-# CHECK:     Other: 0
-# CHECK:     Section: .text
-# CHECK:   }
-# CHECK:   Symbol {
-# CHECK:     Name: l
-# CHECK:     Binding: Local
-# CHECK:     Type: None
-# CHECK:     Other: 0
-# CHECK:     Section: .text
-# CHECK:   }
-# CHECK:   Symbol {
-# CHECK:     Name: m
-# CHECK:     Binding: Local
-# CHECK:     Type: None
-# CHECK:     Other: 0
-# CHECK:     Section: .text
-# CHECK:   }
-# CHECK:   Symbol {
-# CHECK:     Name: n
-# CHECK:     Binding: Local
-# CHECK:     Type: None
-# CHECK:     Other: 0
-# CHECK:     Section: .text
-# CHECK:   }
-# CHECK:   Symbol {
-# CHECK:     Name: o
-# CHECK:     Binding: Local
-# CHECK:     Type: None
-# CHECK:     Other: 0
-# CHECK:     Section: .text
-# CHECK:   }
 # CHECK: ]
+

@@ -25,6 +25,7 @@ class DominatorTree;
 class Function;
 class Instruction;
 class LoopInfo;
+class TerminatorInst;
 
 /// Analyze the specified function to find all of the loop backedges in the
 /// function and return them.  This is a relatively cheap (compared to
@@ -45,10 +46,10 @@ unsigned GetSuccessorNumber(const BasicBlock *BB, const BasicBlock *Succ);
 /// edges from a block with multiple successors to a block with multiple
 /// predecessors.
 ///
-bool isCriticalEdge(const Instruction *TI, unsigned SuccNum,
+bool isCriticalEdge(const TerminatorInst *TI, unsigned SuccNum,
                     bool AllowIdenticalEdges = false);
 
-/// Determine whether instruction 'To' is reachable from 'From',
+/// \brief Determine whether instruction 'To' is reachable from 'From',
 /// returning true if uncertain.
 ///
 /// Determine whether there is a path from From to To within a single function.
@@ -67,7 +68,7 @@ bool isPotentiallyReachable(const Instruction *From, const Instruction *To,
                             const DominatorTree *DT = nullptr,
                             const LoopInfo *LI = nullptr);
 
-/// Determine whether block 'To' is reachable from 'From', returning
+/// \brief Determine whether block 'To' is reachable from 'From', returning
 /// true if uncertain.
 ///
 /// Determine whether there is a path from From to To within a single function.
@@ -77,7 +78,7 @@ bool isPotentiallyReachable(const BasicBlock *From, const BasicBlock *To,
                             const DominatorTree *DT = nullptr,
                             const LoopInfo *LI = nullptr);
 
-/// Determine whether there is at least one path from a block in
+/// \brief Determine whether there is at least one path from a block in
 /// 'Worklist' to 'StopBB', returning true if uncertain.
 ///
 /// Determine whether there is a path from at least one block in Worklist to
@@ -89,7 +90,7 @@ bool isPotentiallyReachableFromMany(SmallVectorImpl<BasicBlock *> &Worklist,
                                     const DominatorTree *DT = nullptr,
                                     const LoopInfo *LI = nullptr);
 
-/// Return true if the control flow in \p RPOTraversal is irreducible.
+/// \brief Return true if the control flow in \p RPOTraversal is irreducible.
 ///
 /// This is a generic implementation to detect CFG irreducibility based on loop
 /// info analysis. It can be used for any kind of CFG (Loop, MachineLoop,

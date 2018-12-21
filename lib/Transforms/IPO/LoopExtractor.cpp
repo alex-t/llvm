@@ -104,8 +104,8 @@ bool LoopExtractor::runOnLoop(Loop *L, LPPassManager &LPM) {
   bool ShouldExtractLoop = false;
 
   // Extract the loop if the entry block doesn't branch to the loop header.
-  Instruction *EntryTI =
-      L->getHeader()->getParent()->getEntryBlock().getTerminator();
+  TerminatorInst *EntryTI =
+    L->getHeader()->getParent()->getEntryBlock().getTerminator();
   if (!isa<BranchInst>(EntryTI) ||
       !cast<BranchInst>(EntryTI)->isUnconditional() ||
       EntryTI->getSuccessor(0) != L->getHeader()) {

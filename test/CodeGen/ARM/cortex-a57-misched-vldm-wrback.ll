@@ -20,9 +20,9 @@
 ; CHECK-NEXT:  Data
 ; CHECK-SAME:  Latency=5
 ; CHECK-NEXT:  Data
-; CHECK-SAME:  Latency=0
+; CHECK-SAME:  Latency=5
 ; CHECK-NEXT:  Data
-; CHECK-SAME:  Latency=0
+; CHECK-SAME:  Latency=6
 define i32 @bar(i32* %iptr) minsize optsize {
   %1 = load double, double* @a, align 8
   %2 = load double, double* @b, align 8

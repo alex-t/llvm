@@ -18,19 +18,18 @@
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineInstrBundle.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
-#include "llvm/Config/llvm-config.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
 using namespace llvm;
 
 
-/// Remove all registers from the set that get clobbered by the register
+/// \brief Remove all registers from the set that get clobbered by the register
 /// mask.
 /// The clobbers set will be the list of live registers clobbered
 /// by the regmask.
 void LivePhysRegs::removeRegsInMask(const MachineOperand &MO,
-    SmallVectorImpl<std::pair<MCPhysReg, const MachineOperand*>> *Clobbers) {
-  RegisterSet::iterator LRI = LiveRegs.begin();
+        SmallVectorImpl<std::pair<unsigned, const MachineOperand*>> *Clobbers) {
+  SparseSet<unsigned>::iterator LRI = LiveRegs.begin();
   while (LRI != LiveRegs.end()) {
     if (MO.clobbersPhysReg(*LRI)) {
       if (Clobbers)
@@ -83,7 +82,7 @@ void LivePhysRegs::stepBackward(const MachineInstr &MI) {
 /// on accurate kill flags. If possible use stepBackward() instead of this
 /// function.
 void LivePhysRegs::stepForward(const MachineInstr &MI,
-    SmallVectorImpl<std::pair<MCPhysReg, const MachineOperand*>> &Clobbers) {
+        SmallVectorImpl<std::pair<unsigned, const MachineOperand*>> &Clobbers) {
   // Remove killed registers from the set.
   for (ConstMIBundleOperands O(MI); O.isValid(); ++O) {
     if (O->isReg() && !O->isDebug()) {
@@ -106,12 +105,8 @@ void LivePhysRegs::stepForward(const MachineInstr &MI,
 
   // Add defs to the set.
   for (auto Reg : Clobbers) {
-    // Skip dead defs and registers clobbered by regmasks. They shouldn't
-    // be added to the set.
+    // Skip dead defs.  They shouldn't be added to the set.
     if (Reg.second->isReg() && Reg.second->isDead())
-      continue;
-    if (Reg.second->isRegMask() &&
-        MachineOperand::clobbersPhysReg(Reg.second->getRegMask(), Reg.first))
       continue;
     addReg(Reg.first);
   }
@@ -142,7 +137,7 @@ LLVM_DUMP_METHOD void LivePhysRegs::dump() const {
 #endif
 
 bool LivePhysRegs::available(const MachineRegisterInfo &MRI,
-                             MCPhysReg Reg) const {
+                             unsigned Reg) const {
   if (LiveRegs.count(Reg))
     return false;
   if (MRI.isReserved(Reg))
@@ -157,7 +152,7 @@ bool LivePhysRegs::available(const MachineRegisterInfo &MRI,
 /// Add live-in registers of basic block \p MBB to \p LiveRegs.
 void LivePhysRegs::addBlockLiveIns(const MachineBasicBlock &MBB) {
   for (const auto &LI : MBB.liveins()) {
-    MCPhysReg Reg = LI.PhysReg;
+    unsigned Reg = LI.PhysReg;
     LaneBitmask Mask = LI.LaneMask;
     MCSubRegIndexIterator S(Reg, TRI);
     assert(Mask.any() && "Invalid livein mask");

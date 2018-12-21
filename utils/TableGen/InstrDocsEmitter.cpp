@@ -100,7 +100,6 @@ void EmitInstrDocs(RecordKeeper &RK, raw_ostream &OS) {
 #define str(s) #s
 #define FLAG(f) if (II->f) { FlagStrings.push_back(str(f)); }
     FLAG(isReturn)
-    FLAG(isEHScopeReturn)
     FLAG(isBranch)
     FLAG(isIndirectBranch)
     FLAG(isCompare)
@@ -110,7 +109,6 @@ void EmitInstrDocs(RecordKeeper &RK, raw_ostream &OS) {
     FLAG(isBarrier)
     FLAG(isCall)
     FLAG(isAdd)
-    FLAG(isTrap)
     FLAG(canFoldAsLoad)
     FLAG(mayLoad)
     //FLAG(mayLoad_Unset) // Deliberately omitted.
@@ -138,7 +136,6 @@ void EmitInstrDocs(RecordKeeper &RK, raw_ostream &OS) {
     FLAG(isInsertSubreg)
     FLAG(isConvergent)
     FLAG(hasNoSchedulingInfo)
-    FLAG(variadicOpsAreDefs)
     if (!FlagStrings.empty()) {
       OS << "Flags: ";
       bool IsFirst = true;

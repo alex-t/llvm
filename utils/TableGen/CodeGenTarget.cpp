@@ -278,7 +278,7 @@ CodeGenRegBank &CodeGenTarget::getRegBank() const {
 
 void CodeGenTarget::ReadRegAltNameIndices() const {
   RegAltNameIndices = Records.getAllDerivedDefinitions("RegAltNameIndex");
-  llvm::sort(RegAltNameIndices, LessRecord());
+  llvm::sort(RegAltNameIndices.begin(), RegAltNameIndices.end(), LessRecord());
 }
 
 /// getRegisterByName - If there is a register with the specific AsmName,
@@ -303,7 +303,7 @@ std::vector<ValueTypeByHwMode> CodeGenTarget::getRegisterVTs(Record *R)
   }
 
   // Remove duplicates.
-  llvm::sort(Result);
+  llvm::sort(Result.begin(), Result.end());
   Result.erase(std::unique(Result.begin(), Result.end()), Result.end());
   return Result;
 }
@@ -314,7 +314,7 @@ void CodeGenTarget::ReadLegalValueTypes() const {
     LegalValueTypes.insert(LegalValueTypes.end(), RC.VTs.begin(), RC.VTs.end());
 
   // Remove duplicates.
-  llvm::sort(LegalValueTypes);
+  llvm::sort(LegalValueTypes.begin(), LegalValueTypes.end());
   LegalValueTypes.erase(std::unique(LegalValueTypes.begin(),
                                     LegalValueTypes.end()),
                         LegalValueTypes.end());
@@ -358,7 +358,7 @@ unsigned CodeGenTarget::getNumFixedInstructions() {
   return array_lengthof(FixedInstrs) - 1;
 }
 
-/// Return all of the instructions defined by the target, ordered by
+/// \brief Return all of the instructions defined by the target, ordered by
 /// their enum value.
 void CodeGenTarget::ComputeInstrsByEnum() const {
   const auto &Insts = getInstructions();
@@ -374,24 +374,19 @@ void CodeGenTarget::ComputeInstrsByEnum() const {
 
   for (const auto &I : Insts) {
     const CodeGenInstruction *CGI = I.second.get();
-    if (CGI->Namespace != "TargetOpcode") {
+    if (CGI->Namespace != "TargetOpcode")
       InstrsByEnum.push_back(CGI);
-      if (CGI->TheDef->getValueAsBit("isPseudo"))
-        ++NumPseudoInstructions;
-    }
   }
 
   assert(InstrsByEnum.size() == Insts.size() && "Missing predefined instr");
 
   // All of the instructions are now in random order based on the map iteration.
-  llvm::sort(
-      InstrsByEnum.begin() + EndOfPredefines, InstrsByEnum.end(),
-      [](const CodeGenInstruction *Rec1, const CodeGenInstruction *Rec2) {
-        const auto &D1 = *Rec1->TheDef;
-        const auto &D2 = *Rec2->TheDef;
-        return std::make_tuple(!D1.getValueAsBit("isPseudo"), D1.getName()) <
-               std::make_tuple(!D2.getValueAsBit("isPseudo"), D2.getName());
-      });
+  // Sort them by name.
+  llvm::sort(InstrsByEnum.begin() + EndOfPredefines, InstrsByEnum.end(),
+             [](const CodeGenInstruction *Rec1,
+                const CodeGenInstruction *Rec2) {
+    return Rec1->TheDef->getName() < Rec2->TheDef->getName();
+  });
 }
 
 
@@ -513,7 +508,7 @@ CodeGenIntrinsicTable::CodeGenIntrinsicTable(const RecordKeeper &RC,
     if (isTarget == TargetOnly)
       Intrinsics.push_back(CodeGenIntrinsic(Defs[I]));
   }
-  llvm::sort(Intrinsics,
+  llvm::sort(Intrinsics.begin(), Intrinsics.end(),
              [](const CodeGenIntrinsic &LHS, const CodeGenIntrinsic &RHS) {
                return std::tie(LHS.TargetPrefix, LHS.Name) <
                       std::tie(RHS.TargetPrefix, RHS.Name);
@@ -536,7 +531,6 @@ CodeGenIntrinsic::CodeGenIntrinsic(Record *R) {
   isCommutative = false;
   canThrow = false;
   isNoReturn = false;
-  isCold = false;
   isNoDuplicate = false;
   isConvergent = false;
   isSpeculatable = false;
@@ -683,8 +677,6 @@ CodeGenIntrinsic::CodeGenIntrinsic(Record *R) {
       isConvergent = true;
     else if (Property->getName() == "IntrNoReturn")
       isNoReturn = true;
-    else if (Property->getName() == "IntrCold")
-      isCold = true;
     else if (Property->getName() == "IntrSpeculatable")
       isSpeculatable = true;
     else if (Property->getName() == "IntrHasSideEffects")
@@ -712,5 +704,6 @@ CodeGenIntrinsic::CodeGenIntrinsic(Record *R) {
   Properties = parseSDPatternOperatorProperties(R);
 
   // Sort the argument attributes for later benefit.
-  llvm::sort(ArgumentAttributes);
+  llvm::sort(ArgumentAttributes.begin(), ArgumentAttributes.end());
 }
+

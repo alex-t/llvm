@@ -23,7 +23,6 @@
 #include "llvm/LTO/LTO.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/FileSystem.h"
-#include "llvm/Support/InitLLVM.h"
 #include "llvm/Support/TargetSelect.h"
 #include "llvm/Support/Threading.h"
 
@@ -193,8 +192,7 @@ static int run(int argc, char **argv) {
     DiagnosticPrinterRawOStream DP(errs());
     DI.print(DP);
     errs() << '\n';
-    if (DI.getSeverity() == DS_Error)
-      exit(1);
+    exit(1);
   };
 
   Conf.CPU = MCPU;
@@ -389,7 +387,6 @@ static int dumpSymtab(int argc, char **argv) {
 }
 
 int main(int argc, char **argv) {
-  InitLLVM X(argc, argv);
   InitializeAllTargets();
   InitializeAllTargetMCs();
   InitializeAllAsmPrinters();

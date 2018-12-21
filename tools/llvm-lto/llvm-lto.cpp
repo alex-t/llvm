@@ -158,17 +158,13 @@ static cl::opt<int>
     ThinLTOCachePruningInterval("thinlto-cache-pruning-interval",
     cl::init(1200), cl::desc("Set ThinLTO cache pruning interval."));
 
-static cl::opt<unsigned long long>
+static cl::opt<int>
     ThinLTOCacheMaxSizeBytes("thinlto-cache-max-size-bytes",
     cl::desc("Set ThinLTO cache pruning directory maximum size in bytes."));
 
 static cl::opt<int>
     ThinLTOCacheMaxSizeFiles("thinlto-cache-max-size-files", cl::init(1000000),
     cl::desc("Set ThinLTO cache pruning directory maximum number of files."));
-
-static cl::opt<unsigned>
-    ThinLTOCacheEntryExpiration("thinlto-cache-entry-expiration", cl::init(604800) /* 1w */,
-    cl::desc("Set ThinLTO cache entry expiration time."));
 
 static cl::opt<std::string> ThinLTOSaveTempsPrefix(
     "thinlto-save-temps",
@@ -354,7 +350,7 @@ void printIndexStats() {
   }
 }
 
-/// List symbols in each IR file.
+/// \brief List symbols in each IR file.
 ///
 /// The main point here is to provide lit-testable coverage for the LTOModule
 /// functionality that's exposed by the C API to list symbols.  Moreover, this
@@ -378,13 +374,13 @@ static void listSymbols(const TargetOptions &Options) {
 /// This is meant to enable testing of ThinLTO combined index generation,
 /// currently available via the gold plugin via -thinlto.
 static void createCombinedModuleSummaryIndex() {
-  ModuleSummaryIndex CombinedIndex(/*HaveGVs=*/false);
+  ModuleSummaryIndex CombinedIndex(/*IsPerformingAnalysis=*/false);
   uint64_t NextModuleId = 0;
   for (auto &Filename : InputFilenames) {
     ExitOnError ExitOnErr("llvm-lto: error loading file '" + Filename + "': ");
     std::unique_ptr<MemoryBuffer> MB =
         ExitOnErr(errorOrToExpected(MemoryBuffer::getFileOrSTDIN(Filename)));
-    ExitOnErr(readModuleSummaryIndex(*MB, CombinedIndex, NextModuleId++));
+    ExitOnErr(readModuleSummaryIndex(*MB, CombinedIndex, ++NextModuleId));
   }
   std::error_code EC;
   assert(!OutputFilename.empty());
@@ -485,7 +481,6 @@ public:
     ThinGenerator.setTargetOptions(Options);
     ThinGenerator.setCacheDir(ThinLTOCacheDir);
     ThinGenerator.setCachePruningInterval(ThinLTOCachePruningInterval);
-    ThinGenerator.setCacheEntryExpiration(ThinLTOCacheEntryExpiration);
     ThinGenerator.setCacheMaxSizeFiles(ThinLTOCacheMaxSizeFiles);
     ThinGenerator.setCacheMaxSizeBytes(ThinLTOCacheMaxSizeBytes);
     ThinGenerator.setFreestanding(EnableFreestanding);
@@ -562,14 +557,11 @@ private:
 
     auto Index = loadCombinedIndex();
     for (auto &Filename : InputFilenames) {
-      LLVMContext Ctx;
-      auto TheModule = loadModule(Filename, Ctx);
-
       // Build a map of module to the GUIDs and summary objects that should
       // be written to its index.
       std::map<std::string, GVSummaryMapTy> ModuleToSummariesForIndex;
-      ThinGenerator.gatherImportedSummariesForModule(*TheModule, *Index,
-                                                     ModuleToSummariesForIndex);
+      ThinLTOCodeGenerator::gatherImportedSummariesForModule(
+          Filename, *Index, ModuleToSummariesForIndex);
 
       std::string OutputName = OutputFilename;
       if (OutputName.empty()) {
@@ -597,14 +589,12 @@ private:
 
     auto Index = loadCombinedIndex();
     for (auto &Filename : InputFilenames) {
-      LLVMContext Ctx;
-      auto TheModule = loadModule(Filename, Ctx);
       std::string OutputName = OutputFilename;
       if (OutputName.empty()) {
         OutputName = Filename + ".imports";
       }
       OutputName = getThinLTOOutputFile(OutputName, OldPrefix, NewPrefix);
-      ThinGenerator.emitImports(*TheModule, OutputName, *Index);
+      ThinLTOCodeGenerator::emitImports(Filename, OutputName, *Index);
     }
   }
 

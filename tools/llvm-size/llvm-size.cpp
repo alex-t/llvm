@@ -68,14 +68,12 @@ cl::opt<bool>
 static cl::list<std::string>
 ArchFlags("arch", cl::desc("architecture(s) from a Mach-O file to dump"),
           cl::ZeroOrMore);
-static bool ArchAll = false;
+bool ArchAll = false;
 
 enum RadixTy { octal = 8, decimal = 10, hexadecimal = 16 };
-static cl::opt<RadixTy> Radix(
-    "radix", cl::desc("Print size in radix"), cl::init(decimal),
-    cl::values(clEnumValN(octal, "8", "Print size in octal"),
-               clEnumValN(decimal, "10", "Print size in decimal"),
-               clEnumValN(hexadecimal, "16", "Print size in hexadecimal")));
+static cl::opt<unsigned int>
+Radix("radix", cl::desc("Print size in radix. Only 8, 10, and 16 are valid"),
+      cl::init(decimal));
 
 static cl::opt<RadixTy>
 RadixShort(cl::desc("Print size in radix:"),
@@ -95,7 +93,7 @@ static cl::alias TotalSizesShort("t", cl::desc("Short for --totals"),
 static cl::list<std::string>
 InputFilenames(cl::Positional, cl::desc("<input files>"), cl::ZeroOrMore);
 
-static bool HadError = false;
+bool HadError = false;
 
 static std::string ToolName;
 
@@ -140,7 +138,7 @@ static void error(llvm::Error E, StringRef FileName, const Archive::Child &C,
 
   std::string Buf;
   raw_string_ostream OS(Buf);
-  logAllUnhandledErrors(std::move(E), OS);
+  logAllUnhandledErrors(std::move(E), OS, "");
   OS.flush();
   errs() << " " << Buf << "\n";
 }
@@ -158,7 +156,7 @@ static void error(llvm::Error E, StringRef FileName,
 
   std::string Buf;
   raw_string_ostream OS(Buf);
-  logAllUnhandledErrors(std::move(E), OS);
+  logAllUnhandledErrors(std::move(E), OS, "");
   OS.flush();
   errs() << " " << Buf << "\n";
 }
@@ -457,8 +455,8 @@ static void printObjectSectionSizes(ObjectFile *Obj) {
     // Make one pass over the section table to calculate sizes.
     for (const SectionRef &Section : Obj->sections()) {
       uint64_t size = Section.getSize();
-      bool isText = Section.isBerkeleyText();
-      bool isData = Section.isBerkeleyData();
+      bool isText = Section.isText();
+      bool isData = Section.isData();
       bool isBSS = Section.isBSS();
       if (isText)
         total_text += size;
@@ -481,25 +479,19 @@ static void printObjectSectionSizes(ObjectFile *Obj) {
     }
 
     if (!BerkeleyHeaderPrinted) {
-      outs() << "   text\t"
-                "   data\t"
-                "    bss\t"
-                "    "
-             << (Radix == octal ? "oct" : "dec")
-             << "\t"
-                "    hex\t"
-                "filename\n";
+      outs() << "   text    data     bss     "
+             << (Radix == octal ? "oct" : "dec") << "     hex filename\n";
       BerkeleyHeaderPrinted = true;
     }
 
     // Print result.
-    fmt << "%#7" << radix_fmt << "\t"
-        << "%#7" << radix_fmt << "\t"
-        << "%#7" << radix_fmt << "\t";
+    fmt << "%#7" << radix_fmt << " "
+        << "%#7" << radix_fmt << " "
+        << "%#7" << radix_fmt << " ";
     outs() << format(fmt.str().c_str(), total_text, total_data, total_bss);
     fmtbuf.clear();
-    fmt << "%7" << (Radix == octal ? PRIo64 : PRIu64) << "\t"
-        << "%7" PRIx64 "\t";
+    fmt << "%7" << (Radix == octal ? PRIo64 : PRIu64) << " "
+        << "%7" PRIx64 " ";
     outs() << format(fmt.str().c_str(), total, total);
   }
 }
@@ -847,14 +839,14 @@ static void printBerkelyTotals() {
   std::string fmtbuf;
   raw_string_ostream fmt(fmtbuf);
   const char *radix_fmt = getRadixFmt();
-  fmt << "%#7" << radix_fmt << "\t"
-      << "%#7" << radix_fmt << "\t"
-      << "%#7" << radix_fmt << "\t";
+  fmt << "%#7" << radix_fmt << " "
+      << "%#7" << radix_fmt << " "
+      << "%#7" << radix_fmt << " ";
   outs() << format(fmt.str().c_str(), TotalObjectText, TotalObjectData,
                    TotalObjectBss);
   fmtbuf.clear();
-  fmt << "%7" << (Radix == octal ? PRIo64 : PRIu64) << "\t"
-      << "%7" PRIx64 "\t";
+  fmt << "%7" << (Radix == octal ? PRIo64 : PRIu64) << " "
+      << "%7" PRIx64 " ";
   outs() << format(fmt.str().c_str(), TotalObjectTotal, TotalObjectTotal)
          << "(TOTALS)\n";
 }
@@ -867,21 +859,21 @@ int main(int argc, char **argv) {
   if (OutputFormatShort.getNumOccurrences())
     OutputFormat = static_cast<OutputFormatTy>(OutputFormatShort);
   if (RadixShort.getNumOccurrences())
-    Radix = RadixShort.getValue();
+    Radix = RadixShort;
 
-  for (StringRef Arch : ArchFlags) {
-    if (Arch == "all") {
+  for (unsigned i = 0; i < ArchFlags.size(); ++i) {
+    if (ArchFlags[i] == "all") {
       ArchAll = true;
     } else {
-      if (!MachOObjectFile::isValidArch(Arch)) {
+      if (!MachOObjectFile::isValidArch(ArchFlags[i])) {
         outs() << ToolName << ": for the -arch option: Unknown architecture "
-               << "named '" << Arch << "'";
+               << "named '" << ArchFlags[i] << "'";
         return 1;
       }
     }
   }
 
-  if (InputFilenames.empty())
+  if (InputFilenames.size() == 0)
     InputFilenames.push_back("a.out");
 
   MoreThanOneFile = InputFilenames.size() > 1;

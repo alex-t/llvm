@@ -74,7 +74,7 @@
 //   }
 //
 // One solution for M is M = forall X . (G(X) && B(X)) => G(X + Step)
-//
+// 
 // Informal proof that the transformation above is correct:
 //
 //   By the definition of guards we can rewrite the guard condition to:
@@ -83,7 +83,7 @@
 //   Let's prove that for each iteration of the loop:
 //     G(0) && M => G(I)
 //   And the condition above can be simplified to G(Start) && M.
-//
+// 
 //   Induction base.
 //     G(0) && M => G(0)
 //
@@ -178,7 +178,6 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/Transforms/Scalar/LoopPredication.h"
-#include "llvm/ADT/Statistic.h"
 #include "llvm/Analysis/BranchProbabilityInfo.h"
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/Analysis/LoopPass.h"
@@ -196,9 +195,6 @@
 #include "llvm/Transforms/Utils/LoopUtils.h"
 
 #define DEBUG_TYPE "loop-predication"
-
-STATISTIC(TotalConsidered, "Number of guards considered");
-STATISTIC(TotalWidened, "Number of checks widened");
 
 using namespace llvm;
 
@@ -383,7 +379,7 @@ Value *LoopPredication::expandCheck(SCEVExpander &Expander,
                                     ICmpInst::Predicate Pred, const SCEV *LHS,
                                     const SCEV *RHS, Instruction *InsertAt) {
   // TODO: we can check isLoopEntryGuardedByCond before emitting the check
-
+ 
   Type *Ty = LHS->getType();
   assert(Ty == RHS->getType() && "expandCheck operands have different types?");
 
@@ -415,11 +411,11 @@ LoopPredication::generateLoopLatchCheck(Type *RangeCheckType) {
   if (!NewLatchCheck.IV)
     return None;
   NewLatchCheck.Limit = SE->getTruncateExpr(LatchCheck.Limit, RangeCheckType);
-  LLVM_DEBUG(dbgs() << "IV of type: " << *LatchType
-                    << "can be represented as range check type:"
-                    << *RangeCheckType << "\n");
-  LLVM_DEBUG(dbgs() << "LatchCheck.IV: " << *NewLatchCheck.IV << "\n");
-  LLVM_DEBUG(dbgs() << "LatchCheck.Limit: " << *NewLatchCheck.Limit << "\n");
+  DEBUG(dbgs() << "IV of type: " << *LatchType
+               << "can be represented as range check type:" << *RangeCheckType
+               << "\n");
+  DEBUG(dbgs() << "LatchCheck.IV: " << *NewLatchCheck.IV << "\n");
+  DEBUG(dbgs() << "LatchCheck.Limit: " << *NewLatchCheck.Limit << "\n");
   return NewLatchCheck;
 }
 
@@ -452,15 +448,15 @@ Optional<Value *> LoopPredication::widenICmpRangeCheckIncrementingLoop(
                      SE->getMinusSCEV(LatchStart, SE->getOne(Ty)));
   if (!CanExpand(GuardStart) || !CanExpand(GuardLimit) ||
       !CanExpand(LatchLimit) || !CanExpand(RHS)) {
-    LLVM_DEBUG(dbgs() << "Can't expand limit check!\n");
+    DEBUG(dbgs() << "Can't expand limit check!\n");
     return None;
   }
   auto LimitCheckPred =
       ICmpInst::getFlippedStrictnessPredicate(LatchCheck.Pred);
 
-  LLVM_DEBUG(dbgs() << "LHS: " << *LatchLimit << "\n");
-  LLVM_DEBUG(dbgs() << "RHS: " << *RHS << "\n");
-  LLVM_DEBUG(dbgs() << "Pred: " << LimitCheckPred << "\n");
+  DEBUG(dbgs() << "LHS: " << *LatchLimit << "\n");
+  DEBUG(dbgs() << "RHS: " << *RHS << "\n");
+  DEBUG(dbgs() << "Pred: " << LimitCheckPred << "\n");
 
   Instruction *InsertAt = Preheader->getTerminator();
   auto *LimitCheck =
@@ -479,16 +475,16 @@ Optional<Value *> LoopPredication::widenICmpRangeCheckDecrementingLoop(
   const SCEV *LatchLimit = LatchCheck.Limit;
   if (!CanExpand(GuardStart) || !CanExpand(GuardLimit) ||
       !CanExpand(LatchLimit)) {
-    LLVM_DEBUG(dbgs() << "Can't expand limit check!\n");
+    DEBUG(dbgs() << "Can't expand limit check!\n");
     return None;
   }
   // The decrement of the latch check IV should be the same as the
   // rangeCheckIV.
   auto *PostDecLatchCheckIV = LatchCheck.IV->getPostIncExpr(*SE);
   if (RangeCheck.IV != PostDecLatchCheckIV) {
-    LLVM_DEBUG(dbgs() << "Not the same. PostDecLatchCheckIV: "
-                      << *PostDecLatchCheckIV
-                      << "  and RangeCheckIV: " << *RangeCheck.IV << "\n");
+    DEBUG(dbgs() << "Not the same. PostDecLatchCheckIV: "
+                 << *PostDecLatchCheckIV
+                 << "  and RangeCheckIV: " << *RangeCheck.IV << "\n");
     return None;
   }
 
@@ -512,8 +508,8 @@ Optional<Value *> LoopPredication::widenICmpRangeCheckDecrementingLoop(
 Optional<Value *> LoopPredication::widenICmpRangeCheck(ICmpInst *ICI,
                                                        SCEVExpander &Expander,
                                                        IRBuilder<> &Builder) {
-  LLVM_DEBUG(dbgs() << "Analyzing ICmpInst condition:\n");
-  LLVM_DEBUG(ICI->dump());
+  DEBUG(dbgs() << "Analyzing ICmpInst condition:\n");
+  DEBUG(ICI->dump());
 
   // parseLoopStructure guarantees that the latch condition is:
   //   ++i <pred> latchLimit, where <pred> is u<, u<=, s<, or s<=.
@@ -521,34 +517,34 @@ Optional<Value *> LoopPredication::widenICmpRangeCheck(ICmpInst *ICI,
   //   i u< guardLimit
   auto RangeCheck = parseLoopICmp(ICI);
   if (!RangeCheck) {
-    LLVM_DEBUG(dbgs() << "Failed to parse the loop latch condition!\n");
+    DEBUG(dbgs() << "Failed to parse the loop latch condition!\n");
     return None;
   }
-  LLVM_DEBUG(dbgs() << "Guard check:\n");
-  LLVM_DEBUG(RangeCheck->dump());
+  DEBUG(dbgs() << "Guard check:\n");
+  DEBUG(RangeCheck->dump());
   if (RangeCheck->Pred != ICmpInst::ICMP_ULT) {
-    LLVM_DEBUG(dbgs() << "Unsupported range check predicate("
-                      << RangeCheck->Pred << ")!\n");
+    DEBUG(dbgs() << "Unsupported range check predicate(" << RangeCheck->Pred
+                 << ")!\n");
     return None;
   }
   auto *RangeCheckIV = RangeCheck->IV;
   if (!RangeCheckIV->isAffine()) {
-    LLVM_DEBUG(dbgs() << "Range check IV is not affine!\n");
+    DEBUG(dbgs() << "Range check IV is not affine!\n");
     return None;
   }
   auto *Step = RangeCheckIV->getStepRecurrence(*SE);
   // We cannot just compare with latch IV step because the latch and range IVs
   // may have different types.
   if (!isSupportedStep(Step)) {
-    LLVM_DEBUG(dbgs() << "Range check and latch have IVs different steps!\n");
+    DEBUG(dbgs() << "Range check and latch have IVs different steps!\n");
     return None;
   }
   auto *Ty = RangeCheckIV->getType();
   auto CurrLatchCheckOpt = generateLoopLatchCheck(Ty);
   if (!CurrLatchCheckOpt) {
-    LLVM_DEBUG(dbgs() << "Failed to generate a loop latch check "
-                         "corresponding to range type: "
-                      << *Ty << "\n");
+    DEBUG(dbgs() << "Failed to generate a loop latch check "
+                    "corresponding to range type: "
+                 << *Ty << "\n");
     return None;
   }
 
@@ -559,7 +555,7 @@ Optional<Value *> LoopPredication::widenICmpRangeCheck(ICmpInst *ICI,
              CurrLatchCheck.IV->getStepRecurrence(*SE)->getType() &&
          "Range and latch steps should be of same type!");
   if (Step != CurrLatchCheck.IV->getStepRecurrence(*SE)) {
-    LLVM_DEBUG(dbgs() << "Range and latch have different step values!\n");
+    DEBUG(dbgs() << "Range and latch have different step values!\n");
     return None;
   }
 
@@ -575,10 +571,8 @@ Optional<Value *> LoopPredication::widenICmpRangeCheck(ICmpInst *ICI,
 
 bool LoopPredication::widenGuardConditions(IntrinsicInst *Guard,
                                            SCEVExpander &Expander) {
-  LLVM_DEBUG(dbgs() << "Processing guard:\n");
-  LLVM_DEBUG(Guard->dump());
-
-  TotalConsidered++;
+  DEBUG(dbgs() << "Processing guard:\n");
+  DEBUG(Guard->dump());
 
   IRBuilder<> Builder(cast<Instruction>(Preheader->getTerminator()));
 
@@ -621,8 +615,6 @@ bool LoopPredication::widenGuardConditions(IntrinsicInst *Guard,
   if (NumWidened == 0)
     return false;
 
-  TotalWidened += NumWidened;
-
   // Emit the new guard condition
   Builder.SetInsertPoint(Guard);
   Value *LastCheck = nullptr;
@@ -633,7 +625,7 @@ bool LoopPredication::widenGuardConditions(IntrinsicInst *Guard,
       LastCheck = Builder.CreateAnd(LastCheck, Check);
   Guard->setOperand(0, LastCheck);
 
-  LLVM_DEBUG(dbgs() << "Widened checks = " << NumWidened << "\n");
+  DEBUG(dbgs() << "Widened checks = " << NumWidened << "\n");
   return true;
 }
 
@@ -642,7 +634,7 @@ Optional<LoopPredication::LoopICmp> LoopPredication::parseLoopLatchICmp() {
 
   BasicBlock *LoopLatch = L->getLoopLatch();
   if (!LoopLatch) {
-    LLVM_DEBUG(dbgs() << "The loop doesn't have a single latch!\n");
+    DEBUG(dbgs() << "The loop doesn't have a single latch!\n");
     return None;
   }
 
@@ -653,7 +645,7 @@ Optional<LoopPredication::LoopICmp> LoopPredication::parseLoopLatchICmp() {
   if (!match(LoopLatch->getTerminator(),
              m_Br(m_ICmp(Pred, m_Value(LHS), m_Value(RHS)), TrueDest,
                   FalseDest))) {
-    LLVM_DEBUG(dbgs() << "Failed to match the latch terminator!\n");
+    DEBUG(dbgs() << "Failed to match the latch terminator!\n");
     return None;
   }
   assert((TrueDest == L->getHeader() || FalseDest == L->getHeader()) &&
@@ -663,20 +655,20 @@ Optional<LoopPredication::LoopICmp> LoopPredication::parseLoopLatchICmp() {
 
   auto Result = parseLoopICmp(Pred, LHS, RHS);
   if (!Result) {
-    LLVM_DEBUG(dbgs() << "Failed to parse the loop latch condition!\n");
+    DEBUG(dbgs() << "Failed to parse the loop latch condition!\n");
     return None;
   }
 
   // Check affine first, so if it's not we don't try to compute the step
   // recurrence.
   if (!Result->IV->isAffine()) {
-    LLVM_DEBUG(dbgs() << "The induction variable is not affine!\n");
+    DEBUG(dbgs() << "The induction variable is not affine!\n");
     return None;
   }
 
   auto *Step = Result->IV->getStepRecurrence(*SE);
   if (!isSupportedStep(Step)) {
-    LLVM_DEBUG(dbgs() << "Unsupported loop stride(" << *Step << ")!\n");
+    DEBUG(dbgs() << "Unsupported loop stride(" << *Step << ")!\n");
     return None;
   }
 
@@ -692,8 +684,8 @@ Optional<LoopPredication::LoopICmp> LoopPredication::parseLoopLatchICmp() {
   };
 
   if (IsUnsupportedPredicate(Step, Result->Pred)) {
-    LLVM_DEBUG(dbgs() << "Unsupported loop latch predicate(" << Result->Pred
-                      << ")!\n");
+    DEBUG(dbgs() << "Unsupported loop latch predicate(" << Result->Pred
+                 << ")!\n");
     return None;
   }
   return Result;
@@ -759,11 +751,11 @@ bool LoopPredication::isLoopProfitableToPredicate() {
   // less than one, can invert the definition of profitable loop predication.
   float ScaleFactor = LatchExitProbabilityScale;
   if (ScaleFactor < 1) {
-    LLVM_DEBUG(
+    DEBUG(
         dbgs()
         << "Ignored user setting for loop-predication-latch-probability-scale: "
         << LatchExitProbabilityScale << "\n");
-    LLVM_DEBUG(dbgs() << "The value is set to 1.0\n");
+    DEBUG(dbgs() << "The value is set to 1.0\n");
     ScaleFactor = 1.0;
   }
   const auto LatchProbabilityThreshold =
@@ -786,8 +778,8 @@ bool LoopPredication::isLoopProfitableToPredicate() {
 bool LoopPredication::runOnLoop(Loop *Loop) {
   L = Loop;
 
-  LLVM_DEBUG(dbgs() << "Analyzing ");
-  LLVM_DEBUG(L->dump());
+  DEBUG(dbgs() << "Analyzing ");
+  DEBUG(L->dump());
 
   Module *M = L->getHeader()->getModule();
 
@@ -808,11 +800,11 @@ bool LoopPredication::runOnLoop(Loop *Loop) {
     return false;
   LatchCheck = *LatchCheckOpt;
 
-  LLVM_DEBUG(dbgs() << "Latch check:\n");
-  LLVM_DEBUG(LatchCheck.dump());
+  DEBUG(dbgs() << "Latch check:\n");
+  DEBUG(LatchCheck.dump());
 
   if (!isLoopProfitableToPredicate()) {
-    LLVM_DEBUG(dbgs() << "Loop not profitable to predicate!\n");
+    DEBUG(dbgs()<< "Loop not profitable to predicate!\n");
     return false;
   }
   // Collect all the guards into a vector and process later, so as not

@@ -15,9 +15,7 @@
 #include "perfmon/pfmlib.h"
 #include "perfmon/pfmlib_perf_event.h"
 #endif
-#include <cassert>
 
-namespace llvm {
 namespace exegesis {
 namespace pfm {
 
@@ -90,19 +88,15 @@ llvm::StringRef PerfEvent::getPfmEventString() const {
 
 #ifdef HAVE_LIBPFM
 Counter::Counter(const PerfEvent &Event) {
-  assert(Event.valid());
   const pid_t Pid = 0;    // measure current process/thread.
   const int Cpu = -1;     // measure any processor.
   const int GroupFd = -1; // no grouping of counters.
   const uint32_t Flags = 0;
   perf_event_attr AttrCopy = *Event.attribute();
   FileDescriptor = perf_event_open(&AttrCopy, Pid, Cpu, GroupFd, Flags);
-  if (FileDescriptor == -1) {
-    llvm::errs() << "Unable to open event, make sure your kernel allows user "
-                    "space perf monitoring.\nYou may want to try:\n$ sudo sh "
-                    "-c 'echo -1 > /proc/sys/kernel/perf_event_paranoid'\n";
-  }
-  assert(FileDescriptor != -1 && "Unable to open event");
+  assert(FileDescriptor != -1 &&
+         "Unable to open event, make sure your kernel allows user space perf "
+         "monitoring.");
 }
 
 Counter::~Counter() { close(FileDescriptor); }
@@ -114,10 +108,8 @@ void Counter::stop() { ioctl(FileDescriptor, PERF_EVENT_IOC_DISABLE, 0); }
 int64_t Counter::read() const {
   int64_t Count = 0;
   ssize_t ReadSize = ::read(FileDescriptor, &Count, sizeof(Count));
-  if (ReadSize != sizeof(Count)) {
-    Count = -1;
+  if (ReadSize != sizeof(Count))
     llvm::errs() << "Failed to read event counter\n";
-  }
   return Count;
 }
 
@@ -137,4 +129,3 @@ int64_t Counter::read() const { return 42; }
 
 } // namespace pfm
 } // namespace exegesis
-} // namespace llvm

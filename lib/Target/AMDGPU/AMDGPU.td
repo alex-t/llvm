@@ -7,17 +7,23 @@
 //
 //===------------------------------------------------------------===//
 
-include "llvm/TableGen/SearchableTable.td"
 include "llvm/Target/Target.td"
-include "AMDGPUFeatures.td"
-
-class BoolToList<bit Value> {
-  list<int> ret = !if(Value, [1]<int>, []<int>);
-}
 
 //===------------------------------------------------------------===//
 // Subtarget Features (device properties)
 //===------------------------------------------------------------===//
+
+def FeatureFP64 : SubtargetFeature<"fp64",
+  "FP64",
+  "true",
+  "Enable double precision operations"
+>;
+
+def FeatureFMA : SubtargetFeature<"fmaf",
+  "FMA",
+  "true",
+  "Enable single precision FMA (not as fast as mul+add, but fused)"
+>;
 
 def FeatureFastFMAF32 : SubtargetFeature<"fast-fmaf",
   "FastFMAF32",
@@ -35,6 +41,30 @@ def HalfRate64Ops : SubtargetFeature<"half-rate-64-ops",
   "HalfRate64Ops",
   "true",
   "Most fp64 instructions are half rate instead of quarter"
+>;
+
+def FeatureR600ALUInst : SubtargetFeature<"R600ALUInst",
+  "R600ALUInst",
+  "false",
+  "Older version of ALU instructions encoding"
+>;
+
+def FeatureVertexCache : SubtargetFeature<"HasVertexCache",
+  "HasVertexCache",
+  "true",
+  "Specify use of dedicated vertex cache"
+>;
+
+def FeatureCaymanISA : SubtargetFeature<"caymanISA",
+  "CaymanISA",
+  "true",
+  "Use Cayman ISA"
+>;
+
+def FeatureCFALUBug : SubtargetFeature<"cfalubug",
+  "CFALUBug",
+  "true",
+  "GPU has CF_ALU bug"
 >;
 
 def FeatureFlatAddressSpace : SubtargetFeature<"flat-address-space",
@@ -97,12 +127,6 @@ def FeatureMadMixInsts : SubtargetFeature<"mad-mix-insts",
   "Has v_mad_mix_f32, v_mad_mixlo_f16, v_mad_mixhi_f16 instructions"
 >;
 
-def FeatureFmaMixInsts : SubtargetFeature<"fma-mix-insts",
-  "HasFmaMixInsts",
-  "true",
-  "Has v_fma_mix_f32, v_fma_mixlo_f16, v_fma_mixhi_f16 instructions"
->;
-
 // XNACK is disabled if SH_MEM_CONFIG.ADDRESS_MODE = GPUVM on chips that support
 // XNACK. The current default kernel driver setting is:
 // - graphics ring: XNACK disabled
@@ -122,6 +146,27 @@ def FeatureSGPRInitBug : SubtargetFeature<"sgpr-init-bug",
   "VI SGPR initialization bug requiring a fixed SGPR allocation size"
 >;
 
+class SubtargetFeatureFetchLimit <string Value> :
+                          SubtargetFeature <"fetch"#Value,
+  "TexVTXClauseSize",
+  Value,
+  "Limit the maximum number of fetches in a clause to "#Value
+>;
+
+def FeatureFetchLimit8 : SubtargetFeatureFetchLimit <"8">;
+def FeatureFetchLimit16 : SubtargetFeatureFetchLimit <"16">;
+
+class SubtargetFeatureWavefrontSize <int Value> : SubtargetFeature<
+  "wavefrontsize"#Value,
+  "WavefrontSize",
+  !cast<string>(Value),
+  "The number of threads per wavefront"
+>;
+
+def FeatureWavefrontSize16 : SubtargetFeatureWavefrontSize<16>;
+def FeatureWavefrontSize32 : SubtargetFeatureWavefrontSize<32>;
+def FeatureWavefrontSize64 : SubtargetFeatureWavefrontSize<64>;
+
 class SubtargetFeatureLDSBankCount <int Value> : SubtargetFeature <
   "ldsbankcount"#Value,
   "LDSBankCount",
@@ -131,6 +176,19 @@ class SubtargetFeatureLDSBankCount <int Value> : SubtargetFeature <
 
 def FeatureLDSBankCount16 : SubtargetFeatureLDSBankCount<16>;
 def FeatureLDSBankCount32 : SubtargetFeatureLDSBankCount<32>;
+
+class SubtargetFeatureLocalMemorySize <int Value> : SubtargetFeature<
+  "localmemorysize"#Value,
+  "LocalMemorySize",
+  !cast<string>(Value),
+  "The size of local memory in bytes"
+>;
+
+def FeatureGCN : SubtargetFeature<"gcn",
+  "IsGCN",
+  "true",
+  "GCN or newer GPU"
+>;
 
 def FeatureGCN3Encoding : SubtargetFeature<"gcn3-encoding",
   "GCN3Encoding",
@@ -142,12 +200,6 @@ def FeatureCIInsts : SubtargetFeature<"ci-insts",
   "CIInsts",
   "true",
   "Additional instructions for CI+"
->;
-
-def FeatureVIInsts : SubtargetFeature<"vi-insts",
-  "VIInsts",
-  "true",
-  "Additional instructions for VI+"
 >;
 
 def FeatureGFX9Insts : SubtargetFeature<"gfx9-insts",
@@ -246,12 +298,6 @@ def FeatureDPP : SubtargetFeature<"dpp",
   "Support DPP (Data Parallel Primitives) extension"
 >;
 
-def FeatureR128A16 : SubtargetFeature<"r128-a16",
-  "HasR128A16",
-  "true",
-  "Support 16 bit coordindates/gradients/lod/clamp/mip types on gfx9"
->;
-
 def FeatureIntClamp : SubtargetFeature<"int-clamp-insts",
   "HasIntClamp",
   "true",
@@ -264,21 +310,18 @@ def FeatureUnpackedD16VMem : SubtargetFeature<"unpacked-d16-vmem",
   "Has unpacked d16 vmem instructions"
 >;
 
-def FeatureDLInsts : SubtargetFeature<"dl-insts",
-  "HasDLInsts",
-  "true",
-  "Has deep learning instructions"
->;
-
-def FeatureSRAMECC : SubtargetFeature<"sram-ecc",
-  "EnableSRAMECC",
-  "true",
-  "Enable SRAM ECC"
->;
-
 //===------------------------------------------------------------===//
 // Subtarget Features (options and debugging)
 //===------------------------------------------------------------===//
+
+// Some instructions do not support denormals despite this flag. Using
+// fp32 denormals also causes instructions to run at the double
+// precision rate for the device.
+def FeatureFP32Denormals : SubtargetFeature<"fp32-denormals",
+  "FP32Denormals",
+  "true",
+  "Enable single precision denormal handling"
+>;
 
 // Denormal handling for fp64 and fp16 is controlled by the same
 // config register when fp16 supported.
@@ -302,6 +345,12 @@ def FeatureFP16Denormals : SubtargetFeature<"fp16-denormals",
   "true",
   "Enable half precision denormal handling",
   [FeatureFP64FP16Denormals]
+>;
+
+def FeatureDX10Clamp : SubtargetFeature<"dx10-clamp",
+  "DX10Clamp",
+  "true",
+  "clamp modifier clamps NaNs to 0.0"
 >;
 
 def FeatureFPExceptions : SubtargetFeature<"fp-exceptions",
@@ -328,6 +377,12 @@ def FeatureEnableHugePrivateBuffer : SubtargetFeature<
   "Enable private/scratch buffer sizes greater than 128 GB"
 >;
 
+def FeatureVGPRSpilling : SubtargetFeature<"vgpr-spilling",
+  "EnableVGPRSpilling",
+  "true",
+  "Enable spilling of VGPRs to scratch memory"
+>;
+
 def FeatureDumpCode : SubtargetFeature <"DumpCode",
   "DumpCode",
   "true",
@@ -338,6 +393,12 @@ def FeatureDumpCodeLower : SubtargetFeature <"dumpcode",
   "DumpCode",
   "true",
   "Dump MachineInstrs in the CodeEmitter"
+>;
+
+def FeaturePromoteAlloca : SubtargetFeature <"promote-alloca",
+  "EnablePromoteAlloca",
+  "true",
+  "Enable promote alloca pass"
 >;
 
 // XXX - This should probably be removed once enabled by default
@@ -397,61 +458,71 @@ def FeatureCodeObjectV3 : SubtargetFeature <
   "Generate code object version 3"
 >;
 
-def FeatureTrigReducedRange : SubtargetFeature<"trig-reduced-range",
-  "HasTrigReducedRange",
-  "true",
-  "Requires use of fract on arguments to trig instructions"
->;
-
 // Dummy feature used to disable assembler instructions.
 def FeatureDisable : SubtargetFeature<"",
   "FeatureDisable","true",
   "Dummy feature to disable assembler instructions"
 >;
 
-def FeatureGCN : SubtargetFeature<"gcn",
-  "IsGCN",
-  "true",
-  "GCN or newer GPU"
+class SubtargetFeatureGeneration <string Value,
+                                  list<SubtargetFeature> Implies> :
+        SubtargetFeature <Value, "Gen", "AMDGPUSubtarget::"#Value,
+                          Value#" GPU generation", Implies>;
+
+def FeatureLocalMemorySize0 : SubtargetFeatureLocalMemorySize<0>;
+def FeatureLocalMemorySize32768 : SubtargetFeatureLocalMemorySize<32768>;
+def FeatureLocalMemorySize65536 : SubtargetFeatureLocalMemorySize<65536>;
+
+def FeatureR600 : SubtargetFeatureGeneration<"R600",
+  [FeatureR600ALUInst, FeatureFetchLimit8, FeatureLocalMemorySize0]
 >;
 
-class GCNSubtargetFeatureGeneration <string Value,
-                                  list<SubtargetFeature> Implies> :
-        SubtargetFeatureGeneration <Value, "GCNSubtarget", Implies>;
+def FeatureR700 : SubtargetFeatureGeneration<"R700",
+  [FeatureFetchLimit16, FeatureLocalMemorySize0]
+>;
 
-def FeatureSouthernIslands : GCNSubtargetFeatureGeneration<"SOUTHERN_ISLANDS",
+def FeatureEvergreen : SubtargetFeatureGeneration<"EVERGREEN",
+  [FeatureFetchLimit16, FeatureLocalMemorySize32768]
+>;
+
+def FeatureNorthernIslands : SubtargetFeatureGeneration<"NORTHERN_ISLANDS",
+  [FeatureFetchLimit16, FeatureWavefrontSize64,
+   FeatureLocalMemorySize32768]
+>;
+
+def FeatureSouthernIslands : SubtargetFeatureGeneration<"SOUTHERN_ISLANDS",
   [FeatureFP64, FeatureLocalMemorySize32768, FeatureMIMG_R128,
   FeatureWavefrontSize64, FeatureGCN,
-  FeatureLDSBankCount32, FeatureMovrel, FeatureTrigReducedRange]
+  FeatureLDSBankCount32, FeatureMovrel]
 >;
 
-def FeatureSeaIslands : GCNSubtargetFeatureGeneration<"SEA_ISLANDS",
+def FeatureSeaIslands : SubtargetFeatureGeneration<"SEA_ISLANDS",
   [FeatureFP64, FeatureLocalMemorySize65536, FeatureMIMG_R128,
   FeatureWavefrontSize64, FeatureGCN, FeatureFlatAddressSpace,
-  FeatureCIInsts, FeatureMovrel, FeatureTrigReducedRange]
+  FeatureCIInsts, FeatureMovrel]
 >;
 
-def FeatureVolcanicIslands : GCNSubtargetFeatureGeneration<"VOLCANIC_ISLANDS",
+def FeatureVolcanicIslands : SubtargetFeatureGeneration<"VOLCANIC_ISLANDS",
   [FeatureFP64, FeatureLocalMemorySize65536, FeatureMIMG_R128,
    FeatureWavefrontSize64, FeatureFlatAddressSpace, FeatureGCN,
-   FeatureGCN3Encoding, FeatureCIInsts, FeatureVIInsts, Feature16BitInsts,
+   FeatureGCN3Encoding, FeatureCIInsts, Feature16BitInsts,
    FeatureSMemRealTime, FeatureVGPRIndexMode, FeatureMovrel,
    FeatureScalarStores, FeatureInv2PiInlineImm,
    FeatureSDWA, FeatureSDWAOutModsVOPC, FeatureSDWAMac, FeatureDPP,
-   FeatureIntClamp, FeatureTrigReducedRange
+   FeatureIntClamp
   ]
 >;
 
-def FeatureGFX9 : GCNSubtargetFeatureGeneration<"GFX9",
+def FeatureGFX9 : SubtargetFeatureGeneration<"GFX9",
   [FeatureFP64, FeatureLocalMemorySize65536,
    FeatureWavefrontSize64, FeatureFlatAddressSpace, FeatureGCN,
-   FeatureGCN3Encoding, FeatureCIInsts, FeatureVIInsts, Feature16BitInsts,
+   FeatureGCN3Encoding, FeatureCIInsts, Feature16BitInsts,
    FeatureSMemRealTime, FeatureScalarStores, FeatureInv2PiInlineImm,
    FeatureApertureRegs, FeatureGFX9Insts, FeatureVOP3P, FeatureVGPRIndexMode,
    FeatureFastFMAF32, FeatureDPP, FeatureIntClamp,
    FeatureSDWA, FeatureSDWAOmod, FeatureSDWAScalar, FeatureSDWASdst,
    FeatureFlatInstOffsets, FeatureFlatGlobalInsts, FeatureFlatScratchInsts,
-   FeatureAddNoCarryInsts, FeatureScalarAtomics, FeatureR128A16
+   FeatureAddNoCarryInsts, FeatureScalarAtomics
   ]
 >;
 
@@ -469,41 +540,34 @@ def FeatureISAVersion6_0_0 : SubtargetFeatureISAVersion <6,0,0,
   [FeatureSouthernIslands,
    FeatureFastFMAF32,
    HalfRate64Ops,
-   FeatureLDSBankCount32,
-   FeatureCodeObjectV3]>;
+   FeatureLDSBankCount32]>;
 
 def FeatureISAVersion6_0_1 : SubtargetFeatureISAVersion <6,0,1,
   [FeatureSouthernIslands,
-   FeatureLDSBankCount32,
-   FeatureCodeObjectV3]>;
+   FeatureLDSBankCount32]>;
 
 def FeatureISAVersion7_0_0 : SubtargetFeatureISAVersion <7,0,0,
   [FeatureSeaIslands,
-   FeatureLDSBankCount32,
-   FeatureCodeObjectV3]>;
+   FeatureLDSBankCount32]>;
 
 def FeatureISAVersion7_0_1 : SubtargetFeatureISAVersion <7,0,1,
   [FeatureSeaIslands,
    HalfRate64Ops,
    FeatureLDSBankCount32,
-   FeatureFastFMAF32,
-   FeatureCodeObjectV3]>;
+   FeatureFastFMAF32]>;
 
 def FeatureISAVersion7_0_2 : SubtargetFeatureISAVersion <7,0,2,
   [FeatureSeaIslands,
    FeatureLDSBankCount16,
-   FeatureFastFMAF32,
-   FeatureCodeObjectV3]>;
+   FeatureFastFMAF32]>;
 
 def FeatureISAVersion7_0_3 : SubtargetFeatureISAVersion <7,0,3,
   [FeatureSeaIslands,
-   FeatureLDSBankCount16,
-   FeatureCodeObjectV3]>;
+   FeatureLDSBankCount16]>;
 
 def FeatureISAVersion7_0_4 : SubtargetFeatureISAVersion <7,0,4,
   [FeatureSeaIslands,
-   FeatureLDSBankCount32,
-   FeatureCodeObjectV3]>;
+   FeatureLDSBankCount32]>;
 
 def FeatureISAVersion8_0_1 : SubtargetFeatureISAVersion <8,0,1,
   [FeatureVolcanicIslands,
@@ -511,62 +575,36 @@ def FeatureISAVersion8_0_1 : SubtargetFeatureISAVersion <8,0,1,
    HalfRate64Ops,
    FeatureLDSBankCount32,
    FeatureXNACK,
-   FeatureUnpackedD16VMem,
-   FeatureCodeObjectV3]>;
+   FeatureUnpackedD16VMem]>;
 
 def FeatureISAVersion8_0_2 : SubtargetFeatureISAVersion <8,0,2,
   [FeatureVolcanicIslands,
    FeatureLDSBankCount32,
    FeatureSGPRInitBug,
-   FeatureUnpackedD16VMem,
-   FeatureCodeObjectV3]>;
+   FeatureUnpackedD16VMem]>;
 
 def FeatureISAVersion8_0_3 : SubtargetFeatureISAVersion <8,0,3,
   [FeatureVolcanicIslands,
    FeatureLDSBankCount32,
-   FeatureUnpackedD16VMem,
-   FeatureCodeObjectV3]>;
+   FeatureUnpackedD16VMem]>;
 
 def FeatureISAVersion8_1_0 : SubtargetFeatureISAVersion <8,1,0,
   [FeatureVolcanicIslands,
    FeatureLDSBankCount16,
-   FeatureXNACK,
-   FeatureCodeObjectV3]>;
+   FeatureXNACK]>;
 
 def FeatureISAVersion9_0_0 : SubtargetFeatureISAVersion <9,0,0,
   [FeatureGFX9,
    FeatureMadMixInsts,
-   FeatureLDSBankCount32,
-   FeatureCodeObjectV3]>;
+   FeatureLDSBankCount32
+   ]>;
 
 def FeatureISAVersion9_0_2 : SubtargetFeatureISAVersion <9,0,2,
   [FeatureGFX9,
    FeatureMadMixInsts,
    FeatureLDSBankCount32,
-   FeatureXNACK,
-   FeatureCodeObjectV3]>;
-
-def FeatureISAVersion9_0_4 : SubtargetFeatureISAVersion <9,0,4,
-  [FeatureGFX9,
-   FeatureLDSBankCount32,
-   FeatureFmaMixInsts,
-   FeatureCodeObjectV3]>;
-
-def FeatureISAVersion9_0_6 : SubtargetFeatureISAVersion <9,0,6,
-  [FeatureGFX9,
-   HalfRate64Ops,
-   FeatureFmaMixInsts,
-   FeatureLDSBankCount32,
-   FeatureDLInsts,
-   FeatureSRAMECC,
-   FeatureCodeObjectV3]>;
-
-def FeatureISAVersion9_0_9 : SubtargetFeatureISAVersion <9,0,9,
-  [FeatureGFX9,
-   FeatureMadMixInsts,
-   FeatureLDSBankCount32,
-   FeatureXNACK,
-   FeatureCodeObjectV3]>;
+   FeatureXNACK
+   ]>;
 
 //===----------------------------------------------------------------------===//
 // Debugger related subtarget features.
@@ -577,6 +615,13 @@ def FeatureDebuggerInsertNops : SubtargetFeature<
   "DebuggerInsertNops",
   "true",
   "Insert one nop instruction for each high level source statement"
+>;
+
+def FeatureDebuggerReserveRegs : SubtargetFeature<
+  "amdgpu-debugger-reserve-regs",
+  "DebuggerReserveRegs",
+  "true",
+  "Reserve registers for debugger usage"
 >;
 
 def FeatureDebuggerEmitPrologue : SubtargetFeature<
@@ -665,6 +710,8 @@ def NullALU : InstrItinClass;
 // Predicate helper class
 //===----------------------------------------------------------------------===//
 
+def TruePredicate : Predicate<"true">;
+
 def isSICI : Predicate<
   "Subtarget->getGeneration() == AMDGPUSubtarget::SOUTHERN_ISLANDS ||"
   "Subtarget->getGeneration() == AMDGPUSubtarget::SEA_ISLANDS"
@@ -698,9 +745,6 @@ def HasUnpackedD16VMem : Predicate<"Subtarget->hasUnpackedD16VMem()">,
 def HasPackedD16VMem : Predicate<"!Subtarget->hasUnpackedD16VMem()">,
   AssemblerPredicate<"!FeatureUnpackedD16VMem">;
 
-def D16PreservesUnusedBits :
-  Predicate<"Subtarget->hasD16LoadStore() && !Subtarget->isSRAMECCEnabled()">,
-  AssemblerPredicate<"FeatureGFX9Insts,!FeatureSRAMECC">;
 
 def LDSRequiresM0Init : Predicate<"Subtarget->ldsRequiresM0Init()">;
 def NotLDSRequiresM0Init : Predicate<"!Subtarget->ldsRequiresM0Init()">;
@@ -708,19 +752,16 @@ def NotLDSRequiresM0Init : Predicate<"!Subtarget->ldsRequiresM0Init()">;
 def HasDSAddTid : Predicate<"Subtarget->getGeneration() >= AMDGPUSubtarget::GFX9">,
   AssemblerPredicate<"FeatureGFX9Insts">;
 
-def HasAddNoCarryInsts : Predicate<"Subtarget->hasAddNoCarry()">,
+def HasAddNoCarryInsts : Predicate<"Subtarget->hasAddNoCarryInsts()">,
   AssemblerPredicate<"FeatureAddNoCarryInsts">;
 
-def NotHasAddNoCarryInsts : Predicate<"!Subtarget->hasAddNoCarry()">,
+def NotHasAddNoCarryInsts : Predicate<"!Subtarget->hasAddNoCarryInsts()">,
   AssemblerPredicate<"!FeatureAddNoCarryInsts">;
 
 def Has16BitInsts : Predicate<"Subtarget->has16BitInsts()">,
   AssemblerPredicate<"Feature16BitInsts">;
 def HasVOP3PInsts : Predicate<"Subtarget->hasVOP3PInsts()">,
   AssemblerPredicate<"FeatureVOP3P">;
-
-def NotHasVOP3PInsts : Predicate<"!Subtarget->hasVOP3PInsts()">,
-  AssemblerPredicate<"!FeatureVOP3P">;
 
 def HasSDWA : Predicate<"Subtarget->hasSDWA()">,
   AssemblerPredicate<"FeatureSDWA,FeatureVolcanicIslands">;
@@ -730,9 +771,6 @@ def HasSDWA9 : Predicate<"Subtarget->hasSDWA()">,
 
 def HasDPP : Predicate<"Subtarget->hasDPP()">,
   AssemblerPredicate<"FeatureDPP">;
-
-def HasR128A16 : Predicate<"Subtarget->hasR128A16()">,
-  AssemblerPredicate<"FeatureR128A16">;
 
 def HasIntClamp : Predicate<"Subtarget->hasIntClamp()">,
   AssemblerPredicate<"FeatureIntClamp">;
@@ -750,24 +788,39 @@ def HasVGPRIndexMode : Predicate<"Subtarget->hasVGPRIndexMode()">,
 def HasMovrel : Predicate<"Subtarget->hasMovrel()">,
                 AssemblerPredicate<"FeatureMovrel">;
 
-def HasFmaMixInsts : Predicate<"Subtarget->hasFmaMixInsts()">,
-  AssemblerPredicate<"FeatureFmaMixInsts">;
-
-def HasDLInsts : Predicate<"Subtarget->hasDLInsts()">,
-  AssemblerPredicate<"FeatureDLInsts">;
-
-
 def EnableLateCFGStructurize : Predicate<
   "EnableLateStructurizeCFG">;
 
+// Exists to help track down where SubtargetPredicate isn't set rather
+// than letting tablegen crash with an unhelpful error.
+def InvalidPred : Predicate<"predicate not set on instruction or pattern">;
+
+class PredicateControl {
+  Predicate SubtargetPredicate = InvalidPred;
+  Predicate SIAssemblerPredicate = isSICI;
+  Predicate VIAssemblerPredicate = isVI;
+  list<Predicate> AssemblerPredicates = [];
+  Predicate AssemblerPredicate = TruePredicate;
+  list<Predicate> OtherPredicates = [];
+  list<Predicate> Predicates = !listconcat([SubtargetPredicate,
+                                            AssemblerPredicate],
+                                            AssemblerPredicates,
+                                            OtherPredicates);
+}
+
+class AMDGPUPat<dag pattern, dag result> : Pat<pattern, result>,
+  PredicateControl;
+
+
 // Include AMDGPU TD files
+include "R600Schedule.td"
+include "R600Processors.td"
 include "SISchedule.td"
 include "GCNProcessors.td"
 include "AMDGPUInstrInfo.td"
-include "SIIntrinsics.td"
+include "AMDGPUIntrinsics.td"
 include "AMDGPURegisterInfo.td"
 include "AMDGPURegisterBanks.td"
 include "AMDGPUInstructions.td"
-include "SIInstrInfo.td"
 include "AMDGPUCallingConv.td"
 include "AMDGPUSearchableTables.td"

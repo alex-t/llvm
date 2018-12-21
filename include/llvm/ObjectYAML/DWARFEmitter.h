@@ -7,7 +7,7 @@
 //
 //===----------------------------------------------------------------------===//
 /// \file
-/// Common declarations for yaml2obj
+/// \brief Common declarations for yaml2obj
 //===----------------------------------------------------------------------===//
 
 #ifndef LLVM_OBJECTYAML_DWARFEMITTER_H

@@ -1,16 +1,3 @@
-//===-- MicroMipsInstrFormats.td - microMIPS Inst Formats -*- tablegen -*--===//
-//
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
-//
-//===----------------------------------------------------------------------===//
-//
-// This files descributes the formats of the microMIPS instruction set.
-//
-//===----------------------------------------------------------------------===//
-
 //===----------------------------------------------------------------------===//
 // MicroMIPS Base Classes
 //===----------------------------------------------------------------------===//
@@ -20,8 +7,8 @@
 // This class does not depend on the instruction size.
 //
 class MicroMipsInstBase<dag outs, dag ins, string asmstr, list<dag> pattern,
-                        InstrItinClass itin, Format f> : Instruction,
-                        PredicateControl {
+                        InstrItinClass itin, Format f> : Instruction
+{
   let Namespace = "Mips";
   let DecoderNamespace = "MicroMips";
 
@@ -32,7 +19,7 @@ class MicroMipsInstBase<dag outs, dag ins, string asmstr, list<dag> pattern,
   let Pattern     = pattern;
   let Itinerary   = itin;
 
-  let EncodingPredicates = [InMicroMips];
+  let Predicates = [InMicroMips];
 
   Format Form = f;
 }
@@ -844,13 +831,13 @@ class ABS_FM_MM<bits<2> fmt, bits<7> funct> : MMArch {
 class CMov_F_F_FM_MM<bits<9> func, bits<2> fmt> : MMArch {
   bits<5> fd;
   bits<5> fs;
-  bits<3> fcc;
+
   bits<32> Inst;
 
   let Inst{31-26} = 0x15;
   let Inst{25-21} = fd;
   let Inst{20-16} = fs;
-  let Inst{15-13} = fcc; //cc
+  let Inst{15-13} = 0x0; //cc
   let Inst{12-11} = 0x0;
   let Inst{10-9}  = fmt;
   let Inst{8-0}   = func;
@@ -933,17 +920,6 @@ class SDBBP_FM_MM : MMArch {
   let Inst{5-0}   = 0x3c;
 }
 
-class SIGRIE_FM_MM : MMArch {
-  bits<16> code_;
-
-  bits<32> Inst;
-
-  let Inst{31-26} = 0x0;
-  let Inst{25-22} = 0x0;
-  let Inst{21-6} = code_;
-  let Inst{5-0} = 0b111111;
-}
-
 class RDHWR_FM_MM : MMArch {
   bits<5> rt;
   bits<5> rd;
@@ -985,7 +961,7 @@ class LWM_FM_MM<bits<4> funct> : MMArch {
   let Inst{11-0}  = addr{11-0};
 }
 
-class LWM_FM_MM16<bits<4> funct> : MMArch {
+class LWM_FM_MM16<bits<4> funct> : MMArch, PredicateControl {
   bits<2> rt;
   bits<4> addr;
 

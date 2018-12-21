@@ -23,7 +23,6 @@
 #include "llvm/Analysis/BranchProbabilityInfo.h"
 #include "llvm/Analysis/CFG.h"
 #include "llvm/Analysis/LoopInfo.h"
-#include "llvm/Analysis/MemorySSAUpdater.h"
 #include "llvm/IR/CFG.h"
 #include "llvm/IR/Dominators.h"
 #include "llvm/IR/Instructions.h"
@@ -130,7 +129,7 @@ static void createPHIsForSplitLoopExit(ArrayRef<BasicBlock *> Preds,
 }
 
 BasicBlock *
-llvm::SplitCriticalEdge(Instruction *TI, unsigned SuccNum,
+llvm::SplitCriticalEdge(TerminatorInst *TI, unsigned SuccNum,
                         const CriticalEdgeSplittingOptions &Options) {
   if (!isCriticalEdge(TI, SuccNum, Options.MergeIdenticalEdges))
     return nullptr;
@@ -199,11 +198,6 @@ llvm::SplitCriticalEdge(Instruction *TI, unsigned SuccNum,
   // If we have nothing to update, just return.
   auto *DT = Options.DT;
   auto *LI = Options.LI;
-  auto *MSSAU = Options.MSSAU;
-  if (MSSAU)
-    MSSAU->wireOldPredecessorsToNewImmediatePredecessor(
-        DestBB, NewBB, {TIBB}, Options.MergeIdenticalEdges);
-
   if (!DT && !LI)
     return NewBB;
 
@@ -289,7 +283,7 @@ llvm::SplitCriticalEdge(Instruction *TI, unsigned SuccNum,
         if (!LoopPreds.empty()) {
           assert(!DestBB->isEHPad() && "We don't split edges to EH pads!");
           BasicBlock *NewExitBB = SplitBlockPredecessors(
-              DestBB, LoopPreds, "split", DT, LI, MSSAU, Options.PreserveLCSSA);
+              DestBB, LoopPreds, "split", DT, LI, Options.PreserveLCSSA);
           if (Options.PreserveLCSSA)
             createPHIsForSplitLoopExit(LoopPreds, NewExitBB, DestBB);
         }
@@ -318,7 +312,7 @@ findIBRPredecessor(BasicBlock *BB, SmallVectorImpl<BasicBlock *> &OtherPreds) {
   BasicBlock *IBB = nullptr;
   for (unsigned Pred = 0, E = PN->getNumIncomingValues(); Pred != E; ++Pred) {
     BasicBlock *PredBB = PN->getIncomingBlock(Pred);
-    Instruction *PredTerm = PredBB->getTerminator();
+    TerminatorInst *PredTerm = PredBB->getTerminator();
     switch (PredTerm->getOpcode()) {
     case Instruction::IndirectBr:
       if (IBB)

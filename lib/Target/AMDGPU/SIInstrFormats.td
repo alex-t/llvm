@@ -12,16 +12,16 @@
 //===----------------------------------------------------------------------===//
 
 def isGCN : Predicate<"Subtarget->getGeneration() "
-                      ">= AMDGPUSubtarget::SOUTHERN_ISLANDS">,
+                      ">= SISubtarget::SOUTHERN_ISLANDS">,
             AssemblerPredicate<"FeatureGCN">;
 def isSI : Predicate<"Subtarget->getGeneration() "
-                      "== AMDGPUSubtarget::SOUTHERN_ISLANDS">,
+                      "== SISubtarget::SOUTHERN_ISLANDS">,
            AssemblerPredicate<"FeatureSouthernIslands">;
 
 
 class InstSI <dag outs, dag ins, string asm = "",
               list<dag> pattern = []> :
-  AMDGPUInst<outs, ins, asm, pattern>, GCNPredicateControl {
+  AMDGPUInst<outs, ins, asm, pattern>, PredicateControl {
   let SubtargetPredicate = isGCN;
 
   // Low bits - basic encoding information.
@@ -118,12 +118,8 @@ class InstSI <dag outs, dag ins, string asm = "",
   // This bit indicates that this is a packed VOP3P instruction
   field bit IsPacked = 0;
 
-  // This bit indicates that this is a D16 buffer instruction.
-  field bit D16Buf = 0;
-
-  // This bit indicates that this uses the floating point double precision
-  // rounding mode flags
-  field bit FPDPRounding = 0;
+  // This bit indicates that this is a D16 instruction.
+  field bit D16 = 0;
 
   // These need to be kept in sync with the enum in SIInstrFlags.
   let TSFlags{0} = SALU;
@@ -180,9 +176,7 @@ class InstSI <dag outs, dag ins, string asm = "",
 
   let TSFlags{49} = IsPacked;
 
-  let TSFlags{50} = D16Buf;
-
-  let TSFlags{51} = FPDPRounding;
+  let TSFlags{50} = D16;
 
   let SchedRW = [Write32Bit];
 
@@ -261,7 +255,7 @@ class MIMGe <bits<7> op> : Enc64 {
   bits<1> tfe;
   bits<1> lwe;
   bits<1> slc;
-  bit d16;
+  bits<1> d16 = 0;
   bits<8> vaddr;
   bits<7> srsrc;
   bits<7> ssamp;
@@ -325,7 +319,6 @@ class VINTRPCommon <dag outs, dag ins, string asm, list<dag> pattern> :
   let mayLoad = 0;
   let mayStore = 0;
   let hasSideEffects = 0;
-  let VALU = 1;
 }
 
 class EXPCommon<dag outs, dag ins, string asm, list<dag> pattern> :
@@ -340,3 +333,15 @@ class EXPCommon<dag outs, dag ins, string asm, list<dag> pattern> :
 }
 
 } // End Uses = [EXEC]
+
+class MIMG <dag outs, dag ins, string asm, list<dag> pattern> :
+    InstSI <outs, ins, asm, pattern> {
+
+  let VM_CNT = 1;
+  let EXP_CNT = 1;
+  let MIMG = 1;
+  let Uses = [EXEC];
+
+  let UseNamedOperandTable = 1;
+  let hasSideEffects = 0; // XXX ????
+}

@@ -16,7 +16,6 @@
 \*===----------------------------------------------------------------------===*/
 
 #include "llvm-c/Transforms/Scalar.h"
-#include "llvm-c/Transforms/Utils.h"
 #include "caml/mlvalues.h"
 #include "caml/misc.h"
 
@@ -135,12 +134,6 @@ CAMLprim value llvm_add_partially_inline_lib_calls(LLVMPassManagerRef PM) {
 }
 
 /* [<Llvm.PassManager.any] Llvm.PassManager.t -> unit */
-CAMLprim value llvm_add_lower_atomic(LLVMPassManagerRef PM) {
-  LLVMAddLowerAtomicPass(PM);
-  return Val_unit;
-}
-
-/* [<Llvm.PassManager.any] Llvm.PassManager.t -> unit */
 CAMLprim value llvm_add_lower_switch(LLVMPassManagerRef PM) {
   LLVMAddLowerSwitchPass(PM);
   return Val_unit;
@@ -246,11 +239,5 @@ CAMLprim value llvm_add_scoped_no_alias_aa(LLVMPassManagerRef PM) {
 /* [<Llvm.PassManager.any] Llvm.PassManager.t -> unit */
 CAMLprim value llvm_add_basic_alias_analysis(LLVMPassManagerRef PM) {
   LLVMAddBasicAliasAnalysisPass(PM);
-  return Val_unit;
-}
-
-/* [<Llvm.PassManager.any] Llvm.PassManager.t -> unit */
-CAMLprim value llvm_add_unify_function_exit_nodes(LLVMPassManagerRef PM) {
-  LLVMAddUnifyFunctionExitNodesPass(PM);
   return Val_unit;
 }

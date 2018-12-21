@@ -13,8 +13,9 @@
 using namespace llvm;
 using namespace llvm::pdb;
 
-DIAEnumTables::DIAEnumTables(CComPtr<IDiaEnumTables> DiaEnumerator)
-    : Enumerator(DiaEnumerator) {}
+DIAEnumTables::DIAEnumTables(
+  CComPtr<IDiaEnumTables> DiaEnumerator)
+  : Enumerator(DiaEnumerator) {}
 
 uint32_t DIAEnumTables::getChildCount() const {
   LONG Count = 0;
@@ -43,3 +44,10 @@ std::unique_ptr<IPDBTable> DIAEnumTables::getNext() {
 }
 
 void DIAEnumTables::reset() { Enumerator->Reset(); }
+
+DIAEnumTables *DIAEnumTables::clone() const {
+  CComPtr<IDiaEnumTables> EnumeratorClone;
+  if (S_OK != Enumerator->Clone(&EnumeratorClone))
+    return nullptr;
+  return new DIAEnumTables(EnumeratorClone);
+}

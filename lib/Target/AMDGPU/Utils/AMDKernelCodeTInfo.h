@@ -46,7 +46,6 @@
    int64_t Value = 0; \
    if (!expectAbsExpression(MCParser, Value, Err)) \
      return false; \
-   C.compute_pgm_resource_registers &= ~(SetMacro(0xFFFFFFFFFFFFFFFFULL) << Shift); \
    C.compute_pgm_resource_registers |= SetMacro(Value) << Shift; \
    return true; \
 }

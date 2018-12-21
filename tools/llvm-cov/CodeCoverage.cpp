@@ -14,7 +14,6 @@
 //===----------------------------------------------------------------------===//
 
 #include "CoverageExporterJson.h"
-#include "CoverageExporterLcov.h"
 #include "CoverageFilters.h"
 #include "CoverageReport.h"
 #include "CoverageSummaryInfo.h"
@@ -50,66 +49,66 @@ void exportCoverageDataToJson(const coverage::CoverageMapping &CoverageMapping,
                               raw_ostream &OS);
 
 namespace {
-/// The implementation of the coverage tool.
+/// \brief The implementation of the coverage tool.
 class CodeCoverageTool {
 public:
   enum Command {
-    /// The show command.
+    /// \brief The show command.
     Show,
-    /// The report command.
+    /// \brief The report command.
     Report,
-    /// The export command.
+    /// \brief The export command.
     Export
   };
 
   int run(Command Cmd, int argc, const char **argv);
 
 private:
-  /// Print the error message to the error output stream.
+  /// \brief Print the error message to the error output stream.
   void error(const Twine &Message, StringRef Whence = "");
 
-  /// Print the warning message to the error output stream.
+  /// \brief Print the warning message to the error output stream.
   void warning(const Twine &Message, StringRef Whence = "");
 
-  /// Convert \p Path into an absolute path and append it to the list
+  /// \brief Convert \p Path into an absolute path and append it to the list
   /// of collected paths.
   void addCollectedPath(const std::string &Path);
 
-  /// If \p Path is a regular file, collect the path. If it's a
+  /// \brief If \p Path is a regular file, collect the path. If it's a
   /// directory, recursively collect all of the paths within the directory.
   void collectPaths(const std::string &Path);
 
-  /// Return a memory buffer for the given source file.
+  /// \brief Return a memory buffer for the given source file.
   ErrorOr<const MemoryBuffer &> getSourceFile(StringRef SourceFile);
 
-  /// Create source views for the expansions of the view.
+  /// \brief Create source views for the expansions of the view.
   void attachExpansionSubViews(SourceCoverageView &View,
                                ArrayRef<ExpansionRecord> Expansions,
                                const CoverageMapping &Coverage);
 
-  /// Create the source view of a particular function.
+  /// \brief Create the source view of a particular function.
   std::unique_ptr<SourceCoverageView>
   createFunctionView(const FunctionRecord &Function,
                      const CoverageMapping &Coverage);
 
-  /// Create the main source view of a particular source file.
+  /// \brief Create the main source view of a particular source file.
   std::unique_ptr<SourceCoverageView>
   createSourceFileView(StringRef SourceFile, const CoverageMapping &Coverage);
 
-  /// Load the coverage mapping data. Return nullptr if an error occurred.
+  /// \brief Load the coverage mapping data. Return nullptr if an error occurred.
   std::unique_ptr<CoverageMapping> load();
 
-  /// Create a mapping from files in the Coverage data to local copies
+  /// \brief Create a mapping from files in the Coverage data to local copies
   /// (path-equivalence).
   void remapPathNames(const CoverageMapping &Coverage);
 
-  /// Remove input source files which aren't mapped by \p Coverage.
+  /// \brief Remove input source files which aren't mapped by \p Coverage.
   void removeUnmappedInputs(const CoverageMapping &Coverage);
 
-  /// If a demangler is available, demangle all symbol names.
+  /// \brief If a demangler is available, demangle all symbol names.
   void demangleSymbols(const CoverageMapping &Coverage);
 
-  /// Write out a source file view to the filesystem.
+  /// \brief Write out a source file view to the filesystem.
   void writeSourceFileView(StringRef SourceFile, CoverageMapping *Coverage,
                            CoveragePrinter *Printer, bool ShowFilenames);
 
@@ -216,13 +215,12 @@ void CodeCoverageTool::collectPaths(const std::string &Path) {
     for (llvm::sys::fs::recursive_directory_iterator F(Path, EC), E;
          F != E; F.increment(EC)) {
 
-      auto Status = F->status();
-      if (!Status) {
-        warning(Status.getError().message(), F->path());
+      if (EC) {
+        warning(EC.message(), F->path());
         continue;
       }
 
-      if (Status->type() == llvm::sys::fs::file_type::regular_file)
+      if (llvm::sys::fs::is_regular_file(F->path()))
         addCollectedPath(F->path());
     }
   }
@@ -370,6 +368,12 @@ std::unique_ptr<CoverageMapping> CodeCoverageTool::load() {
                << "No profile record found for '" << HashMismatch.first << "'"
                << " with hash = 0x" << Twine::utohexstr(HashMismatch.second)
                << '\n';
+
+      for (const auto &CounterMismatch : Coverage->getCounterMismatches())
+        errs() << "counter-mismatch: "
+               << "Coverage mapping for " << CounterMismatch.first
+               << " only has " << CounterMismatch.second
+               << " valid counter expressions\n";
     }
   }
 
@@ -474,13 +478,14 @@ void CodeCoverageTool::demangleSymbols(const CoverageMapping &Coverage) {
   OutputTOF.os().close();
 
   // Invoke the demangler.
-  std::vector<StringRef> ArgsV;
-  for (StringRef Arg : ViewOpts.DemanglerOpts)
-    ArgsV.push_back(Arg);
+  std::vector<const char *> ArgsV;
+  for (const std::string &Arg : ViewOpts.DemanglerOpts)
+    ArgsV.push_back(Arg.c_str());
+  ArgsV.push_back(nullptr);
   Optional<StringRef> Redirects[] = {InputPath.str(), OutputPath.str(), {""}};
   std::string ErrMsg;
-  int RC = sys::ExecuteAndWait(ViewOpts.DemanglerOpts[0], ArgsV,
-                               /*env=*/None, Redirects, /*secondsToWait=*/0,
+  int RC = sys::ExecuteAndWait(ViewOpts.DemanglerOpts[0], ArgsV.data(),
+                               /*env=*/nullptr, Redirects, /*secondsToWait=*/0,
                                /*memoryLimit=*/0, &ErrMsg);
   if (RC) {
     error(ErrMsg, ViewOpts.DemanglerOpts[0]);
@@ -567,9 +572,7 @@ int CodeCoverageTool::run(Command Cmd, int argc, const char **argv) {
       cl::values(clEnumValN(CoverageViewOptions::OutputFormat::Text, "text",
                             "Text output"),
                  clEnumValN(CoverageViewOptions::OutputFormat::HTML, "html",
-                            "HTML output"),
-                 clEnumValN(CoverageViewOptions::OutputFormat::Lcov, "lcov",
-                            "lcov tracefile output")),
+                            "HTML output")),
       cl::init(CoverageViewOptions::OutputFormat::Text));
 
   cl::opt<std::string> PathRemap(
@@ -676,11 +679,6 @@ int CodeCoverageTool::run(Command Cmd, int argc, const char **argv) {
       if (UseColor == cl::BOU_FALSE)
         errs() << "Color output cannot be disabled when generating html.\n";
       ViewOpts.Colors = true;
-      break;
-    case CoverageViewOptions::OutputFormat::Lcov:
-      if (UseColor == cl::BOU_TRUE)
-        errs() << "Color output cannot be enabled when generating lcov.\n";
-      ViewOpts.Colors = false;
       break;
     }
 
@@ -841,11 +839,6 @@ int CodeCoverageTool::doShow(int argc, const char **argv,
   if (Err)
     return Err;
 
-  if (ViewOpts.Format == CoverageViewOptions::OutputFormat::Lcov) {
-    error("Lcov format should be used with 'llvm-cov export'.");
-    return 1;
-  }
-
   ViewOpts.ShowLineNumbers = true;
   ViewOpts.ShowLineStats = ShowLineExecutionCounts.getNumOccurrences() != 0 ||
                            !ShowRegions || ShowBestLineRegionsCounts;
@@ -977,9 +970,6 @@ int CodeCoverageTool::doReport(int argc, const char **argv,
   if (ViewOpts.Format == CoverageViewOptions::OutputFormat::HTML) {
     error("HTML output for summary reports is not yet supported.");
     return 1;
-  } else if (ViewOpts.Format == CoverageViewOptions::OutputFormat::Lcov) {
-    error("Lcov format should be used with 'llvm-cov export'.");
-    return 1;
   }
 
   auto Coverage = load();
@@ -1011,10 +1001,8 @@ int CodeCoverageTool::doExport(int argc, const char **argv,
   if (Err)
     return Err;
 
-  if (ViewOpts.Format != CoverageViewOptions::OutputFormat::Text &&
-      ViewOpts.Format != CoverageViewOptions::OutputFormat::Lcov) {
-    error("Coverage data can only be exported as textual JSON or an "
-          "lcov tracefile.");
+  if (ViewOpts.Format != CoverageViewOptions::OutputFormat::Text) {
+    error("Coverage data can only be exported as textual JSON.");
     return 1;
   }
 
@@ -1024,27 +1012,12 @@ int CodeCoverageTool::doExport(int argc, const char **argv,
     return 1;
   }
 
-  std::unique_ptr<CoverageExporter> Exporter;
-
-  switch (ViewOpts.Format) {
-  case CoverageViewOptions::OutputFormat::Text:
-    Exporter = llvm::make_unique<CoverageExporterJson>(*Coverage.get(),
-                                                       ViewOpts, outs());
-    break;
-  case CoverageViewOptions::OutputFormat::HTML:
-    // Unreachable because we should have gracefully terminated with an error
-    // above.
-    llvm_unreachable("Export in HTML is not supported!");
-  case CoverageViewOptions::OutputFormat::Lcov:
-    Exporter = llvm::make_unique<CoverageExporterLcov>(*Coverage.get(),
-                                                       ViewOpts, outs());
-    break;
-  }
+  auto Exporter = CoverageExporterJson(*Coverage.get(), ViewOpts, outs());
 
   if (SourceFiles.empty())
-    Exporter->renderRoot(IgnoreFilenameFilters);
+    Exporter.renderRoot(IgnoreFilenameFilters);
   else
-    Exporter->renderRoot(SourceFiles);
+    Exporter.renderRoot(SourceFiles);
 
   return 0;
 }

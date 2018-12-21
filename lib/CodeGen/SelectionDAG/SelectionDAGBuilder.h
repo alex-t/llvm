@@ -687,13 +687,6 @@ public:
   SDValue getValue(const Value *V);
   bool findValue(const Value *V) const;
 
-  /// Return the SDNode for the specified IR value if it exists.
-  SDNode *getNodeForIRValue(const Value *V) {
-    if (NodeMap.find(V) == NodeMap.end())
-      return nullptr;
-    return NodeMap[V].getNode();
-  }
-
   SDValue getNonRegisterValue(const Value *V);
   SDValue getValueImpl(const Value *V);
 
@@ -712,13 +705,13 @@ public:
   void FindMergedConditions(const Value *Cond, MachineBasicBlock *TBB,
                             MachineBasicBlock *FBB, MachineBasicBlock *CurBB,
                             MachineBasicBlock *SwitchBB,
-                            Instruction::BinaryOps Opc, BranchProbability TProb,
-                            BranchProbability FProb, bool InvertCond);
+                            Instruction::BinaryOps Opc, BranchProbability TW,
+                            BranchProbability FW, bool InvertCond);
   void EmitBranchForMergedCondition(const Value *Cond, MachineBasicBlock *TBB,
                                     MachineBasicBlock *FBB,
                                     MachineBasicBlock *CurBB,
                                     MachineBasicBlock *SwitchBB,
-                                    BranchProbability TProb, BranchProbability FProb,
+                                    BranchProbability TW, BranchProbability FW,
                                     bool InvertCond);
   bool ShouldEmitAsBranches(const std::vector<CaseBlock> &Cases);
   bool isExportableFromCurrentBlock(const Value *V, const BasicBlock *FromBB);
@@ -790,11 +783,11 @@ public:
   };
 
   /// Lower \p SLI into a STATEPOINT instruction.
-  SDValue LowerAsSTATEPOINT(StatepointLoweringInfo &SI);
+  SDValue LowerAsSTATEPOINT(StatepointLoweringInfo &SLI);
 
   // This function is responsible for the whole statepoint lowering process.
   // It uniformly handles invoke and call statepoints.
-  void LowerStatepoint(ImmutableStatepoint ISP,
+  void LowerStatepoint(ImmutableStatepoint Statepoint,
                        const BasicBlock *EHPadBB = nullptr);
 
   void LowerCallSiteWithDeoptBundle(ImmutableCallSite CS, SDValue Callee,
@@ -854,10 +847,7 @@ private:
   void visitInvoke(const InvokeInst &I);
   void visitResume(const ResumeInst &I);
 
-  void visitUnary(const User &I, unsigned Opcode);
-  void visitFNeg(const User &I) { visitUnary(I, ISD::FNEG); }
-
-  void visitBinary(const User &I, unsigned Opcode);
+  void visitBinary(const User &I, unsigned OpCode);
   void visitShift(const User &I, unsigned Opcode);
   void visitAdd(const User &I)  { visitBinary(I, ISD::ADD); }
   void visitFAdd(const User &I) { visitBinary(I, ISD::FADD); }
@@ -900,7 +890,7 @@ private:
 
   void visitExtractValue(const User &I);
   void visitInsertValue(const User &I);
-  void visitLandingPad(const LandingPadInst &LP);
+  void visitLandingPad(const LandingPadInst &I);
 
   void visitGetElementPtr(const User &I);
   void visitSelect(const User &I);
@@ -945,7 +935,7 @@ private:
                        const BasicBlock *EHPadBB = nullptr);
 
   // These two are implemented in StatepointLowering.cpp
-  void visitGCRelocate(const GCRelocateInst &Relocate);
+  void visitGCRelocate(const GCRelocateInst &I);
   void visitGCResult(const GCResultInst &I);
 
   void visitVectorReduce(const CallInst &I, unsigned Intrinsic);
@@ -1018,18 +1008,14 @@ struct RegsForValue {
 
   /// Records if this value needs to be treated in an ABI dependant manner,
   /// different to normal type legalization.
-  Optional<CallingConv::ID> CallConv;
+  bool IsABIMangled = false;
 
   RegsForValue() = default;
   RegsForValue(const SmallVector<unsigned, 4> &regs, MVT regvt, EVT valuevt,
-               Optional<CallingConv::ID> CC = None);
+               bool IsABIMangledValue = false);
   RegsForValue(LLVMContext &Context, const TargetLowering &TLI,
                const DataLayout &DL, unsigned Reg, Type *Ty,
-               Optional<CallingConv::ID> CC);
-
-  bool isABIMangled() const {
-    return CallConv.hasValue();
-  }
+               bool IsABIMangledValue = false);
 
   /// Add the specified values to this one.
   void append(const RegsForValue &RHS) {
@@ -1059,17 +1045,9 @@ struct RegsForValue {
   /// Add this value to the specified inlineasm node operand list. This adds the
   /// code marker, matching input operand index (if applicable), and includes
   /// the number of values added into it.
-  void AddInlineAsmOperands(unsigned Code, bool HasMatching,
+  void AddInlineAsmOperands(unsigned Kind, bool HasMatching,
                             unsigned MatchingIdx, const SDLoc &dl,
                             SelectionDAG &DAG, std::vector<SDValue> &Ops) const;
-
-  /// Check if the total RegCount is greater than one.
-  bool occupiesMultipleRegs() const {
-    return std::accumulate(RegCount.begin(), RegCount.end(), 0) > 1;
-  }
-
-  /// Return a list of registers and their sizes.
-  SmallVector<std::pair<unsigned, unsigned>, 4> getRegsAndSizes() const;
 };
 
 } // end namespace llvm

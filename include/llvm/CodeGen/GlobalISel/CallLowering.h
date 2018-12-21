@@ -123,7 +123,7 @@ protected:
   }
 
   template <typename FuncInfoTy>
-  void setArgFlags(ArgInfo &Arg, unsigned OpIdx, const DataLayout &DL,
+  void setArgFlags(ArgInfo &Arg, unsigned OpNum, const DataLayout &DL,
                    const FuncInfoTy &FuncInfo) const;
 
   /// Invoke Handler::assignArg on each of the given \p Args and then use
@@ -131,19 +131,19 @@ protected:
   ///
   /// \return True if everything has succeeded, false otherwise.
   bool handleAssignments(MachineIRBuilder &MIRBuilder, ArrayRef<ArgInfo> Args,
-                         ValueHandler &Handler) const;
+                         ValueHandler &Callback) const;
 
 public:
   CallLowering(const TargetLowering *TLI) : TLI(TLI) {}
   virtual ~CallLowering() = default;
 
   /// This hook must be implemented to lower outgoing return values, described
-  /// by \p Val, into the specified virtual registers \p VRegs.
+  /// by \p Val, into the specified virtual register \p VReg.
   /// This hook is used by GlobalISel.
   ///
   /// \return True if the lowering succeeds, false otherwise.
-  virtual bool lowerReturn(MachineIRBuilder &MIRBuilder, const Value *Val,
-                           ArrayRef<unsigned> VRegs) const {
+  virtual bool lowerReturn(MachineIRBuilder &MIRBuilder,
+                           const Value *Val, unsigned VReg) const {
     return false;
   }
 

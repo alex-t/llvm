@@ -20,6 +20,7 @@
 #include "llvm/Analysis/AliasAnalysis.h"
 #include "llvm/Analysis/InstructionSimplify.h"
 #include "llvm/Analysis/TargetFolder.h"
+#include "llvm/Analysis/Utils/Local.h"
 #include "llvm/Analysis/ValueTracking.h"
 #include "llvm/IR/Argument.h"
 #include "llvm/IR/BasicBlock.h"
@@ -32,7 +33,6 @@
 #include "llvm/IR/Instruction.h"
 #include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/Intrinsics.h"
-#include "llvm/IR/PatternMatch.h"
 #include "llvm/IR/Use.h"
 #include "llvm/IR/Value.h"
 #include "llvm/Support/Casting.h"
@@ -41,13 +41,10 @@
 #include "llvm/Support/KnownBits.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Transforms/InstCombine/InstCombineWorklist.h"
-#include "llvm/Transforms/Utils/Local.h"
 #include <cassert>
 #include <cstdint>
 
 #define DEBUG_TYPE "instcombine"
-
-using namespace llvm::PatternMatch;
 
 namespace llvm {
 
@@ -82,8 +79,8 @@ class User;
 ///   5 -> Other instructions
 static inline unsigned getComplexity(Value *V) {
   if (isa<Instruction>(V)) {
-    if (isa<CastInst>(V) || match(V, m_Neg(m_Value())) ||
-        match(V, m_Not(m_Value())) || match(V, m_FNeg(m_Value())))
+    if (isa<CastInst>(V) || BinaryOperator::isNeg(V) ||
+        BinaryOperator::isFNeg(V) || BinaryOperator::isNot(V))
       return 4;
     return 5;
   }
@@ -125,23 +122,23 @@ static inline Value *peekThroughBitcast(Value *V, bool OneUseOnly = false) {
   return V;
 }
 
-/// Add one to a Constant
+/// \brief Add one to a Constant
 static inline Constant *AddOne(Constant *C) {
   return ConstantExpr::getAdd(C, ConstantInt::get(C->getType(), 1));
 }
 
-/// Subtract one from a Constant
+/// \brief Subtract one from a Constant
 static inline Constant *SubOne(Constant *C) {
   return ConstantExpr::getSub(C, ConstantInt::get(C->getType(), 1));
 }
 
-/// Return true if the specified value is free to invert (apply ~ to).
+/// \brief Return true if the specified value is free to invert (apply ~ to).
 /// This happens in cases where the ~ can be eliminated.  If WillInvertAllUses
 /// is true, work under the assumption that the caller intends to remove all
 /// uses of V and only keep uses of ~V.
 static inline bool IsFreeToInvert(Value *V, bool WillInvertAllUses) {
   // ~(~(X)) -> X.
-  if (match(V, m_Not(m_Value())))
+  if (BinaryOperator::isNot(V))
     return true;
 
   // Constants can be considered to be not'ed values.
@@ -178,14 +175,10 @@ static inline bool IsFreeToInvert(Value *V, bool WillInvertAllUses) {
       if (isa<Constant>(BO->getOperand(0)) || isa<Constant>(BO->getOperand(1)))
         return WillInvertAllUses;
 
-  // Selects with invertible operands are freely invertible
-  if (match(V, m_Select(m_Value(), m_Not(m_Value()), m_Not(m_Value()))))
-    return WillInvertAllUses;
-
   return false;
 }
 
-/// Specific patterns of overflow check idioms that we match.
+/// \brief Specific patterns of overflow check idioms that we match.
 enum OverflowCheckFlavor {
   OCF_UNSIGNED_ADD,
   OCF_SIGNED_ADD,
@@ -197,7 +190,7 @@ enum OverflowCheckFlavor {
   OCF_INVALID
 };
 
-/// Returns the OverflowCheckFlavor corresponding to a overflow_with_op
+/// \brief Returns the OverflowCheckFlavor corresponding to a overflow_with_op
 /// intrinsic.
 static inline OverflowCheckFlavor
 IntrinsicIDToOverflowCheckFlavor(unsigned ID) {
@@ -219,62 +212,7 @@ IntrinsicIDToOverflowCheckFlavor(unsigned ID) {
   }
 }
 
-/// Some binary operators require special handling to avoid poison and undefined
-/// behavior. If a constant vector has undef elements, replace those undefs with
-/// identity constants if possible because those are always safe to execute.
-/// If no identity constant exists, replace undef with some other safe constant.
-static inline Constant *getSafeVectorConstantForBinop(
-      BinaryOperator::BinaryOps Opcode, Constant *In, bool IsRHSConstant) {
-  assert(In->getType()->isVectorTy() && "Not expecting scalars here");
-
-  Type *EltTy = In->getType()->getVectorElementType();
-  auto *SafeC = ConstantExpr::getBinOpIdentity(Opcode, EltTy, IsRHSConstant);
-  if (!SafeC) {
-    // TODO: Should this be available as a constant utility function? It is
-    // similar to getBinOpAbsorber().
-    if (IsRHSConstant) {
-      switch (Opcode) {
-      case Instruction::SRem: // X % 1 = 0
-      case Instruction::URem: // X %u 1 = 0
-        SafeC = ConstantInt::get(EltTy, 1);
-        break;
-      case Instruction::FRem: // X % 1.0 (doesn't simplify, but it is safe)
-        SafeC = ConstantFP::get(EltTy, 1.0);
-        break;
-      default:
-        llvm_unreachable("Only rem opcodes have no identity constant for RHS");
-      }
-    } else {
-      switch (Opcode) {
-      case Instruction::Shl:  // 0 << X = 0
-      case Instruction::LShr: // 0 >>u X = 0
-      case Instruction::AShr: // 0 >> X = 0
-      case Instruction::SDiv: // 0 / X = 0
-      case Instruction::UDiv: // 0 /u X = 0
-      case Instruction::SRem: // 0 % X = 0
-      case Instruction::URem: // 0 %u X = 0
-      case Instruction::Sub:  // 0 - X (doesn't simplify, but it is safe)
-      case Instruction::FSub: // 0.0 - X (doesn't simplify, but it is safe)
-      case Instruction::FDiv: // 0.0 / X (doesn't simplify, but it is safe)
-      case Instruction::FRem: // 0.0 % X = 0
-        SafeC = Constant::getNullValue(EltTy);
-        break;
-      default:
-        llvm_unreachable("Expected to find identity constant for opcode");
-      }
-    }
-  }
-  assert(SafeC && "Must have safe constant for binop");
-  unsigned NumElts = In->getType()->getVectorNumElements();
-  SmallVector<Constant *, 16> Out(NumElts);
-  for (unsigned i = 0; i != NumElts; ++i) {
-    Constant *C = In->getAggregateElement(i);
-    Out[i] = isa<UndefValue>(C) ? SafeC : C;
-  }
-  return ConstantVector::get(Out);
-}
-
-/// The core instruction combiner logic.
+/// \brief The core instruction combiner logic.
 ///
 /// This class provides both the logic to recursively visit instructions and
 /// combine them.
@@ -282,10 +220,10 @@ class LLVM_LIBRARY_VISIBILITY InstCombiner
     : public InstVisitor<InstCombiner, Instruction *> {
   // FIXME: These members shouldn't be public.
 public:
-  /// A worklist of the instructions that need to be simplified.
+  /// \brief A worklist of the instructions that need to be simplified.
   InstCombineWorklist &Worklist;
 
-  /// An IRBuilder that automatically inserts new instructions into the
+  /// \brief An IRBuilder that automatically inserts new instructions into the
   /// worklist.
   using BuilderTy = IRBuilder<TargetFolder, IRBuilderCallbackInserter>;
   BuilderTy &Builder;
@@ -323,7 +261,7 @@ public:
         ExpensiveCombines(ExpensiveCombines), AA(AA), AC(AC), TLI(TLI), DT(DT),
         DL(DL), SQ(DL, &TLI, &DT, &AC), ORE(ORE), LI(LI) {}
 
-  /// Run the combiner over the entire worklist until it is empty.
+  /// \brief Run the combiner over the entire worklist until it is empty.
   ///
   /// \returns true if the IR is changed.
   bool run();
@@ -452,7 +390,7 @@ private:
   /// if it cannot already be eliminated by some other transformation.
   bool shouldOptimizeCast(CastInst *CI);
 
-  /// Try to optimize a sequence of instructions checking if an operation
+  /// \brief Try to optimize a sequence of instructions checking if an operation
   /// on LHS and RHS overflows.
   ///
   /// If this overflow check is done via one of the overflow check intrinsics,
@@ -503,35 +441,12 @@ private:
            OverflowResult::NeverOverflows;
   }
 
-  bool willNotOverflowAdd(const Value *LHS, const Value *RHS,
-                          const Instruction &CxtI, bool IsSigned) const {
-    return IsSigned ? willNotOverflowSignedAdd(LHS, RHS, CxtI)
-                    : willNotOverflowUnsignedAdd(LHS, RHS, CxtI);
-  }
-
   bool willNotOverflowSignedSub(const Value *LHS, const Value *RHS,
-                                const Instruction &CxtI) const {
-    return computeOverflowForSignedSub(LHS, RHS, &CxtI) ==
-           OverflowResult::NeverOverflows;
-  }
-
+                                const Instruction &CxtI) const;
   bool willNotOverflowUnsignedSub(const Value *LHS, const Value *RHS,
-                                  const Instruction &CxtI) const {
-    return computeOverflowForUnsignedSub(LHS, RHS, &CxtI) ==
-           OverflowResult::NeverOverflows;
-  }
-
-  bool willNotOverflowSub(const Value *LHS, const Value *RHS,
-                          const Instruction &CxtI, bool IsSigned) const {
-    return IsSigned ? willNotOverflowSignedSub(LHS, RHS, CxtI)
-                    : willNotOverflowUnsignedSub(LHS, RHS, CxtI);
-  }
-
+                                  const Instruction &CxtI) const;
   bool willNotOverflowSignedMul(const Value *LHS, const Value *RHS,
-                                const Instruction &CxtI) const {
-    return computeOverflowForSignedMul(LHS, RHS, &CxtI) ==
-           OverflowResult::NeverOverflows;
-  }
+                                const Instruction &CxtI) const;
 
   bool willNotOverflowUnsignedMul(const Value *LHS, const Value *RHS,
                                   const Instruction &CxtI) const {
@@ -539,29 +454,12 @@ private:
            OverflowResult::NeverOverflows;
   }
 
-  bool willNotOverflowMul(const Value *LHS, const Value *RHS,
-                          const Instruction &CxtI, bool IsSigned) const {
-    return IsSigned ? willNotOverflowSignedMul(LHS, RHS, CxtI)
-                    : willNotOverflowUnsignedMul(LHS, RHS, CxtI);
-  }
-
-  bool willNotOverflow(BinaryOperator::BinaryOps Opcode, const Value *LHS,
-                       const Value *RHS, const Instruction &CxtI,
-                       bool IsSigned) const {
-    switch (Opcode) {
-    case Instruction::Add: return willNotOverflowAdd(LHS, RHS, CxtI, IsSigned);
-    case Instruction::Sub: return willNotOverflowSub(LHS, RHS, CxtI, IsSigned);
-    case Instruction::Mul: return willNotOverflowMul(LHS, RHS, CxtI, IsSigned);
-    default: llvm_unreachable("Unexpected opcode for overflow query");
-    }
-  }
-
   Value *EmitGEPOffset(User *GEP);
   Instruction *scalarizePHI(ExtractElementInst &EI, PHINode *PN);
+  Value *EvaluateInDifferentElementOrder(Value *V, ArrayRef<int> Mask);
   Instruction *foldCastedBitwiseLogic(BinaryOperator &I);
   Instruction *narrowBinOp(TruncInst &Trunc);
   Instruction *narrowMaskedBinOp(BinaryOperator &And);
-  Instruction *narrowMathIfNoOverflow(BinaryOperator &I);
   Instruction *narrowRotate(TruncInst &Trunc);
   Instruction *optimizeBitCastFromPhi(CastInst &CI, PHINode *PN);
 
@@ -589,11 +487,8 @@ private:
 
   Value *foldAndOrOfICmpsOfAndWithPow2(ICmpInst *LHS, ICmpInst *RHS,
                                        bool JoinedByAnd, Instruction &CxtI);
-  Value *matchSelectFromAndOr(Value *A, Value *B, Value *C, Value *D);
-  Value *getSelectCondition(Value *A, Value *B);
-
 public:
-  /// Inserts an instruction \p New before instruction \p Old
+  /// \brief Inserts an instruction \p New before instruction \p Old
   ///
   /// Also adds the new instruction to the worklist and returns \p New so that
   /// it is suitable for use as the return from the visitation patterns.
@@ -606,13 +501,13 @@ public:
     return New;
   }
 
-  /// Same as InsertNewInstBefore, but also sets the debug loc.
+  /// \brief Same as InsertNewInstBefore, but also sets the debug loc.
   Instruction *InsertNewInstWith(Instruction *New, Instruction &Old) {
     New->setDebugLoc(Old.getDebugLoc());
     return InsertNewInstBefore(New, Old);
   }
 
-  /// A combiner-aware RAUW-like routine.
+  /// \brief A combiner-aware RAUW-like routine.
   ///
   /// This method is to be used when an instruction is found to be dead,
   /// replaceable with another preexisting expression. Here we add all uses of
@@ -630,8 +525,8 @@ public:
     if (&I == V)
       V = UndefValue::get(I.getType());
 
-    LLVM_DEBUG(dbgs() << "IC: Replacing " << I << "\n"
-                      << "    with " << *V << '\n');
+    DEBUG(dbgs() << "IC: Replacing " << I << "\n"
+                 << "    with " << *V << '\n');
 
     I.replaceAllUsesWith(V);
     return &I;
@@ -647,13 +542,13 @@ public:
     return InsertValueInst::Create(Struct, Result, 0);
   }
 
-  /// Combiner aware instruction erasure.
+  /// \brief Combiner aware instruction erasure.
   ///
   /// When dealing with an instruction that has side effects or produces a void
   /// value, we can't rely on DCE to delete the instruction. Instead, visit
   /// methods should return the value returned by this function.
   Instruction *eraseInstFromFunction(Instruction &I) {
-    LLVM_DEBUG(dbgs() << "IC: ERASE " << I << '\n');
+    DEBUG(dbgs() << "IC: ERASE " << I << '\n');
     assert(I.use_empty() && "Cannot erase instruction that is used!");
     salvageDebugInfo(I);
 
@@ -702,12 +597,6 @@ public:
     return llvm::computeOverflowForUnsignedMul(LHS, RHS, DL, &AC, CxtI, &DT);
   }
 
-  OverflowResult computeOverflowForSignedMul(const Value *LHS,
-	                                         const Value *RHS,
-                                             const Instruction *CxtI) const {
-    return llvm::computeOverflowForSignedMul(LHS, RHS, DL, &AC, CxtI, &DT);
-  }
-
   OverflowResult computeOverflowForUnsignedAdd(const Value *LHS,
                                                const Value *RHS,
                                                const Instruction *CxtI) const {
@@ -720,26 +609,15 @@ public:
     return llvm::computeOverflowForSignedAdd(LHS, RHS, DL, &AC, CxtI, &DT);
   }
 
-  OverflowResult computeOverflowForUnsignedSub(const Value *LHS,
-                                               const Value *RHS,
-                                               const Instruction *CxtI) const {
-    return llvm::computeOverflowForUnsignedSub(LHS, RHS, DL, &AC, CxtI, &DT);
-  }
-
-  OverflowResult computeOverflowForSignedSub(const Value *LHS, const Value *RHS,
-                                             const Instruction *CxtI) const {
-    return llvm::computeOverflowForSignedSub(LHS, RHS, DL, &AC, CxtI, &DT);
-  }
-
   /// Maximum size of array considered when transforming.
   uint64_t MaxArraySizeForCombine;
 
 private:
-  /// Performs a few simplifications for operators which are associative
+  /// \brief Performs a few simplifications for operators which are associative
   /// or commutative.
   bool SimplifyAssociativeOrCommutative(BinaryOperator &I);
 
-  /// Tries to simplify binary operations which some other binary
+  /// \brief Tries to simplify binary operations which some other binary
   /// operation distributes over.
   ///
   /// It does this by either by factorizing out common terms (eg "(A*B)+(A*C)"
@@ -774,7 +652,7 @@ private:
                                ConstantInt *&Less, ConstantInt *&Equal,
                                ConstantInt *&Greater);
 
-  /// Attempts to replace V with a simpler value based on the demanded
+  /// \brief Attempts to replace V with a simpler value based on the demanded
   /// bits.
   Value *SimplifyDemandedUseBits(Value *V, APInt DemandedMask, KnownBits &Known,
                                  unsigned Depth, Instruction *CxtI);
@@ -796,19 +674,15 @@ private:
       Instruction *Shr, const APInt &ShrOp1, Instruction *Shl,
       const APInt &ShlOp1, const APInt &DemandedMask, KnownBits &Known);
 
-  /// Tries to simplify operands to an integer instruction based on its
+  /// \brief Tries to simplify operands to an integer instruction based on its
   /// demanded bits.
   bool SimplifyDemandedInstructionBits(Instruction &Inst);
-
-  Value *simplifyAMDGCNMemoryIntrinsicDemanded(IntrinsicInst *II,
-                                               APInt DemandedElts,
-                                               int DmaskIdx = -1);
 
   Value *SimplifyDemandedVectorElts(Value *V, APInt DemandedElts,
                                     APInt &UndefElts, unsigned Depth = 0);
 
-  /// Canonicalize the position of binops relative to shufflevector.
-  Instruction *foldVectorBinop(BinaryOperator &Inst);
+  Value *SimplifyVectorOp(BinaryOperator &Inst);
+
 
   /// Given a binary operator, cast instruction, or select which has a PHI node
   /// as operand #0, see if we can fold the instruction into the PHI (which is
@@ -826,7 +700,7 @@ private:
 
   Instruction *foldAddWithConstant(BinaryOperator &Add);
 
-  /// Try to rotate an operation below a PHI node, using PHI nodes for
+  /// \brief Try to rotate an operation below a PHI node, using PHI nodes for
   /// its operands.
   Instruction *FoldPHIArgOpIntoPHI(PHINode &PN);
   Instruction *FoldPHIArgBinOpIntoPHI(PHINode &PN);
@@ -852,12 +726,11 @@ private:
                                             ConstantInt *AndCst = nullptr);
   Instruction *foldFCmpIntToFPConst(FCmpInst &I, Instruction *LHSI,
                                     Constant *RHSC);
-  Instruction *foldICmpAddOpConst(Value *X, const APInt &C,
+  Instruction *foldICmpAddOpConst(Value *X, ConstantInt *CI,
                                   ICmpInst::Predicate Pred);
   Instruction *foldICmpWithCastAndCast(ICmpInst &ICI);
 
   Instruction *foldICmpUsingKnownBits(ICmpInst &Cmp);
-  Instruction *foldICmpWithDominatingICmp(ICmpInst &Cmp);
   Instruction *foldICmpWithConstant(ICmpInst &Cmp);
   Instruction *foldICmpInstWithConstant(ICmpInst &Cmp);
   Instruction *foldICmpInstWithConstantNotInt(ICmpInst &Cmp);
@@ -920,18 +793,16 @@ private:
   Value *insertRangeTest(Value *V, const APInt &Lo, const APInt &Hi,
                          bool isSigned, bool Inside);
   Instruction *PromoteCastOfAllocation(BitCastInst &CI, AllocaInst &AI);
-  bool mergeStoreIntoSuccessor(StoreInst &SI);
+  Instruction *MatchBSwap(BinaryOperator &I);
+  bool SimplifyStoreAtEndOfBlock(StoreInst &SI);
 
-  /// Given an 'or' instruction, check to see if it is part of a bswap idiom.
-  /// If so, return the equivalent bswap intrinsic.
-  Instruction *matchBSwap(BinaryOperator &Or);
-
-  Instruction *SimplifyAnyMemTransfer(AnyMemTransferInst *MI);
-  Instruction *SimplifyAnyMemSet(AnyMemSetInst *MI);
+  Instruction *SimplifyElementUnorderedAtomicMemCpy(AtomicMemCpyInst *AMI);
+  Instruction *SimplifyMemTransfer(MemIntrinsic *MI);
+  Instruction *SimplifyMemSet(MemSetInst *MI);
 
   Value *EvaluateInDifferentType(Value *V, Type *Ty, bool isSigned);
 
-  /// Returns a value X such that Val = X * Scale, or null if none.
+  /// \brief Returns a value X such that Val = X * Scale, or null if none.
   ///
   /// If the multiplication is known not to overflow then NoSignedWrap is set.
   Value *Descale(Value *Val, APInt Scale, bool &NoSignedWrap);

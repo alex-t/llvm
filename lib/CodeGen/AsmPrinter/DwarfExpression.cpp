@@ -24,20 +24,6 @@
 
 using namespace llvm;
 
-void DwarfExpression::emitConstu(uint64_t Value) {
-  if (Value < 32)
-    emitOp(dwarf::DW_OP_lit0 + Value);
-  else if (Value == std::numeric_limits<uint64_t>::max()) {
-    // Only do this for 64-bit values as the DWARF expression stack uses
-    // target-address-size values.
-    emitOp(dwarf::DW_OP_lit0);
-    emitOp(dwarf::DW_OP_not);
-  } else {
-    emitOp(dwarf::DW_OP_constu);
-    emitUnsigned(Value);
-  }
-}
-
 void DwarfExpression::addReg(int DwarfReg, const char *Comment) {
  assert(DwarfReg >= 0 && "invalid negative dwarf register number");
  assert((LocationKind == Unknown || LocationKind == Register) &&
@@ -86,12 +72,14 @@ void DwarfExpression::addOpPiece(unsigned SizeInBits, unsigned OffsetInBits) {
 }
 
 void DwarfExpression::addShr(unsigned ShiftBy) {
-  emitConstu(ShiftBy);
+  emitOp(dwarf::DW_OP_constu);
+  emitUnsigned(ShiftBy);
   emitOp(dwarf::DW_OP_shr);
 }
 
 void DwarfExpression::addAnd(unsigned Mask) {
-  emitConstu(Mask);
+  emitOp(dwarf::DW_OP_constu);
+  emitUnsigned(Mask);
   emitOp(dwarf::DW_OP_and);
 }
 
@@ -193,7 +181,8 @@ void DwarfExpression::addSignedConstant(int64_t Value) {
 void DwarfExpression::addUnsignedConstant(uint64_t Value) {
   assert(LocationKind == Implicit || LocationKind == Unknown);
   LocationKind = Implicit;
-  emitConstu(Value);
+  emitOp(dwarf::DW_OP_constu);
+  emitUnsigned(Value);
 }
 
 void DwarfExpression::addUnsignedConstant(const APInt &Value) {
@@ -254,9 +243,10 @@ bool DwarfExpression::addMachineRegExpression(const TargetRegisterInfo &TRI,
 
   // Don't emit locations that cannot be expressed without DW_OP_stack_value.
   if (DwarfVersion < 4)
-    if (any_of(ExprCursor, [](DIExpression::ExprOperand Op) -> bool {
-          return Op.getOp() == dwarf::DW_OP_stack_value;
-        })) {
+    if (std::any_of(ExprCursor.begin(), ExprCursor.end(),
+                    [](DIExpression::ExprOperand Op) -> bool {
+                      return Op.getOp() == dwarf::DW_OP_stack_value;
+                    })) {
       DwarfRegs.clear();
       LocationKind = Unknown;
       return false;
@@ -367,14 +357,11 @@ void DwarfExpression::addExpression(DIExpressionCursor &&ExprCursor,
     case dwarf::DW_OP_shl:
     case dwarf::DW_OP_shr:
     case dwarf::DW_OP_shra:
-    case dwarf::DW_OP_lit0:
-    case dwarf::DW_OP_not:
-    case dwarf::DW_OP_dup:
       emitOp(Op->getOp());
       break;
     case dwarf::DW_OP_deref:
       assert(LocationKind != Register);
-      if (LocationKind != Memory && ::isMemoryLocation(ExprCursor))
+      if (LocationKind != Memory && isMemoryLocation(ExprCursor))
         // Turning this into a memory location description makes the deref
         // implicit.
         LocationKind = Memory;
@@ -383,7 +370,8 @@ void DwarfExpression::addExpression(DIExpressionCursor &&ExprCursor,
       break;
     case dwarf::DW_OP_constu:
       assert(LocationKind != Register);
-      emitConstu(Op->getArg(0));
+      emitOp(dwarf::DW_OP_constu);
+      emitUnsigned(Op->getArg(0));
       break;
     case dwarf::DW_OP_stack_value:
       LocationKind = Implicit;

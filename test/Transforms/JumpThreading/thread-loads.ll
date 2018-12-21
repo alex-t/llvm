@@ -246,15 +246,13 @@ bb3:
   ret i32 %res.0
 }
 
-; Make sure we merge the aliasing metadata. We keep the range metadata for the
-; first load, as it dominates the second load. Hence we can eliminate the
-; branch.
+; Make sure we merge the aliasing metadata. (If we don't, we have a load
+; with the wrong metadata, so the branch gets incorrectly eliminated.)
 define void @test8(i32*, i32*, i32*) {
 ; CHECK-LABEL: @test8(
-; CHECK: %a = load i32, i32* %0, !range ![[RANGE4:[0-9]+]]
+; CHECK: %a = load i32, i32* %0, !range !4
 ; CHECK-NEXT: store i32 %a
-; CHECK-NEXT: %xxx = tail call i32 (...) @f1()
-; CHECK-NEXT: ret void
+; CHECK: br i1 %c
   %a = load i32, i32* %0, !tbaa !0, !range !4, !alias.scope !9, !noalias !10
   %b = load i32, i32* %0, !range !5
   store i32 %a, i32* %1
@@ -526,8 +524,6 @@ left_x:
 right_x:
   ret i32 10
 }
-
-; CHECK: ![[RANGE4]] = !{i32 0, i32 1}
 
 !0 = !{!3, !3, i64 0}
 !1 = !{!"omnipotent char", !2}

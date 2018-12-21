@@ -58,7 +58,7 @@ void SampleProfileSummaryBuilder::addRecord(
 void ProfileSummaryBuilder::computeDetailedSummary() {
   if (DetailedSummaryCutoffs.empty())
     return;
-  llvm::sort(DetailedSummaryCutoffs);
+  llvm::sort(DetailedSummaryCutoffs.begin(), DetailedSummaryCutoffs.end());
   auto Iter = CountFrequencies.begin();
   const auto End = CountFrequencies.end();
 

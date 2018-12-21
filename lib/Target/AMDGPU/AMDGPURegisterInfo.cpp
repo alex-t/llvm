@@ -8,15 +8,13 @@
 //===----------------------------------------------------------------------===//
 //
 /// \file
-/// Parent TargetRegisterInfo class common to all hw codegen targets.
+/// \brief Parent TargetRegisterInfo class common to all hw codegen targets.
 //
 //===----------------------------------------------------------------------===//
 
 #include "AMDGPURegisterInfo.h"
 #include "AMDGPUTargetMachine.h"
-#include "SIMachineFunctionInfo.h"
 #include "SIRegisterInfo.h"
-#include "MCTargetDesc/AMDGPUMCTargetDesc.h"
 
 using namespace llvm;
 
@@ -27,7 +25,7 @@ AMDGPURegisterInfo::AMDGPURegisterInfo() : AMDGPUGenRegisterInfo(0) {}
 // they are not supported at this time.
 //===----------------------------------------------------------------------===//
 
-unsigned AMDGPURegisterInfo::getSubRegFromChannel(unsigned Channel) {
+unsigned AMDGPURegisterInfo::getSubRegFromChannel(unsigned Channel) const {
   static const unsigned SubRegs[] = {
     AMDGPU::sub0, AMDGPU::sub1, AMDGPU::sub2, AMDGPU::sub3, AMDGPU::sub4,
     AMDGPU::sub5, AMDGPU::sub6, AMDGPU::sub7, AMDGPU::sub8, AMDGPU::sub9,

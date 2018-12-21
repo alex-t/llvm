@@ -14,13 +14,9 @@
 ; HARD:       fmulq [[R4]], [[R5:.+]], [[R6:.+]]
 ; HARD:       fdivq [[R6]], [[R2]]
 ; SOFT:       call _Q_add
-; SOFT:       unimp 16
 ; SOFT:       call _Q_sub
-; SOFT:       unimp 16
 ; SOFT:       call _Q_mul
-; SOFT:       unimp 16
 ; SOFT:       call _Q_div
-; SOFT:       unimp 16
 ; CHECK:      std
 ; CHECK:      std
 
@@ -105,7 +101,6 @@ declare fp128 @llvm.fabs.f128(fp128) nounwind readonly
 ; CHECK-LABEL: int_to_f128:
 ; HARD:       fitoq
 ; SOFT:       _Q_itoq
-; SOFT:       unimp 16
 
 define void @int_to_f128(fp128* noalias sret %scalar.result, i32 %i) {
 entry:
@@ -118,7 +113,6 @@ entry:
 ; CHECK:       ldub
 ; HARD:        faddq
 ; SOFT:       call _Q_add
-; SOFT:       unimp 16
 ; CHECK:       stb
 ; CHECK:       ret
 
@@ -134,7 +128,6 @@ entry:
 ; CHECK-LABEL: uint_to_f128:
 ; HARD:       fdtoq
 ; SOFT:       _Q_utoq
-; SOFT:       unimp 16
 
 define void @uint_to_f128(fp128* noalias sret %scalar.result, i32 %i) {
 entry:
@@ -166,10 +159,8 @@ entry:
 ; HARD-DAG:      fitoq
 ; HARD-DAG:      fqtoi
 ; SOFT-DAG:      call _Q_lltoq
-; SOFT-DAG:      unimp 16
 ; SOFT-DAG:      call _Q_qtoll
 ; SOFT-DAG:      call _Q_itoq
-; SOFT-DAG:      unimp 16
 ; SOFT-DAG:      call _Q_qtoi
 
 define void @test_itoq_qtoi(i64 %a, i32 %b, fp128* %c, fp128* %d, i64* %ptr0, fp128* %ptr1) {
@@ -194,7 +185,6 @@ entry:
 ; HARD-DAG:      fdtoq
 ; HARD-DAG:      fqtoi
 ; SOFT-DAG:      call _Q_utoq
-; SOFT-DAG:      unimp 16
 ; SOFT-DAG:      call _Q_qtou
 
 define void @test_utoq_qtou(i64 %a, i32 %b, fp128* %c, fp128* %d, i64* %ptr0, fp128* %ptr1) {

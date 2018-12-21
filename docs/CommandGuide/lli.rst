@@ -125,7 +125,6 @@ CODE GENERATION OPTIONS
  .. code-block:: text
 
       default: Target default code model
-      tiny: Tiny code model
       small: Small code model
       kernel: Kernel code model
       medium: Medium code model

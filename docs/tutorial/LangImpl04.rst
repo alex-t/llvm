@@ -597,7 +597,7 @@ if we add:
 
 .. code-block:: c++
 
-    #ifdef _WIN32
+    #ifdef LLVM_ON_WIN32
     #define DLLEXPORT __declspec(dllexport)
     #else
     #define DLLEXPORT

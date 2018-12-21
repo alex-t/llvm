@@ -10,7 +10,6 @@
 // This file provides the Win32 specific implementation of the Signals class.
 //
 //===----------------------------------------------------------------------===//
-#include "llvm/Support/ConvertUTF.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/Path.h"
 #include "llvm/Support/Process.h"
@@ -191,7 +190,7 @@ using namespace llvm;
 static LONG WINAPI LLVMUnhandledExceptionFilter(LPEXCEPTION_POINTERS ep);
 static BOOL WINAPI LLVMConsoleCtrlHandler(DWORD dwCtrlType);
 
-// The function to call if ctrl-c is pressed.
+// InterruptFunction - The function to call if ctrl-c is pressed.
 static void (*InterruptFunction)() = 0;
 
 static std::vector<std::string> *FilesToRemove = NULL;
@@ -388,9 +387,9 @@ namespace llvm {
 //===----------------------------------------------------------------------===//
 
 #ifdef _MSC_VER
-/// Emulates hitting "retry" from an "abort, retry, ignore" CRT debug report
-/// dialog. "retry" raises an exception which ultimately triggers our stack
-/// dumper.
+/// AvoidMessageBoxHook - Emulates hitting "retry" from an "abort, retry,
+/// ignore" CRT debug report dialog.  "retry" raises an exception which
+/// ultimately triggers our stack dumper.
 static LLVM_ATTRIBUTE_UNUSED int
 AvoidMessageBoxHook(int ReportType, char *Message, int *Return) {
   // Set *Return to the retry code for the return value of _CrtDbgReport:
@@ -448,7 +447,7 @@ static void RegisterHandler() {
   // else multi-threading problems will ensue.
 }
 
-// The public API
+// RemoveFileOnSignal - The public API
 bool sys::RemoveFileOnSignal(StringRef Filename, std::string* ErrMsg) {
   RegisterHandler();
 
@@ -467,7 +466,7 @@ bool sys::RemoveFileOnSignal(StringRef Filename, std::string* ErrMsg) {
   return false;
 }
 
-// The public API
+// DontRemoveFileOnSignal - The public API
 void sys::DontRemoveFileOnSignal(StringRef Filename) {
   if (FilesToRemove == NULL)
     return;
@@ -501,8 +500,8 @@ void sys::DisableSystemDialogsOnCrash() {
   _set_error_mode(_OUT_TO_STDERR);
 }
 
-/// When an error signal (such as SIGABRT or SIGSEGV) is delivered to the
-/// process, print a stack trace and then exit.
+/// PrintStackTraceOnErrorSignal - When an error signal (such as SIGABRT or
+/// SIGSEGV) is delivered to the process, print a stack trace and then exit.
 void sys::PrintStackTraceOnErrorSignal(StringRef Argv0,
                                        bool DisableCrashReporting) {
   ::Argv0 = Argv0;
@@ -558,12 +557,11 @@ void llvm::sys::SetInterruptFunction(void (*IF)()) {
 }
 
 
-/// Add a function to be called when a signal is delivered to the process. The
-/// handler can have a cookie passed to it to identify what instance of the
-/// handler it is.
-void llvm::sys::AddSignalHandler(sys::SignalHandlerCallback FnPtr,
-                                 void *Cookie) {
-  insertSignalHandler(FnPtr, Cookie);
+/// AddSignalHandler - Add a function to be called when a signal is delivered
+/// to the process.  The handler can have a cookie passed to it to identify
+/// what instance of the handler it is.
+void llvm::sys::AddSignalHandler(void (*FnPtr)(void *), void *Cookie) {
+  CallBacksToRun->push_back(std::make_pair(FnPtr, Cookie));
   RegisterHandler();
   LeaveCriticalSection(&CriticalSection);
 }
@@ -597,7 +595,7 @@ void llvm::sys::RunInterruptHandlers() {
   Cleanup();
 }
 
-/// Find the Windows Registry Key for a given location.
+/// \brief Find the Windows Registry Key for a given location.
 ///
 /// \returns a valid HKEY if the location exists, else NULL.
 static HKEY FindWERKey(const llvm::Twine &RegistryLocation) {
@@ -610,7 +608,7 @@ static HKEY FindWERKey(const llvm::Twine &RegistryLocation) {
   return Key;
 }
 
-/// Populate ResultDirectory with the value for "DumpFolder" for a given
+/// \brief Populate ResultDirectory with the value for "DumpFolder" for a given
 /// Windows Registry key.
 ///
 /// \returns true if a valid value for DumpFolder exists, false otherwise.
@@ -651,7 +649,7 @@ static bool GetDumpFolder(HKEY Key,
   return true;
 }
 
-/// Populate ResultType with a valid MINIDUMP_TYPE based on the value of
+/// \brief Populate ResultType with a valid MINIDUMP_TYPE based on the value of
 /// "DumpType" for a given Windows Registry key.
 ///
 /// According to
@@ -698,7 +696,7 @@ static bool GetDumpType(HKEY Key, MINIDUMP_TYPE &ResultType) {
   return true;
 }
 
-/// Write a Windows dump file containing process information that can be
+/// \brief Write a Windows dump file containing process information that can be
 /// used for post-mortem debugging.
 ///
 /// \returns zero error code if a mini dump created, actual error code

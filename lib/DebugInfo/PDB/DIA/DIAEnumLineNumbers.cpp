@@ -42,3 +42,10 @@ std::unique_ptr<IPDBLineNumber> DIAEnumLineNumbers::getNext() {
 }
 
 void DIAEnumLineNumbers::reset() { Enumerator->Reset(); }
+
+DIAEnumLineNumbers *DIAEnumLineNumbers::clone() const {
+  CComPtr<IDiaEnumLineNumbers> EnumeratorClone;
+  if (S_OK != Enumerator->Clone(&EnumeratorClone))
+    return nullptr;
+  return new DIAEnumLineNumbers(EnumeratorClone);
+}

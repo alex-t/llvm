@@ -35,7 +35,7 @@ class ToolOutputFile {
     /// The flag which indicates whether we should not delete the file.
     bool Keep;
 
-    explicit CleanupInstaller(StringRef Filename);
+    explicit CleanupInstaller(StringRef ilename);
     ~CleanupInstaller();
   } Installer;
 

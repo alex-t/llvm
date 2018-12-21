@@ -53,9 +53,7 @@ public:
   PDBStringTableBuilder &getStringTableBuilder();
   GSIStreamBuilder &getGsiBuilder();
 
-  // If HashPDBContentsToGUID is true on the InfoStreamBuilder, Guid is filled
-  // with the computed PDB GUID on return.
-  Error commit(StringRef Filename, codeview::GUID *Guid);
+  Error commit(StringRef Filename);
 
   Expected<uint32_t> getNamedStreamIndex(StringRef Name) const;
   Error addNamedStream(StringRef Name, StringRef Data);
@@ -78,7 +76,7 @@ private:
     std::unique_ptr<MemoryBuffer> Content;
   };
 
-  Error finalizeMsfLayout();
+  Expected<msf::MSFLayout> finalizeMsfLayout();
   Expected<uint32_t> allocateNamedStream(StringRef Name, uint32_t Size);
 
   void commitFpm(WritableBinaryStream &MsfBuffer, const msf::MSFLayout &Layout);

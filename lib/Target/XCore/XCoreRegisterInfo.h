@@ -32,6 +32,8 @@ public:
   const MCPhysReg *getCalleeSavedRegs(const MachineFunction *MF) const override;
 
   BitVector getReservedRegs(const MachineFunction &MF) const override;
+  
+  bool enableMultipleCopyHints() const override { return true; }
 
   bool requiresRegisterScavenging(const MachineFunction &MF) const override;
 

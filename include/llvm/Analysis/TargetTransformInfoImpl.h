@@ -27,7 +27,7 @@
 
 namespace llvm {
 
-/// Base class for use as a mix-in that aids implementing
+/// \brief Base class for use as a mix-in that aids implementing
 /// a TargetTransformInfo-compatible class.
 class TargetTransformInfoImplBase {
 protected:
@@ -155,12 +155,8 @@ public:
     case Intrinsic::sideeffect:
     case Intrinsic::dbg_declare:
     case Intrinsic::dbg_value:
-    case Intrinsic::dbg_label:
     case Intrinsic::invariant_start:
     case Intrinsic::invariant_end:
-    case Intrinsic::launder_invariant_group:
-    case Intrinsic::strip_invariant_group:
-    case Intrinsic::is_constant:
     case Intrinsic::lifetime_start:
     case Intrinsic::lifetime_end:
     case Intrinsic::objectsize:
@@ -314,8 +310,6 @@ public:
 
   bool enableInterleavedAccessVectorization() { return false; }
 
-  bool enableMaskedInterleavedAccessVectorization() { return false; }
-
   bool isFPVectorizationPotentiallyUnsafe() { return false; }
 
   bool allowsMisalignedMemoryAccesses(LLVMContext &Context,
@@ -331,7 +325,7 @@ public:
   bool haveFastSqrt(Type *Ty) { return false; }
 
   bool isFCmpOrdCheaperThanFCmpZero(Type *Ty) { return true; }
-
+  
   unsigned getFPOpCost(Type *Ty) { return TargetTransformInfo::TCC_Basic; }
 
   int getIntImmCodeSizeCost(unsigned Opcode, unsigned Idx, const APInt &Imm,
@@ -453,9 +447,8 @@ public:
   unsigned getInterleavedMemoryOpCost(unsigned Opcode, Type *VecTy,
                                       unsigned Factor,
                                       ArrayRef<unsigned> Indices,
-                                      unsigned Alignment, unsigned AddressSpace,
-                                      bool UseMaskForCond = false,
-                                      bool UseMaskForGaps = false) {
+                                      unsigned Alignment,
+                                      unsigned AddressSpace) {
     return 1;
   }
 
@@ -658,7 +651,7 @@ protected:
   }
 };
 
-/// CRTP base class for use as a mix-in that aids implementing
+/// \brief CRTP base class for use as a mix-in that aids implementing
 /// a TargetTransformInfo-compatible class.
 template <typename T>
 class TargetTransformInfoImplCRTPBase : public TargetTransformInfoImplBase {

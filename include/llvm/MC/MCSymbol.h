@@ -85,7 +85,7 @@ protected:
   /// "Lfoo" or ".foo".
   unsigned IsTemporary : 1;
 
-  /// True if this symbol can be redefined.
+  /// \brief True if this symbol can be redefined.
   unsigned IsRedefinable : 1;
 
   /// IsUsed - True if this symbol has been used.
@@ -141,7 +141,7 @@ protected:
   friend class MCExpr;
   friend class MCContext;
 
-  /// The name for a symbol.
+  /// \brief The name for a symbol.
   /// MCSymbol contains a uint64_t so is probably aligned to 8.  On a 32-bit
   /// system, the name is a pointer so isn't going to satisfy the 8 byte
   /// alignment of uint64_t.  Account for that here.
@@ -168,11 +168,11 @@ protected:
 
 private:
   void operator delete(void *);
-  /// Placement delete - required by std, but never called.
+  /// \brief Placement delete - required by std, but never called.
   void operator delete(void*, unsigned) {
     llvm_unreachable("Constructor throws?");
   }
-  /// Placement delete - required by std, but never called.
+  /// \brief Placement delete - required by std, but never called.
   void operator delete(void*, unsigned, bool) {
     llvm_unreachable("Constructor throws?");
   }
@@ -185,7 +185,7 @@ private:
     return nullptr;
   }
 
-  /// Get a reference to the name field.  Requires that we have a name
+  /// \brief Get a reference to the name field.  Requires that we have a name
   const StringMapEntry<bool> *&getNameEntryPtr() {
     assert(FragmentAndHasName.getInt() && "Name is required");
     NameEntryStorageTy *Name = reinterpret_cast<NameEntryStorageTy *>(this);
@@ -222,11 +222,11 @@ public:
   /// isUsed - Check if this is used.
   bool isUsed() const { return IsUsed; }
 
-  /// Check if this symbol is redefinable.
+  /// \brief Check if this symbol is redefinable.
   bool isRedefinable() const { return IsRedefinable; }
-  /// Mark this symbol as redefinable.
+  /// \brief Mark this symbol as redefinable.
   void setRedefinable(bool Value) { IsRedefinable = Value; }
-  /// Prepare this symbol to be redefined.
+  /// \brief Prepare this symbol to be redefined.
   void redefineIfPossible() {
     if (IsRedefinable) {
       if (SymbolContents == SymContentsVariable) {
@@ -315,8 +315,6 @@ public:
   void setIndex(uint32_t Value) const {
     Index = Value;
   }
-
-  bool isUnset() const { return SymbolContents == SymContentsUnset; }
 
   uint64_t getOffset() const {
     assert((SymbolContents == SymContentsUnset ||

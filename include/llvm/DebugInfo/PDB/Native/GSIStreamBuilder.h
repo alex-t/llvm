@@ -61,6 +61,7 @@ public:
   void addGlobalSymbol(const codeview::ProcRefSym &Sym);
   void addGlobalSymbol(const codeview::DataSym &Sym);
   void addGlobalSymbol(const codeview::ConstantSym &Sym);
+  void addGlobalSymbol(const codeview::UDTSym &Sym);
   void addGlobalSymbol(const codeview::CVSymbol &Sym);
 
 private:

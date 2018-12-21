@@ -31,6 +31,10 @@
 
 using namespace llvm;
 
+namespace llvm {
+void initializeShadowCallStackPass(PassRegistry &);
+}
+
 namespace {
 
 class ShadowCallStack : public MachineFunctionPass {

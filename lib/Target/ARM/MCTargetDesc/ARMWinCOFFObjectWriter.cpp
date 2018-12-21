@@ -75,8 +75,8 @@ unsigned ARMWinCOFFObjectWriter::getRelocType(MCContext &Ctx,
   case ARM::fixup_t2_condbranch:
     return COFF::IMAGE_REL_ARM_BRANCH20T;
   case ARM::fixup_t2_uncondbranch:
-  case ARM::fixup_arm_thumb_bl:
     return COFF::IMAGE_REL_ARM_BRANCH24T;
+  case ARM::fixup_arm_thumb_bl:
   case ARM::fixup_arm_thumb_blx:
     return COFF::IMAGE_REL_ARM_BLX23T;
   case ARM::fixup_t2_movw_lo16:
@@ -91,9 +91,10 @@ bool ARMWinCOFFObjectWriter::recordRelocation(const MCFixup &Fixup) const {
 
 namespace llvm {
 
-std::unique_ptr<MCObjectTargetWriter>
-createARMWinCOFFObjectWriter(bool Is64Bit) {
-  return llvm::make_unique<ARMWinCOFFObjectWriter>(Is64Bit);
+std::unique_ptr<MCObjectWriter>
+createARMWinCOFFObjectWriter(raw_pwrite_stream &OS, bool Is64Bit) {
+  auto MOTW = llvm::make_unique<ARMWinCOFFObjectWriter>(Is64Bit);
+  return createWinCOFFObjectWriter(std::move(MOTW), OS);
 }
 
 } // end namespace llvm

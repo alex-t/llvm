@@ -8,18 +8,20 @@
 //===----------------------------------------------------------------------===//
 ///
 /// \file
-/// WebAssembly except_ref operand code-gen constructs.
+/// \brief WebAssembly except_ref operand code-gen constructs.
 ///
 //===----------------------------------------------------------------------===//
 
-defm SELECT_EXCEPT_REF : I<(outs EXCEPT_REF:$dst),
-                           (ins EXCEPT_REF:$lhs, EXCEPT_REF:$rhs, I32:$cond),
-                           (outs), (ins),
-                           [(set EXCEPT_REF:$dst,
-                            (select I32:$cond, EXCEPT_REF:$lhs,
-                             EXCEPT_REF:$rhs))],
-                           "except_ref.select\t$dst, $lhs, $rhs, $cond",
-                           "except_ref.select", 0x1b>;
+let Defs = [ARGUMENTS] in {
+
+def SELECT_EXCEPT_REF : I<(outs EXCEPT_REF:$dst),
+                          (ins EXCEPT_REF:$lhs, EXCEPT_REF:$rhs, I32:$cond),
+                          [(set EXCEPT_REF:$dst,
+                           (select I32:$cond, EXCEPT_REF:$lhs,
+                            EXCEPT_REF:$rhs))],
+                          "except_ref.select\t$dst, $lhs, $rhs, $cond", 0x1b>;
+
+} // Defs = [ARGUMENTS]
 
 def : Pat<(select (i32 (setne I32:$cond, 0)), EXCEPT_REF:$lhs, EXCEPT_REF:$rhs),
           (SELECT_EXCEPT_REF EXCEPT_REF:$lhs, EXCEPT_REF:$rhs, I32:$cond)>;

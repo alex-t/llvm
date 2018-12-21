@@ -359,7 +359,7 @@ struct PartialInlinerLegacyPass : public ModulePass {
     TargetTransformInfoWrapperPass *TTIWP =
         &getAnalysis<TargetTransformInfoWrapperPass>();
     ProfileSummaryInfo *PSI =
-        &getAnalysis<ProfileSummaryInfoWrapperPass>().getPSI();
+        getAnalysis<ProfileSummaryInfoWrapperPass>().getPSI();
 
     std::function<AssumptionCache &(Function &)> GetAssumptionCache =
         [&ACT](Function &F) -> AssumptionCache & {
@@ -403,7 +403,8 @@ PartialInlinerImpl::computeOutliningColdRegionsInfo(Function *F,
 
   auto IsSingleEntry = [](SmallVectorImpl<BasicBlock *> &BlockList) {
     BasicBlock *Dom = BlockList.front();
-    return BlockList.size() > 1 && Dom->hasNPredecessors(1);
+    return BlockList.size() > 1 &&
+           std::distance(pred_begin(Dom), pred_end(Dom)) == 1;
   };
 
   auto IsSingleExit =
@@ -468,7 +469,7 @@ PartialInlinerImpl::computeOutliningColdRegionsInfo(Function *F,
     // Only consider regions with predecessor blocks that are considered
     // not-cold (default: part of the top 99.99% of all block counters)
     // AND greater than our minimum block execution count (default: 100).
-    if (PSI->isColdBlock(thisBB, BFI) ||
+    if (PSI->isColdBB(thisBB, BFI) ||
         BBProfileCount(thisBB) < MinBlockCounterExecution)
       continue;
     for (auto SI = succ_begin(thisBB); SI != succ_end(thisBB); ++SI) {
@@ -555,8 +556,12 @@ PartialInlinerImpl::computeOutliningInfo(Function *F) {
     return is_contained(successors(BB), Succ);
   };
 
+  auto SuccSize = [](BasicBlock *BB) {
+    return std::distance(succ_begin(BB), succ_end(BB));
+  };
+
   auto IsReturnBlock = [](BasicBlock *BB) {
-    Instruction *TI = BB->getTerminator();
+    TerminatorInst *TI = BB->getTerminator();
     return isa<ReturnInst>(TI);
   };
 
@@ -591,7 +596,7 @@ PartialInlinerImpl::computeOutliningInfo(Function *F) {
     if (OutliningInfo->GetNumInlinedBlocks() >= MaxNumInlineBlocks)
       break;
 
-    if (succ_size(CurrEntry) != 2)
+    if (SuccSize(CurrEntry) != 2)
       break;
 
     BasicBlock *Succ1 = *succ_begin(CurrEntry);
@@ -665,7 +670,7 @@ PartialInlinerImpl::computeOutliningInfo(Function *F) {
   // peeling off dominating blocks from the outlining region:
   while (OutliningInfo->GetNumInlinedBlocks() < MaxNumInlineBlocks) {
     BasicBlock *Cand = OutliningInfo->NonReturnBlock;
-    if (succ_size(Cand) != 2)
+    if (SuccSize(Cand) != 2)
       break;
 
     if (HasNonEntryPred(Cand))
@@ -834,41 +839,42 @@ bool PartialInlinerImpl::shouldPartialInline(
 int PartialInlinerImpl::computeBBInlineCost(BasicBlock *BB) {
   int InlineCost = 0;
   const DataLayout &DL = BB->getParent()->getParent()->getDataLayout();
-  for (Instruction &I : BB->instructionsWithoutDebug()) {
-    // Skip free instructions.
-    switch (I.getOpcode()) {
+  for (BasicBlock::iterator I = BB->begin(), E = BB->end(); I != E; ++I) {
+    if (isa<DbgInfoIntrinsic>(I))
+      continue;
+
+    switch (I->getOpcode()) {
     case Instruction::BitCast:
     case Instruction::PtrToInt:
     case Instruction::IntToPtr:
     case Instruction::Alloca:
-    case Instruction::PHI:
       continue;
     case Instruction::GetElementPtr:
-      if (cast<GetElementPtrInst>(&I)->hasAllZeroIndices())
+      if (cast<GetElementPtrInst>(I)->hasAllZeroIndices())
         continue;
       break;
     default:
       break;
     }
 
-    IntrinsicInst *IntrInst = dyn_cast<IntrinsicInst>(&I);
+    IntrinsicInst *IntrInst = dyn_cast<IntrinsicInst>(I);
     if (IntrInst) {
       if (IntrInst->getIntrinsicID() == Intrinsic::lifetime_start ||
           IntrInst->getIntrinsicID() == Intrinsic::lifetime_end)
         continue;
     }
 
-    if (CallInst *CI = dyn_cast<CallInst>(&I)) {
+    if (CallInst *CI = dyn_cast<CallInst>(I)) {
       InlineCost += getCallsiteCost(CallSite(CI), DL);
       continue;
     }
 
-    if (InvokeInst *II = dyn_cast<InvokeInst>(&I)) {
+    if (InvokeInst *II = dyn_cast<InvokeInst>(I)) {
       InlineCost += getCallsiteCost(CallSite(II), DL);
       continue;
     }
 
-    if (SwitchInst *SI = dyn_cast<SwitchInst>(&I)) {
+    if (SwitchInst *SI = dyn_cast<SwitchInst>(I)) {
       InlineCost += (SI->getNumCases() + 1) * InlineConstants::InstrCost;
       continue;
     }
@@ -1250,7 +1256,7 @@ std::pair<bool, Function *> PartialInlinerImpl::unswitchFunction(Function *F) {
   if (PSI->isFunctionEntryCold(F))
     return {false, nullptr};
 
-  if (empty(F->users()))
+  if (F->user_begin() == F->user_end())
     return {false, nullptr};
 
   OptimizationRemarkEmitter ORE(F);
@@ -1356,7 +1362,7 @@ bool PartialInlinerImpl::tryPartialInline(FunctionCloner &Cloner) {
     return false;
   }
 
-  assert(empty(Cloner.OrigFunc->users()) &&
+  assert(Cloner.OrigFunc->user_begin() == Cloner.OrigFunc->user_end() &&
          "F's users should all be replaced!");
 
   std::vector<User *> Users(Cloner.ClonedFunc->user_begin(),
@@ -1460,7 +1466,9 @@ bool PartialInlinerImpl::run(Module &M) {
     std::pair<bool, Function * > Result = unswitchFunction(CurrFunc);
     if (Result.second)
       Worklist.push_back(Result.second);
-    Changed |= Result.first;
+    if (Result.first) {
+      Changed = true;
+    }
   }
 
   return Changed;

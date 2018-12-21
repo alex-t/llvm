@@ -295,7 +295,7 @@ uint64_t SystemZLongBranch::initMBBInfo() {
 
     // Add the terminators.
     while (MI != End) {
-      if (!MI->isDebugInstr()) {
+      if (!MI->isDebugValue()) {
         assert(MI->isTerminator() && "Terminator followed by non-terminator");
         Terminators.push_back(describeTerminator(*MI));
         skipTerminator(Position, Terminators.back(), false);

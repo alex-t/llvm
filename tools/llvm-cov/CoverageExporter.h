@@ -21,16 +21,16 @@
 
 namespace llvm {
 
-/// Exports the code coverage information.
+/// \brief Exports the code coverage information.
 class CoverageExporter {
 protected:
-  /// The full CoverageMapping object to export.
+  /// \brief The full CoverageMapping object to export.
   const coverage::CoverageMapping &Coverage;
 
-  /// The options passed to the tool.
+  /// \brief The options passed to the tool.
   const CoverageViewOptions &Options;
 
-  /// Output stream to print to.
+  /// \brief Output stream to print JSON to.
   raw_ostream &OS;
 
   CoverageExporter(const coverage::CoverageMapping &CoverageMapping,
@@ -40,11 +40,11 @@ protected:
 public:
   virtual ~CoverageExporter(){};
 
-  /// Render the CoverageMapping object.
-  virtual void renderRoot(const CoverageFilters &IgnoreFilters) = 0;
+  /// \brief Render the CoverageMapping object.
+  virtual void renderRoot(const CoverageFilters &IgnoreFilenameFilters) = 0;
 
-  /// Render the CoverageMapping object for specified source files.
-  virtual void renderRoot(ArrayRef<std::string> SourceFiles) = 0;
+  /// \brief Render the CoverageMapping object for specified source files.
+  virtual void renderRoot(const std::vector<std::string> &SourceFiles) = 0;
 };
 
 } // end namespace llvm

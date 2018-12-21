@@ -85,16 +85,6 @@ Expected<FileAnalysis> FileAnalysis::Create(StringRef Filename) {
   if (!Analysis.Object)
     return make_error<UnsupportedDisassembly>("Failed to cast object");
 
-  switch (Analysis.Object->getArch()) {
-    case Triple::x86:
-    case Triple::x86_64:
-    case Triple::aarch64:
-    case Triple::aarch64_be:
-      break;
-    default:
-      return make_error<UnsupportedDisassembly>("Unsupported architecture.");
-  }
-
   Analysis.ObjectTriple = Analysis.Object->makeTriple();
   Analysis.Features = Analysis.Object->getFeatures();
 
@@ -104,9 +94,6 @@ Expected<FileAnalysis> FileAnalysis::Create(StringRef Filename) {
 
   if (auto SectionParseResponse = Analysis.parseCodeSections())
     return std::move(SectionParseResponse);
-
-  if (auto SymbolTableParseResponse = Analysis.parseSymbolTable())
-    return std::move(SymbolTableParseResponse);
 
   return std::move(Analysis);
 }
@@ -167,19 +154,7 @@ const Instr &FileAnalysis::getInstructionOrDie(uint64_t Address) const {
 }
 
 bool FileAnalysis::isCFITrap(const Instr &InstrMeta) const {
-  const auto &InstrDesc = MII->get(InstrMeta.Instruction.getOpcode());
-  return InstrDesc.isTrap() || willTrapOnCFIViolation(InstrMeta);
-}
-
-bool FileAnalysis::willTrapOnCFIViolation(const Instr &InstrMeta) const {
-  const auto &InstrDesc = MII->get(InstrMeta.Instruction.getOpcode());
-  if (!InstrDesc.isCall())
-    return false;
-  uint64_t Target;
-  if (!MIA->evaluateBranch(InstrMeta.Instruction, InstrMeta.VMAddress,
-                           InstrMeta.InstructionSize, Target))
-    return false;
-  return TrapOnFailFunctionAddresses.count(Target) > 0;
+  return MII->getName(InstrMeta.Instruction.getOpcode()) == "TRAP";
 }
 
 bool FileAnalysis::canFallThrough(const Instr &InstrMeta) const {
@@ -321,38 +296,20 @@ uint64_t FileAnalysis::indirectCFOperandClobber(const GraphResult &Graph) const 
     else
       Node = Branch.Fallthrough;
 
-    // Some architectures (e.g., AArch64) cannot load in an indirect branch, so
-    // we allow them one load.
-    bool canLoad = !MII->get(IndirectCF.Instruction.getOpcode()).mayLoad();
-
-    // We walk backwards from the indirect CF.  It is the last node returned by
-    // Graph.flattenAddress, so we skip it since we already handled it.
-    DenseSet<unsigned> CurRegisterNumbers = RegisterNumbers;
-    std::vector<uint64_t> Nodes = Graph.flattenAddress(Node);
-    for (auto I = Nodes.rbegin() + 1, E = Nodes.rend(); I != E; ++I) {
-      Node = *I;
+    while (Node != Graph.BaseAddress) {
       const Instr &NodeInstr = getInstructionOrDie(Node);
       const auto &InstrDesc = MII->get(NodeInstr.Instruction.getOpcode());
 
-      for (auto RI = CurRegisterNumbers.begin(), RE = CurRegisterNumbers.end();
-           RI != RE; ++RI) {
-        unsigned RegNum = *RI;
+      for (unsigned RegNum : RegisterNumbers) {
         if (InstrDesc.hasDefOfPhysReg(NodeInstr.Instruction, RegNum,
-                                      *RegisterInfo)) {
-          if (!canLoad || !InstrDesc.mayLoad())
-            return Node;
-          canLoad = false;
-          CurRegisterNumbers.erase(RI);
-          // Add the registers this load reads to those we check for clobbers.
-          for (unsigned i = InstrDesc.getNumDefs(),
-                        e = InstrDesc.getNumOperands(); i != e; i++) {
-            const auto Operand = NodeInstr.Instruction.getOperand(i);
-            if (Operand.isReg())
-              CurRegisterNumbers.insert(Operand.getReg());
-          }
-          break;
-        }
+                                      *RegisterInfo))
+          return Node;
       }
+
+      const auto &KV = Graph.IntermediateNodes.find(Node);
+      assert((KV != Graph.IntermediateNodes.end()) &&
+             "Could not get next node.");
+      Node = KV->second;
     }
   }
 
@@ -445,12 +402,6 @@ Error FileAnalysis::parseCodeSections() {
     if (!(object::ELFSectionRef(Section).getFlags() & ELF::SHF_EXECINSTR))
       continue;
 
-    // Avoid checking the PLT since it produces spurious failures on AArch64
-    // when ignoring DWARF data.
-    StringRef SectionName;
-    if (!Section.getName(SectionName) && SectionName == ".plt")
-      continue;
-
     StringRef SectionContents;
     if (Section.getContents(SectionContents))
       return make_error<StringError>("Failed to retrieve section contents",
@@ -505,9 +456,6 @@ void FileAnalysis::parseSectionContents(ArrayRef<uint8_t> SectionBytes,
     if (!usesRegisterOperand(InstrMeta))
       continue;
 
-    if (InstrDesc.isReturn())
-      continue;
-
     // Check if this instruction exists in the range of the DWARF metadata.
     if (!IgnoreDWARFFlag) {
       auto LineInfo =
@@ -536,40 +484,6 @@ void FileAnalysis::addInstruction(const Instr &Instruction) {
            << ": Instruction at this address already exists.\n";
     exit(EXIT_FAILURE);
   }
-}
-
-Error FileAnalysis::parseSymbolTable() {
-  // Functions that will trap on CFI violations.
-  SmallSet<StringRef, 4> TrapOnFailFunctions;
-  TrapOnFailFunctions.insert("__cfi_slowpath");
-  TrapOnFailFunctions.insert("__cfi_slowpath_diag");
-  TrapOnFailFunctions.insert("abort");
-
-  // Look through the list of symbols for functions that will trap on CFI
-  // violations.
-  for (auto &Sym : Object->symbols()) {
-    auto SymNameOrErr = Sym.getName();
-    if (!SymNameOrErr)
-      consumeError(SymNameOrErr.takeError());
-    else if (TrapOnFailFunctions.count(*SymNameOrErr) > 0) {
-      auto AddrOrErr = Sym.getAddress();
-      if (!AddrOrErr)
-        consumeError(AddrOrErr.takeError());
-      else
-        TrapOnFailFunctionAddresses.insert(*AddrOrErr);
-    }
-  }
-  if (auto *ElfObject = dyn_cast<object::ELFObjectFileBase>(Object)) {
-    for (const auto &Addr : ElfObject->getPltAddresses()) {
-      object::SymbolRef Sym(Addr.first, Object);
-      auto SymNameOrErr = Sym.getName();
-      if (!SymNameOrErr)
-        consumeError(SymNameOrErr.takeError());
-      else if (TrapOnFailFunctions.count(*SymNameOrErr) > 0)
-        TrapOnFailFunctionAddresses.insert(Addr.second);
-    }
-  }
-  return Error::success();
 }
 
 UnsupportedDisassembly::UnsupportedDisassembly(StringRef Text) : Text(Text) {}

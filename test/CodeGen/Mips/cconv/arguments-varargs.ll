@@ -1,22 +1,14 @@
-; RUN: llc -mtriple=mips-linux -relocation-model=static < %s \
-; RUN:   | FileCheck --check-prefixes=ALL,O32,O32-BE %s
-; RUN: llc -mtriple=mipsel-linux -relocation-model=static < %s \
-; RUN:   | FileCheck --check-prefixes=ALL,O32,O32-LE %s
+; RUN: llc -mtriple=mips-linux -relocation-model=static < %s | FileCheck --check-prefixes=ALL,O32,O32-BE %s
+; RUN: llc -mtriple=mipsel-linux -relocation-model=static < %s | FileCheck --check-prefixes=ALL,O32,O32-LE %s
 
-; RUN-TODO: llc -march=mips64 -relocation-model=static -target-abi o32 < %s \
-; RUN-TODO:   | FileCheck --check-prefixes=ALL,O32 %s
-; RUN-TODO: llc -march=mips64el -relocation-model=static -target-abi o32 < %s \
-; RUN-TODO:   | FileCheck --check-prefixes=ALL,O32 %s
+; RUN-TODO: llc -march=mips64 -relocation-model=static -target-abi o32 < %s | FileCheck --check-prefixes=ALL,O32 %s
+; RUN-TODO: llc -march=mips64el -relocation-model=static -target-abi o32 < %s | FileCheck --check-prefixes=ALL,O32 %s
 
-; RUN: llc -mtriple=mips64-linux -relocation-model=static -target-abi n32 < %s \
-; RUN:   | FileCheck --check-prefixes=ALL,NEW,N32,NEW-BE %s
-; RUN: llc -mtriple=mips64el-linux -relocation-model=static -target-abi n32 < %s \
-; RUN:   | FileCheck --check-prefixes=ALL,NEW,N32,NEW-LE %s
+; RUN: llc -mtriple=mips64-linux -relocation-model=static -target-abi n32 < %s | FileCheck --check-prefixes=ALL,NEW,N32,NEW-BE %s
+; RUN: llc -mtriple=mips64el-linux -relocation-model=static -target-abi n32 < %s | FileCheck --check-prefixes=ALL,NEW,N32,NEW-LE %s
 
-; RUN: llc -march=mips64 -relocation-model=static -target-abi n64 < %s \
-; RUN:   | FileCheck --check-prefixes=ALL,NEW,N64,NEW-BE %s
-; RUN: llc -march=mips64el -relocation-model=static -target-abi n64 < %s \
-; RUN:   | FileCheck --check-prefixes=ALL,NEW,N64,NEW-LE %s
+; RUN: llc -march=mips64 -relocation-model=static -target-abi n64 < %s | FileCheck --check-prefixes=ALL,NEW,N64,NEW-BE %s
+; RUN: llc -march=mips64el -relocation-model=static -target-abi n64 < %s | FileCheck --check-prefixes=ALL,NEW,N64,NEW-LE %s
 
 @hwords = global [3 x i16] zeroinitializer, align 1
 @words  = global [3 x i32] zeroinitializer, align 1
@@ -59,6 +51,9 @@ entry:
 
 ; N64-DAG:       daddiu [[VA:\$[0-9]+]], [[SP]], 8
 ; N64-DAG:       sd [[VA]], 0([[SP]])
+
+; Store [[VA]]
+; O32-DAG:       sw [[VA]], 0([[SP]])
 
 ; ALL: teqi $zero, 1
 
@@ -175,6 +170,9 @@ entry:
 ; N64-DAG:       daddiu [[VA:\$[0-9]+]], [[SP]], 8
 ; N64-DAG:       sd [[VA]], 0([[SP]])
 
+; Store [[VA]]
+; O32-DAG:       sw [[VA]], 0([[SP]])
+
 ; ALL: teqi $zero, 1
 
 ; Increment [[VA]]
@@ -289,6 +287,9 @@ entry:
 
 ; N64-DAG:       daddiu [[VA:\$[0-9]+]], [[SP]], 8
 ; N64-DAG:       sd [[VA]], 0([[SP]])
+
+; Store [[VA]]
+; O32-DAG:       sw [[VA]], 0([[SP]])
 
 ; ALL: teqi $zero, 1
 
@@ -412,6 +413,9 @@ entry:
 ; N64-DAG:       daddiu [[VA:\$[0-9]+]], [[SP]], 8
 ; N64-DAG:       sd [[VA]], 0([[SP]])
 
+; Store [[VA]]
+; O32-DAG:       sw [[VA]], 0([[SP]])
+
 ; ALL: teqi $zero, 1
 
 ; Increment [[VA]]
@@ -527,6 +531,9 @@ entry:
 ; N64-DAG:       daddiu [[VA:\$[0-9]+]], [[SP]], 8
 ; N64-DAG:       sd [[VA]], 0([[SP]])
 
+; Store [[VA]]
+; O32-DAG:       sw [[VA]], 0([[SP]])
+
 ; ALL: teqi $zero, 1
 
 ; Increment [[VA]]
@@ -641,6 +648,9 @@ entry:
 
 ; N64-DAG:       daddiu [[VA:\$[0-9]+]], [[SP]], 8
 ; N64-DAG:       sd [[VA]], 0([[SP]])
+
+; Store [[VA]]
+; O32-DAG:       sw [[VA]], 0([[SP]])
 
 ; ALL: teqi $zero, 1
 
@@ -763,6 +773,9 @@ entry:
 ; N64-DAG:       daddiu [[VA:\$[0-9]+]], [[SP]], 8
 ; N64-DAG:       sd [[VA]], 0([[SP]])
 
+; Store [[VA]]
+; O32-DAG:       sw [[VA]], 0([[SP]])
+
 ; ALL: teqi $zero, 1
 
 ; Increment [[VA]]
@@ -877,6 +890,9 @@ entry:
 ; N64-DAG:       daddiu [[VA:\$[0-9]+]], [[SP]], 8
 ; N64-DAG:       sd [[VA]], 0([[SP]])
 
+; Store [[VA]]
+; O32-DAG:       sw [[VA]], 0([[SP]])
+
 ; ALL: teqi $zero, 1
 
 ; Increment [[VA]]
@@ -990,6 +1006,9 @@ entry:
 
 ; N64-DAG:       daddiu [[VA:\$[0-9]+]], [[SP]], 8
 ; N64-DAG:       sd [[VA]], 0([[SP]])
+
+; Store [[VA]]
+; O32-DAG:       sw [[VA]], 0([[SP]])
 
 ; ALL: teqi $zero, 1
 

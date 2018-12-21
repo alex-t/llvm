@@ -47,12 +47,10 @@ std::vector<unsigned> union_modes(const InfoByHwMode<InfoT> &A,
   for (const auto &P : B)
     U.insert(P.first);
   // Make sure that the default mode is last on the list.
-  bool HasDefault = false;
+  bool HasDefault = U.count(DefaultMode);
   for (unsigned M : U)
     if (M != DefaultMode)
       V.push_back(M);
-    else
-      HasDefault = true;
   if (HasDefault)
     V.push_back(DefaultMode);
   return V;

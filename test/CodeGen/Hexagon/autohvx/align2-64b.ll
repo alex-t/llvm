@@ -506,7 +506,8 @@ define <64 x i8> @test_56(<64 x i8> %v0, <64 x i8> %v1) #0 {
 }
 
 ; CHECK-LABEL: test_57:
-; CHECK: v0 = vlalign(v1,v0,#7)
+; CHECK: r[[REG57:[0-9]+]] = #57
+; CHECK: v0 = valign(v1,v0,r[[REG57]])
 ; CHECK: jumpr r31
 define <64 x i8> @test_57(<64 x i8> %v0, <64 x i8> %v1) #0 {
   %t0 = shufflevector <64 x i8> %v0, <64 x i8> %v1, <64 x i32><i32 57, i32 58, i32 59, i32 60, i32 61, i32 62, i32 63, i32 64, i32 65, i32 66, i32 67, i32 68, i32 69, i32 70, i32 71, i32 72, i32 73, i32 74, i32 75, i32 76, i32 77, i32 78, i32 79, i32 80, i32 81, i32 82, i32 83, i32 84, i32 85, i32 86, i32 87, i32 88, i32 89, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef>
@@ -514,7 +515,8 @@ define <64 x i8> @test_57(<64 x i8> %v0, <64 x i8> %v1) #0 {
 }
 
 ; CHECK-LABEL: test_58:
-; CHECK: v0 = vlalign(v1,v0,#6)
+; CHECK: r[[REG58:[0-9]+]] = #58
+; CHECK: v0 = valign(v1,v0,r[[REG58]])
 ; CHECK: jumpr r31
 define <64 x i8> @test_58(<64 x i8> %v0, <64 x i8> %v1) #0 {
   %t0 = shufflevector <64 x i8> %v0, <64 x i8> %v1, <64 x i32><i32 58, i32 59, i32 60, i32 61, i32 62, i32 63, i32 64, i32 65, i32 66, i32 67, i32 68, i32 69, i32 70, i32 71, i32 72, i32 73, i32 74, i32 75, i32 76, i32 77, i32 78, i32 79, i32 80, i32 81, i32 82, i32 83, i32 84, i32 85, i32 86, i32 87, i32 88, i32 89, i32 90, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef>
@@ -522,7 +524,8 @@ define <64 x i8> @test_58(<64 x i8> %v0, <64 x i8> %v1) #0 {
 }
 
 ; CHECK-LABEL: test_59:
-; CHECK: v0 = vlalign(v1,v0,#5)
+; CHECK: r[[REG59:[0-9]+]] = #59
+; CHECK: v0 = valign(v1,v0,r[[REG59]])
 ; CHECK: jumpr r31
 define <64 x i8> @test_59(<64 x i8> %v0, <64 x i8> %v1) #0 {
   %t0 = shufflevector <64 x i8> %v0, <64 x i8> %v1, <64 x i32><i32 59, i32 60, i32 61, i32 62, i32 63, i32 64, i32 65, i32 66, i32 67, i32 68, i32 69, i32 70, i32 71, i32 72, i32 73, i32 74, i32 75, i32 76, i32 77, i32 78, i32 79, i32 80, i32 81, i32 82, i32 83, i32 84, i32 85, i32 86, i32 87, i32 88, i32 89, i32 90, i32 91, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef>
@@ -530,7 +533,8 @@ define <64 x i8> @test_59(<64 x i8> %v0, <64 x i8> %v1) #0 {
 }
 
 ; CHECK-LABEL: test_60:
-; CHECK: v0 = vlalign(v1,v0,#4)
+; CHECK: r[[REG60:[0-9]+]] = #60
+; CHECK: v0 = valign(v1,v0,r[[REG60]])
 ; CHECK: jumpr r31
 define <64 x i8> @test_60(<64 x i8> %v0, <64 x i8> %v1) #0 {
   %t0 = shufflevector <64 x i8> %v0, <64 x i8> %v1, <64 x i32><i32 60, i32 61, i32 62, i32 63, i32 64, i32 65, i32 66, i32 67, i32 68, i32 69, i32 70, i32 71, i32 72, i32 73, i32 74, i32 75, i32 76, i32 77, i32 78, i32 79, i32 80, i32 81, i32 82, i32 83, i32 84, i32 85, i32 86, i32 87, i32 88, i32 89, i32 90, i32 91, i32 92, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef>
@@ -538,7 +542,8 @@ define <64 x i8> @test_60(<64 x i8> %v0, <64 x i8> %v1) #0 {
 }
 
 ; CHECK-LABEL: test_61:
-; CHECK: v0 = vlalign(v1,v0,#3)
+; CHECK: r[[REG61:[0-9]+]] = #61
+; CHECK: v0 = valign(v1,v0,r[[REG61]])
 ; CHECK: jumpr r31
 define <64 x i8> @test_61(<64 x i8> %v0, <64 x i8> %v1) #0 {
   %t0 = shufflevector <64 x i8> %v0, <64 x i8> %v1, <64 x i32><i32 61, i32 62, i32 63, i32 64, i32 65, i32 66, i32 67, i32 68, i32 69, i32 70, i32 71, i32 72, i32 73, i32 74, i32 75, i32 76, i32 77, i32 78, i32 79, i32 80, i32 81, i32 82, i32 83, i32 84, i32 85, i32 86, i32 87, i32 88, i32 89, i32 90, i32 91, i32 92, i32 93, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef>
@@ -546,7 +551,8 @@ define <64 x i8> @test_61(<64 x i8> %v0, <64 x i8> %v1) #0 {
 }
 
 ; CHECK-LABEL: test_62:
-; CHECK: v0 = vlalign(v1,v0,#2)
+; CHECK: r[[REG62:[0-9]+]] = #62
+; CHECK: v0 = valign(v1,v0,r[[REG62]])
 ; CHECK: jumpr r31
 define <64 x i8> @test_62(<64 x i8> %v0, <64 x i8> %v1) #0 {
   %t0 = shufflevector <64 x i8> %v0, <64 x i8> %v1, <64 x i32><i32 62, i32 63, i32 64, i32 65, i32 66, i32 67, i32 68, i32 69, i32 70, i32 71, i32 72, i32 73, i32 74, i32 75, i32 76, i32 77, i32 78, i32 79, i32 80, i32 81, i32 82, i32 83, i32 84, i32 85, i32 86, i32 87, i32 88, i32 89, i32 90, i32 91, i32 92, i32 93, i32 94, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef>
@@ -554,7 +560,8 @@ define <64 x i8> @test_62(<64 x i8> %v0, <64 x i8> %v1) #0 {
 }
 
 ; CHECK-LABEL: test_63:
-; CHECK: v0 = vlalign(v1,v0,#1)
+; CHECK: r[[REG63:[0-9]+]] = #63
+; CHECK: v0 = valign(v1,v0,r[[REG63]])
 ; CHECK: jumpr r31
 define <64 x i8> @test_63(<64 x i8> %v0, <64 x i8> %v1) #0 {
   %t0 = shufflevector <64 x i8> %v0, <64 x i8> %v1, <64 x i32><i32 63, i32 64, i32 65, i32 66, i32 67, i32 68, i32 69, i32 70, i32 71, i32 72, i32 73, i32 74, i32 75, i32 76, i32 77, i32 78, i32 79, i32 80, i32 81, i32 82, i32 83, i32 84, i32 85, i32 86, i32 87, i32 88, i32 89, i32 90, i32 91, i32 92, i32 93, i32 94, i32 95, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef>

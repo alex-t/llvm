@@ -58,7 +58,7 @@ private:
 public:
   void addNodeToList(MachineInstr *N);
   void removeNodeFromList(MachineInstr *N);
-  void transferNodesFromList(ilist_traits &FromList, instr_iterator First,
+  void transferNodesFromList(ilist_traits &OldList, instr_iterator First,
                              instr_iterator Last);
   void deleteNode(MachineInstr *MI);
 };
@@ -115,18 +115,13 @@ private:
   /// branch.
   bool AddressTaken = false;
 
-  /// Indicate that this basic block is the entry block of an EH scope, i.e.,
-  /// the block that used to have a catchpad or cleanuppad instruction in the
-  /// LLVM IR.
-  bool IsEHScopeEntry = false;
-
   /// Indicate that this basic block is the entry block of an EH funclet.
   bool IsEHFuncletEntry = false;
 
   /// Indicate that this basic block is the entry block of a cleanup funclet.
   bool IsCleanupFuncletEntry = false;
 
-  /// since getSymbol is a relatively heavy-weight operation, the symbol
+  /// \brief since getSymbol is a relatively heavy-weight operation, the symbol
   /// is only computed once and is cached.
   mutable MCSymbol *CachedMCSymbol = nullptr;
 
@@ -380,14 +375,6 @@ public:
 
   bool hasEHPadSuccessor() const;
 
-  /// Returns true if this is the entry block of an EH scope, i.e., the block
-  /// that used to have a catchpad or cleanuppad instruction in the LLVM IR.
-  bool isEHScopeEntry() const { return IsEHScopeEntry; }
-
-  /// Indicates if this is the entry block of an EH scope, i.e., the block that
-  /// that used to have a catchpad or cleanuppad instruction in the LLVM IR.
-  void setIsEHScopeEntry(bool V = true) { IsEHScopeEntry = V; }
-
   /// Returns true if this is the entry block of an EH funclet.
   bool isEHFuncletEntry() const { return IsEHFuncletEntry; }
 
@@ -477,11 +464,6 @@ public:
   /// probabilities may need to be normalized.
   void copySuccessor(MachineBasicBlock *Orig, succ_iterator I);
 
-  /// Split the old successor into old plus new and updates the probability
-  /// info.
-  void splitSuccessor(MachineBasicBlock *Old, MachineBasicBlock *New,
-                      bool NormalizeSuccProbs = false);
-
   /// Transfers all the successors from MBB to this machine basic block (i.e.,
   /// copies all the successors FromMBB and remove all the successors from
   /// FromMBB).
@@ -567,12 +549,6 @@ public:
   /// instruction.
   bool isReturnBlock() const {
     return !empty() && back().isReturn();
-  }
-
-  /// Convenience function that returns true if the bock ends in a EH scope
-  /// return instruction.
-  bool isEHScopeReturnBlock() const {
-    return !empty() && back().isEHScopeReturn();
   }
 
   /// Split the critical edge from this block to the given successor block, and
@@ -724,7 +700,7 @@ public:
                             bool IsCond);
 
   /// Find the next valid DebugLoc starting at MBBI, skipping any DBG_VALUE
-  /// and DBG_LABEL instructions.  Return UnknownLoc if there is none.
+  /// instructions.  Return UnknownLoc if there is none.
   DebugLoc findDebugLoc(instr_iterator MBBI);
   DebugLoc findDebugLoc(iterator MBBI) {
     return findDebugLoc(MBBI.getInstrIterator());
@@ -921,7 +897,7 @@ public:
 /// const_instr_iterator} and the respective reverse iterators.
 template<typename IterT>
 inline IterT skipDebugInstructionsForward(IterT It, IterT End) {
-  while (It != End && It->isDebugInstr())
+  while (It != End && It->isDebugValue())
     It++;
   return It;
 }
@@ -932,7 +908,7 @@ inline IterT skipDebugInstructionsForward(IterT It, IterT End) {
 /// const_instr_iterator} and the respective reverse iterators.
 template<class IterT>
 inline IterT skipDebugInstructionsBackward(IterT It, IterT Begin) {
-  while (It != Begin && It->isDebugInstr())
+  while (It != Begin && It->isDebugValue())
     It--;
   return It;
 }

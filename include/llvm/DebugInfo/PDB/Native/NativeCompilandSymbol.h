@@ -21,12 +21,11 @@ public:
   NativeCompilandSymbol(NativeSession &Session, SymIndexId SymbolId,
                         DbiModuleDescriptor MI);
 
-  void dump(raw_ostream &OS, int Indent, PdbSymbolIdField ShowIdFields,
-            PdbSymbolIdField RecurseIdFields) const override;
+  std::unique_ptr<NativeRawSymbol> clone() const override;
 
   PDB_SymType getSymTag() const override;
   bool isEditAndContinueEnabled() const override;
-  SymIndexId getLexicalParentId() const override;
+  uint32_t getLexicalParentId() const override;
   std::string getLibraryName() const override;
   std::string getName() const override;
 

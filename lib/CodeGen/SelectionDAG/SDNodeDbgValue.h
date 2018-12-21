@@ -24,7 +24,6 @@ class DIVariable;
 class DIExpression;
 class SDNode;
 class Value;
-class raw_ostream;
 
 /// Holds the information from a dbg_value node through SDISel.
 /// We do not use SDValue here to avoid including its header.
@@ -33,8 +32,7 @@ public:
   enum DbgValueKind {
     SDNODE = 0,             ///< Value is the result of an expression.
     CONST = 1,              ///< Value is a constant.
-    FRAMEIX = 2,            ///< Value is contents of a stack location.
-    VREG = 3                ///< Value is a virtual register.
+    FRAMEIX = 2             ///< Value is contents of a stack location.
   };
 private:
   union {
@@ -44,7 +42,6 @@ private:
     } s;
     const Value *Const;     ///< Valid for constants.
     unsigned FrameIx;       ///< Valid for stack objects.
-    unsigned VReg;          ///< Valid for registers.
   } u;
   DIVariable *Var;
   DIExpression *Expr;
@@ -53,7 +50,6 @@ private:
   enum DbgValueKind kind;
   bool IsIndirect;
   bool Invalid = false;
-  bool Emitted = false;
 
 public:
   /// Constructor for non-constants.
@@ -73,18 +69,12 @@ public:
     u.Const = C;
   }
 
-  /// Constructor for virtual registers and frame indices.
-  SDDbgValue(DIVariable *Var, DIExpression *Expr, unsigned VRegOrFrameIdx,
-             bool IsIndirect, DebugLoc DL, unsigned Order,
-             enum DbgValueKind Kind)
-      : Var(Var), Expr(Expr), DL(DL), Order(Order), IsIndirect(IsIndirect) {
-    assert((Kind == VREG || Kind == FRAMEIX) &&
-           "Invalid SDDbgValue constructor");
-    kind = Kind;
-    if (kind == VREG)
-      u.VReg = VRegOrFrameIdx;
-    else
-      u.FrameIx = VRegOrFrameIdx;
+  /// Constructor for frame indices.
+  SDDbgValue(DIVariable *Var, DIExpression *Expr, unsigned FI, DebugLoc dl,
+             unsigned O)
+      : Var(Var), Expr(Expr), DL(std::move(dl)), Order(O), IsIndirect(false) {
+    kind = FRAMEIX;
+    u.FrameIx = FI;
   }
 
   /// Returns the kind.
@@ -108,9 +98,6 @@ public:
   /// Returns the FrameIx for a stack object
   unsigned getFrameIx() const { assert (kind==FRAMEIX); return u.FrameIx; }
 
-  /// Returns the Virtual Register for a VReg
-  unsigned getVReg() const { assert (kind==VREG); return u.VReg; }
-
   /// Returns whether this is an indirect value.
   bool isIndirect() const { return IsIndirect; }
 
@@ -126,39 +113,6 @@ public:
   /// deleted.
   void setIsInvalidated() { Invalid = true; }
   bool isInvalidated() const { return Invalid; }
-
-  /// setIsEmitted / isEmitted - Getter/Setter for flag indicating that this
-  /// SDDbgValue has been emitted to an MBB.
-  void setIsEmitted() { Emitted = true; }
-  bool isEmitted() const { return Emitted; }
-
-  /// clearIsEmitted - Reset Emitted flag, for certain special cases where
-  /// dbg.addr is emitted twice.
-  void clearIsEmitted() { Emitted = false; }
-
-  LLVM_DUMP_METHOD void dump(raw_ostream &OS) const;
-};
-
-/// Holds the information from a dbg_label node through SDISel.
-/// We do not use SDValue here to avoid including its header.
-class SDDbgLabel {
-  MDNode *Label;
-  DebugLoc DL;
-  unsigned Order;
-
-public:
-  SDDbgLabel(MDNode *Label, DebugLoc dl, unsigned O)
-      : Label(Label), DL(std::move(dl)), Order(O) {}
-
-  /// Returns the MDNode pointer for the label.
-  MDNode *getLabel() const { return Label; }
-
-  /// Returns the DebugLoc.
-  DebugLoc getDebugLoc() const { return DL; }
-
-  /// Returns the SDNodeOrder.  This is the order of the preceding node in the
-  /// input.
-  unsigned getOrder() const { return Order; }
 };
 
 } // end llvm namespace

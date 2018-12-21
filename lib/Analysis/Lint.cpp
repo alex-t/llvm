@@ -165,13 +165,13 @@ namespace {
       }
     }
 
-    /// A check failed, so printout out the condition and the message.
+    /// \brief A check failed, so printout out the condition and the message.
     ///
     /// This provides a nice place to put a breakpoint if you want to see why
     /// something is not correct.
     void CheckFailed(const Twine &Message) { MessagesStr << Message << '\n'; }
 
-    /// A check failed (with values to print).
+    /// \brief A check failed (with values to print).
     ///
     /// This calls the Message-only version so that the above is easier to set
     /// a breakpoint on.

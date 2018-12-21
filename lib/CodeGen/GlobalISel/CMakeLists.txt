@@ -3,7 +3,6 @@ add_llvm_library(LLVMGlobalISel
         GlobalISel.cpp
         Combiner.cpp
         CombinerHelper.cpp
-        GISelChangeObserver.cpp
         IRTranslator.cpp
         InstructionSelect.cpp
         InstructionSelector.cpp

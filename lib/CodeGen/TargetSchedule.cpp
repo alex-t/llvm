@@ -261,13 +261,7 @@ TargetSchedModel::computeInstrLatency(const MCSchedClassDesc &SCDesc) const {
 unsigned TargetSchedModel::computeInstrLatency(unsigned Opcode) const {
   assert(hasInstrSchedModel() && "Only call this function with a SchedModel");
   unsigned SCIdx = TII->get(Opcode).getSchedClass();
-  return capLatency(SchedModel.computeInstrLatency(*STI, SCIdx));
-}
-
-unsigned TargetSchedModel::computeInstrLatency(const MCInst &Inst) const {
-  if (hasInstrSchedModel())
-    return capLatency(SchedModel.computeInstrLatency(*STI, *TII, Inst));
-  return computeInstrLatency(Inst.getOpcode());
+  return SchedModel.computeInstrLatency(*STI, SCIdx);
 }
 
 unsigned
@@ -322,7 +316,7 @@ computeOutputLatency(const MachineInstr *DefMI, unsigned DefOperIdx,
   return 0;
 }
 
-double
+Optional<double>
 TargetSchedModel::computeReciprocalThroughput(const MachineInstr *MI) const {
   if (hasInstrItineraries()) {
     unsigned SchedClass = MI->getDesc().getSchedClass();
@@ -332,11 +326,10 @@ TargetSchedModel::computeReciprocalThroughput(const MachineInstr *MI) const {
 
   if (hasInstrSchedModel())
     return MCSchedModel::getReciprocalThroughput(*STI, *resolveSchedClass(MI));
-
-  return 0.0;
+  return Optional<double>();
 }
 
-double
+Optional<double>
 TargetSchedModel::computeReciprocalThroughput(unsigned Opcode) const {
   unsigned SchedClass = TII->get(Opcode).getSchedClass();
   if (hasInstrItineraries())
@@ -347,14 +340,5 @@ TargetSchedModel::computeReciprocalThroughput(unsigned Opcode) const {
     if (SCDesc.isValid() && !SCDesc.isVariant())
       return MCSchedModel::getReciprocalThroughput(*STI, SCDesc);
   }
-
-  return 0.0;
+  return Optional<double>();
 }
-
-double
-TargetSchedModel::computeReciprocalThroughput(const MCInst &MI) const {
-  if (hasInstrSchedModel())
-    return SchedModel.getReciprocalThroughput(*STI, *TII, MI);
-  return computeReciprocalThroughput(MI.getOpcode());
-}
-

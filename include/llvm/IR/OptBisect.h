@@ -47,7 +47,7 @@ public:
 /// optimization-related problems.
 class OptBisect : public OptPassGate {
 public:
-  /// Default constructor, initializes the OptBisect state based on the
+  /// \brief Default constructor, initializes the OptBisect state based on the
   /// -opt-bisect-limit command line argument.
   ///
   /// By default, bisection is disabled.

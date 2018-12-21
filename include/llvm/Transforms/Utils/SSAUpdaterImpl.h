@@ -357,9 +357,10 @@ public:
       BBInfo *Info = *I;
 
       if (Info->DefBB != Info) {
-        // Record the available value to speed up subsequent uses of this
-        // SSAUpdater for the same value.
-        (*AvailableVals)[Info->BB] = Info->DefBB->AvailableVal;
+        // Record the available value at join nodes to speed up subsequent
+        // uses of this SSAUpdater for the same value.
+        if (Info->NumPreds > 1)
+          (*AvailableVals)[Info->BB] = Info->DefBB->AvailableVal;
         continue;
       }
 
@@ -378,7 +379,7 @@ public:
         Traits::AddPHIOperand(PHI, PredInfo->AvailableVal, Pred);
       }
 
-      LLVM_DEBUG(dbgs() << "  Inserted PHI: " << *PHI << "\n");
+      DEBUG(dbgs() << "  Inserted PHI: " << *PHI << "\n");
 
       // If the client wants to know about all new instructions, tell it.
       if (InsertedPHIs) InsertedPHIs->push_back(PHI);

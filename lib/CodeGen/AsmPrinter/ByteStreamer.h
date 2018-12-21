@@ -76,7 +76,7 @@ private:
   SmallVectorImpl<char> &Buffer;
   SmallVectorImpl<std::string> &Comments;
 
-  /// Only verbose textual output needs comments.  This will be set to
+  /// \brief Only verbose textual output needs comments.  This will be set to
   /// true for that case, and false otherwise.  If false, comments passed in to
   /// the emit methods will be ignored.
   bool GenerateComments;

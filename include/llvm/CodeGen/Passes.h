@@ -301,7 +301,7 @@ namespace llvm {
   /// StackSlotColoring - This pass performs stack slot coloring.
   extern char &StackSlotColoringID;
 
-  /// This pass lays out funclets contiguously.
+  /// \brief This pass lays out funclets contiguously.
   extern char &FuncletLayoutID;
 
   /// This pass inserts the XRay instrumentation sleds if they are supported by
@@ -311,7 +311,7 @@ namespace llvm {
   /// This pass inserts FEntry calls
   extern char &FEntryInserterID;
 
-  /// This pass implements the "patchable-function" attribute.
+  /// \brief This pass implements the "patchable-function" attribute.
   extern char &PatchableFunctionID;
 
   /// createStackProtectorPass - This pass adds stack protectors to functions.
@@ -329,16 +329,12 @@ namespace llvm {
 
   /// createWinEHPass - Prepares personality functions used by MSVC on Windows,
   /// in addition to the Itanium LSDA based personalities.
-  FunctionPass *createWinEHPass(bool DemoteCatchSwitchPHIOnly = false);
+  FunctionPass *createWinEHPass();
 
   /// createSjLjEHPreparePass - This pass adapts exception handling code to use
   /// the GCC-style builtin setjmp/longjmp (sjlj) to handling EH control flow.
   ///
   FunctionPass *createSjLjEHPreparePass();
-
-  /// createWasmEHPass - This pass adapts exception handling code to use
-  /// WebAssembly's exception handling scheme.
-  FunctionPass *createWasmEHPass();
 
   /// LocalStackSlotAllocation - This pass assigns local frame indices to stack
   /// slots relative to one another and allocates base registers to access them
@@ -378,11 +374,6 @@ namespace llvm {
   /// memory accesses to target specific intrinsics.
   ///
   FunctionPass *createInterleavedAccessPass();
-
-  /// InterleavedLoadCombines Pass - This pass identifies interleaved loads and
-  /// combines them into wide loads detectable by InterleavedAccessPass
-  ///
-  FunctionPass *createInterleavedLoadCombinePass();
 
   /// LowerEmuTLS - This pass generates __emutls_[vt].xyz variables for all
   /// TLS variables for the emulated TLS model.
@@ -428,7 +419,7 @@ namespace llvm {
 
   /// This pass performs outlining on machine instructions directly before
   /// printing assembly.
-  ModulePass *createMachineOutlinerPass(bool RunOnAllFunctions = true);
+  ModulePass *createMachineOutlinerPass();
 
   /// This pass expands the experimental reduction intrinsics into sequences of
   /// shuffles.

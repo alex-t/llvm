@@ -49,21 +49,8 @@ class IPDBRawSymbol;
 class IPDBSession;
 
 #define DECLARE_PDB_SYMBOL_CONCRETE_TYPE(TagValue)                             \
-private:                                                                       \
-  using PDBSymbol::PDBSymbol;                                                  \
-  friend class PDBSymbol;                                                      \
-                                                                               \
-public:                                                                        \
   static const PDB_SymType Tag = TagValue;                                     \
   static bool classof(const PDBSymbol *S) { return S->getSymTag() == Tag; }
-
-#define DECLARE_PDB_SYMBOL_CUSTOM_TYPE(Condition)                              \
-private:                                                                       \
-  using PDBSymbol::PDBSymbol;                                                  \
-  friend class PDBSymbol;                                                      \
-                                                                               \
-public:                                                                        \
-  static bool classof(const PDBSymbol *S) { return Condition; }
 
 /// PDBSymbol defines the base of the inheritance hierarchy for concrete symbol
 /// types (e.g. functions, executables, vtables, etc).  All concrete symbol
@@ -72,33 +59,14 @@ public:                                                                        \
 /// reference "Lexical and Class Hierarchy of Symbol Types":
 /// https://msdn.microsoft.com/en-us/library/370hs6k4.aspx
 class PDBSymbol {
-  static std::unique_ptr<PDBSymbol> createSymbol(const IPDBSession &PDBSession,
-                                                 PDB_SymType Tag);
-
 protected:
-  explicit PDBSymbol(const IPDBSession &PDBSession);
-  PDBSymbol(PDBSymbol &&Other);
+  PDBSymbol(const IPDBSession &PDBSession,
+            std::unique_ptr<IPDBRawSymbol> Symbol);
+  PDBSymbol(PDBSymbol &Symbol);
 
 public:
   static std::unique_ptr<PDBSymbol>
-  create(const IPDBSession &PDBSession,
-         std::unique_ptr<IPDBRawSymbol> RawSymbol);
-  static std::unique_ptr<PDBSymbol> create(const IPDBSession &PDBSession,
-                                           IPDBRawSymbol &RawSymbol);
-
-  template <typename ConcreteT>
-  static std::unique_ptr<ConcreteT>
-  createAs(const IPDBSession &PDBSession,
-           std::unique_ptr<IPDBRawSymbol> RawSymbol) {
-    std::unique_ptr<PDBSymbol> S = create(PDBSession, std::move(RawSymbol));
-    return unique_dyn_cast_or_null<ConcreteT>(std::move(S));
-  }
-  template <typename ConcreteT>
-  static std::unique_ptr<ConcreteT> createAs(const IPDBSession &PDBSession,
-                                             IPDBRawSymbol &RawSymbol) {
-    std::unique_ptr<PDBSymbol> S = create(PDBSession, RawSymbol);
-    return unique_dyn_cast_or_null<ConcreteT>(std::move(S));
-  }
+  create(const IPDBSession &PDBSession, std::unique_ptr<IPDBRawSymbol> Symbol);
 
   virtual ~PDBSymbol();
 
@@ -112,8 +80,7 @@ public:
   /// normally goes on the right side of the symbol.
   virtual void dumpRight(PDBSymDumper &Dumper) const {}
 
-  void defaultDump(raw_ostream &OS, int Indent, PdbSymbolIdField ShowFlags,
-                   PdbSymbolIdField RecurseFlags) const;
+  void defaultDump(raw_ostream &OS, int Indent) const;
   void dumpProperties() const;
   void dumpChildStats() const;
 
@@ -126,6 +93,8 @@ public:
       return nullptr;
     return Enumerator->getNext();
   }
+
+  std::unique_ptr<PDBSymbol> clone() const;
 
   template <typename T>
   std::unique_ptr<ConcreteSymbolEnumerator<T>> findAllChildren() const {
@@ -162,8 +131,7 @@ protected:
   }
 
   const IPDBSession &Session;
-  std::unique_ptr<IPDBRawSymbol> OwnedRawSymbol;
-  IPDBRawSymbol *RawSymbol = nullptr;
+  std::unique_ptr<IPDBRawSymbol> RawSymbol;
 };
 
 } // namespace llvm

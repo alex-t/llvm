@@ -217,7 +217,7 @@ bool HexagonOptAddrMode::allValidCandidates(NodeAddr<StmtNode *> SA,
     NodeSet Visited, Defs;
     const auto &P = LV->getAllReachingDefsRec(UR, UN, Visited, Defs);
     if (!P.second) {
-      LLVM_DEBUG({
+      DEBUG({
         dbgs() << "*** Unable to collect all reaching defs for use ***\n"
                << PrintNode<UseNode*>(UN, *DFG) << '\n'
                << "The program's complexity may exceed the limits.\n";
@@ -226,7 +226,7 @@ bool HexagonOptAddrMode::allValidCandidates(NodeAddr<StmtNode *> SA,
     }
     const auto &ReachingDefs = P.first;
     if (ReachingDefs.size() > 1) {
-      LLVM_DEBUG({
+      DEBUG({
         dbgs() << "*** Multiple Reaching Defs found!!! ***\n";
         for (auto DI : ReachingDefs) {
           NodeAddr<UseNode *> DA = DFG->addr<UseNode *>(DI);
@@ -244,15 +244,15 @@ bool HexagonOptAddrMode::allValidCandidates(NodeAddr<StmtNode *> SA,
 void HexagonOptAddrMode::getAllRealUses(NodeAddr<StmtNode *> SA,
                                         NodeList &UNodeList) {
   for (NodeAddr<DefNode *> DA : SA.Addr->members_if(DFG->IsDef, *DFG)) {
-    LLVM_DEBUG(dbgs() << "\t\t[DefNode]: "
-                      << Print<NodeAddr<DefNode *>>(DA, *DFG) << "\n");
+    DEBUG(dbgs() << "\t\t[DefNode]: " << Print<NodeAddr<DefNode *>>(DA, *DFG)
+                 << "\n");
     RegisterRef DR = DFG->getPRI().normalize(DA.Addr->getRegRef(*DFG));
 
     auto UseSet = LV->getAllReachedUses(DR, DA);
 
     for (auto UI : UseSet) {
       NodeAddr<UseNode *> UA = DFG->addr<UseNode *>(UI);
-      LLVM_DEBUG({
+      DEBUG({
         NodeAddr<StmtNode *> TempIA = UA.Addr->getOwner(*DFG);
         dbgs() << "\t\t\t[Reached Use]: "
                << Print<NodeAddr<InstrNode *>>(TempIA, *DFG) << "\n";
@@ -262,8 +262,8 @@ void HexagonOptAddrMode::getAllRealUses(NodeAddr<StmtNode *> SA,
         NodeAddr<PhiNode *> PA = UA.Addr->getOwner(*DFG);
         NodeId id = PA.Id;
         const Liveness::RefMap &phiUse = LV->getRealUses(id);
-        LLVM_DEBUG(dbgs() << "\t\t\t\tphi real Uses"
-                          << Print<Liveness::RefMap>(phiUse, *DFG) << "\n");
+        DEBUG(dbgs() << "\t\t\t\tphi real Uses"
+                     << Print<Liveness::RefMap>(phiUse, *DFG) << "\n");
         if (!phiUse.empty()) {
           for (auto I : phiUse) {
             if (!DFG->getPRI().alias(RegisterRef(I.first), DR))
@@ -306,8 +306,7 @@ bool HexagonOptAddrMode::isSafeToExtLR(NodeAddr<StmtNode *> SN,
     NodeAddr<RefNode*> AA = LV->getNearestAliasedRef(LRExtRR, IA);
     if ((DFG->IsDef(AA) && AA.Id != LRExtRegRD) ||
         AA.Addr->getReachingDef() != LRExtRegRD) {
-      LLVM_DEBUG(
-          dbgs() << "isSafeToExtLR: Returning false; another reaching def\n");
+      DEBUG(dbgs() << "isSafeToExtLR: Returning false; another reaching def\n");
       return false;
     }
 
@@ -397,8 +396,8 @@ bool HexagonOptAddrMode::processAddUses(NodeAddr<StmtNode *> AddSN,
 
     NodeAddr<StmtNode *> OwnerN = UseN.Addr->getOwner(*DFG);
     MachineInstr *UseMI = OwnerN.Addr->getCode();
-    LLVM_DEBUG(dbgs() << "\t\t[MI <BB#" << UseMI->getParent()->getNumber()
-                      << ">]: " << *UseMI << "\n");
+    DEBUG(dbgs() << "\t\t[MI <BB#" << UseMI->getParent()->getNumber()
+                 << ">]: " << *UseMI << "\n");
     Changed |= updateAddUses(AddMI, UseMI);
   }
 
@@ -452,7 +451,7 @@ bool HexagonOptAddrMode::analyzeUses(unsigned tfrDefR,
     } else if (MI.getOpcode() == Hexagon::S2_addasl_rrri) {
       NodeList AddaslUseList;
 
-      LLVM_DEBUG(dbgs() << "\nGetting ReachedUses for === " << MI << "\n");
+      DEBUG(dbgs() << "\nGetting ReachedUses for === " << MI << "\n");
       getAllRealUses(SN, AddaslUseList);
       // Process phi nodes.
       if (allValidCandidates(SN, AddaslUseList) &&
@@ -502,8 +501,7 @@ bool HexagonOptAddrMode::changeLoad(MachineInstr *OldMI, MachineOperand ImmOp,
       MIB.add(ImmOp);
       OpStart = 4;
       Changed = true;
-    } else if (HII->getAddrMode(*OldMI) == HexagonII::BaseImmOffset &&
-               OldMI->getOperand(2).isImm()) {
+    } else if (HII->getAddrMode(*OldMI) == HexagonII::BaseImmOffset) {
       short NewOpCode = HII->changeAddrMode_io_abs(*OldMI);
       assert(NewOpCode >= 0 && "Invalid New opcode\n");
       MIB = BuildMI(*BB, InsertPt, OldMI->getDebugLoc(), HII->get(NewOpCode))
@@ -517,21 +515,19 @@ bool HexagonOptAddrMode::changeLoad(MachineInstr *OldMI, MachineOperand ImmOp,
     } else
       Changed = false;
 
-    LLVM_DEBUG(dbgs() << "[Changing]: " << *OldMI << "\n");
-    LLVM_DEBUG(dbgs() << "[TO]: " << *MIB << "\n");
-  } else if (ImmOpNum == 2) {
-    if (OldMI->getOperand(3).isImm() && OldMI->getOperand(3).getImm() == 0) {
-      short NewOpCode = HII->changeAddrMode_rr_io(*OldMI);
-      assert(NewOpCode >= 0 && "Invalid New opcode\n");
-      MIB = BuildMI(*BB, InsertPt, OldMI->getDebugLoc(), HII->get(NewOpCode));
-      MIB.add(OldMI->getOperand(0));
-      MIB.add(OldMI->getOperand(1));
-      MIB.add(ImmOp);
-      OpStart = 4;
-      Changed = true;
-      LLVM_DEBUG(dbgs() << "[Changing]: " << *OldMI << "\n");
-      LLVM_DEBUG(dbgs() << "[TO]: " << *MIB << "\n");
-    }
+    DEBUG(dbgs() << "[Changing]: " << *OldMI << "\n");
+    DEBUG(dbgs() << "[TO]: " << *MIB << "\n");
+  } else if (ImmOpNum == 2 && OldMI->getOperand(3).getImm() == 0) {
+    short NewOpCode = HII->changeAddrMode_rr_io(*OldMI);
+    assert(NewOpCode >= 0 && "Invalid New opcode\n");
+    MIB = BuildMI(*BB, InsertPt, OldMI->getDebugLoc(), HII->get(NewOpCode));
+    MIB.add(OldMI->getOperand(0));
+    MIB.add(OldMI->getOperand(1));
+    MIB.add(ImmOp);
+    OpStart = 4;
+    Changed = true;
+    DEBUG(dbgs() << "[Changing]: " << *OldMI << "\n");
+    DEBUG(dbgs() << "[TO]: " << *MIB << "\n");
   }
 
   if (Changed)
@@ -572,8 +568,8 @@ bool HexagonOptAddrMode::changeStore(MachineInstr *OldMI, MachineOperand ImmOp,
       OpStart = 3;
     }
     Changed = true;
-    LLVM_DEBUG(dbgs() << "[Changing]: " << *OldMI << "\n");
-    LLVM_DEBUG(dbgs() << "[TO]: " << *MIB << "\n");
+    DEBUG(dbgs() << "[Changing]: " << *OldMI << "\n");
+    DEBUG(dbgs() << "[TO]: " << *MIB << "\n");
   } else if (ImmOpNum == 1 && OldMI->getOperand(2).getImm() == 0) {
     short NewOpCode = HII->changeAddrMode_rr_io(*OldMI);
     assert(NewOpCode >= 0 && "Invalid New opcode\n");
@@ -582,8 +578,8 @@ bool HexagonOptAddrMode::changeStore(MachineInstr *OldMI, MachineOperand ImmOp,
     MIB.add(ImmOp);
     OpStart = 3;
     Changed = true;
-    LLVM_DEBUG(dbgs() << "[Changing]: " << *OldMI << "\n");
-    LLVM_DEBUG(dbgs() << "[TO]: " << *MIB << "\n");
+    DEBUG(dbgs() << "[Changing]: " << *OldMI << "\n");
+    DEBUG(dbgs() << "[TO]: " << *MIB << "\n");
   }
   if (Changed)
     for (unsigned i = OpStart; i < OpEnd; ++i)
@@ -606,7 +602,7 @@ bool HexagonOptAddrMode::changeAddAsl(NodeAddr<UseNode *> AddAslUN,
                                       unsigned ImmOpNum) {
   NodeAddr<StmtNode *> SA = AddAslUN.Addr->getOwner(*DFG);
 
-  LLVM_DEBUG(dbgs() << "Processing addasl :" << *AddAslMI << "\n");
+  DEBUG(dbgs() << "Processing addasl :" << *AddAslMI << "\n");
 
   NodeList UNodeList;
   getAllRealUses(SA, UNodeList);
@@ -617,11 +613,11 @@ bool HexagonOptAddrMode::changeAddAsl(NodeAddr<UseNode *> AddAslUN,
            "Can't transform this 'AddAsl' instruction!");
 
     NodeAddr<StmtNode *> UseIA = UseUN.Addr->getOwner(*DFG);
-    LLVM_DEBUG(dbgs() << "[InstrNode]: "
-                      << Print<NodeAddr<InstrNode *>>(UseIA, *DFG) << "\n");
+    DEBUG(dbgs() << "[InstrNode]: " << Print<NodeAddr<InstrNode *>>(UseIA, *DFG)
+                 << "\n");
     MachineInstr *UseMI = UseIA.Addr->getCode();
-    LLVM_DEBUG(dbgs() << "[MI <" << printMBBReference(*UseMI->getParent())
-                      << ">]: " << *UseMI << "\n");
+    DEBUG(dbgs() << "[MI <" << printMBBReference(*UseMI->getParent())
+                 << ">]: " << *UseMI << "\n");
     const MCInstrDesc &UseMID = UseMI->getDesc();
     assert(HII->getAddrMode(*UseMI) == HexagonII::BaseImmOffset);
 
@@ -699,9 +695,9 @@ bool HexagonOptAddrMode::processBlock(NodeAddr<BlockNode *> BA) {
          !MI->getOperand(2).isImm() || HII->isConstExtended(*MI)))
     continue;
 
-    LLVM_DEBUG(dbgs() << "[Analyzing " << HII->getName(MI->getOpcode())
-                      << "]: " << *MI << "\n\t[InstrNode]: "
-                      << Print<NodeAddr<InstrNode *>>(IA, *DFG) << '\n');
+    DEBUG(dbgs() << "[Analyzing " << HII->getName(MI->getOpcode()) << "]: "
+                 << *MI << "\n\t[InstrNode]: "
+                 << Print<NodeAddr<InstrNode *>>(IA, *DFG) << '\n');
 
     NodeList UNodeList;
     getAllRealUses(SA, UNodeList);
@@ -737,9 +733,8 @@ bool HexagonOptAddrMode::processBlock(NodeAddr<BlockNode *> BA) {
 
     bool KeepTfr = false;
 
-    LLVM_DEBUG(dbgs() << "\t[Total reached uses] : " << UNodeList.size()
-                      << "\n");
-    LLVM_DEBUG(dbgs() << "\t[Processing Reached Uses] ===\n");
+    DEBUG(dbgs() << "\t[Total reached uses] : " << UNodeList.size() << "\n");
+    DEBUG(dbgs() << "\t[Processing Reached Uses] ===\n");
     for (auto I = UNodeList.rbegin(), E = UNodeList.rend(); I != E; ++I) {
       NodeAddr<UseNode *> UseN = *I;
       assert(!(UseN.Addr->getFlags() & NodeAttrs::PhiRef) &&
@@ -747,8 +742,8 @@ bool HexagonOptAddrMode::processBlock(NodeAddr<BlockNode *> BA) {
 
       NodeAddr<StmtNode *> OwnerN = UseN.Addr->getOwner(*DFG);
       MachineInstr *UseMI = OwnerN.Addr->getCode();
-      LLVM_DEBUG(dbgs() << "\t\t[MI <" << printMBBReference(*UseMI->getParent())
-                        << ">]: " << *UseMI << "\n");
+      DEBUG(dbgs() << "\t\t[MI <" << printMBBReference(*UseMI->getParent())
+                   << ">]: " << *UseMI << "\n");
 
       int UseMOnum = -1;
       unsigned NumOperands = UseMI->getNumOperands();
@@ -761,13 +756,11 @@ bool HexagonOptAddrMode::processBlock(NodeAddr<BlockNode *> BA) {
       // This could happen, for example, when DefR = R4, but the used
       // register is D2.
 
-      // Change UseMI if replacement is possible. If any replacement failed,
-      // or wasn't attempted, make sure to keep the TFR.
-      bool Xformed = false;
       if (UseMOnum >= 0 && InstrEvalResult[UseMI])
-        Xformed = xformUseMI(MI, UseMI, UseN, UseMOnum);
-      Changed |=  Xformed;
-      KeepTfr |= !Xformed;
+        // Change UseMI if replacement is possible.
+        Changed |= xformUseMI(MI, UseMI, UseN, UseMOnum);
+      else
+        KeepTfr = true;
     }
     if (!KeepTfr)
       Deleted.insert(MI);
@@ -800,8 +793,8 @@ bool HexagonOptAddrMode::runOnMachineFunction(MachineFunction &MF) {
 
   Deleted.clear();
   NodeAddr<FuncNode *> FA = DFG->getFunc();
-  LLVM_DEBUG(dbgs() << "==== [RefMap#]=====:\n "
-                    << Print<NodeAddr<FuncNode *>>(FA, *DFG) << "\n");
+  DEBUG(dbgs() << "==== [RefMap#]=====:\n "
+               << Print<NodeAddr<FuncNode *>>(FA, *DFG) << "\n");
 
   for (NodeAddr<BlockNode *> BA : FA.Addr->members(*DFG))
     Changed |= processBlock(BA);

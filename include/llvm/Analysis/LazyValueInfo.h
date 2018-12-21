@@ -128,7 +128,7 @@ public:
                   FunctionAnalysisManager::Invalidator &Inv);
 };
 
-/// Analysis to compute lazy value information.
+/// \brief Analysis to compute lazy value information.
 class LazyValueAnalysis : public AnalysisInfoMixin<LazyValueAnalysis> {
 public:
   typedef LazyValueInfo Result;

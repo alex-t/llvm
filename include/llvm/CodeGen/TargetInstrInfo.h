@@ -18,14 +18,12 @@
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DenseMapInfo.h"
 #include "llvm/ADT/None.h"
-#include "llvm/CodeGen/LiveRegUnits.h"
 #include "llvm/CodeGen/MachineBasicBlock.h"
 #include "llvm/CodeGen/MachineCombinerPattern.h"
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineInstr.h"
 #include "llvm/CodeGen/MachineLoopInfo.h"
 #include "llvm/CodeGen/MachineOperand.h"
-#include "llvm/CodeGen/MachineOutliner.h"
 #include "llvm/CodeGen/PseudoSourceValue.h"
 #include "llvm/MC/MCInstrInfo.h"
 #include "llvm/Support/BranchProbability.h"
@@ -81,7 +79,7 @@ public:
 
   /// Given a machine instruction descriptor, returns the register
   /// class constraint for OpNum, or NULL.
-  const TargetRegisterClass *getRegClass(const MCInstrDesc &MCID, unsigned OpNum,
+  const TargetRegisterClass *getRegClass(const MCInstrDesc &TID, unsigned OpNum,
                                          const TargetRegisterInfo *TRI,
                                          const MachineFunction &MF) const;
 
@@ -246,14 +244,14 @@ public:
   }
 
   /// If the specified machine instruction has a load from a stack slot,
-  /// return true along with the FrameIndices of the loaded stack slot and the
-  /// machine mem operands containing the reference.
+  /// return true along with the FrameIndex of the loaded stack slot and the
+  /// machine mem operand containing the reference.
   /// If not, return false.  Unlike isLoadFromStackSlot, this returns true for
   /// any instructions that loads from the stack.  This is just a hint, as some
   /// cases may be missed.
-  virtual bool hasLoadFromStackSlot(
-      const MachineInstr &MI,
-      SmallVectorImpl<const MachineMemOperand *> &Accesses) const;
+  virtual bool hasLoadFromStackSlot(const MachineInstr &MI,
+                                    const MachineMemOperand *&MMO,
+                                    int &FrameIndex) const;
 
   /// If the specified machine instruction is a direct
   /// store to a stack slot, return the virtual or physical register number of
@@ -284,14 +282,14 @@ public:
   }
 
   /// If the specified machine instruction has a store to a stack slot,
-  /// return true along with the FrameIndices of the loaded stack slot and the
-  /// machine mem operands containing the reference.
+  /// return true along with the FrameIndex of the loaded stack slot and the
+  /// machine mem operand containing the reference.
   /// If not, return false.  Unlike isStoreToStackSlot,
   /// this returns true for any instructions that stores to the
   /// stack.  This is just a hint, as some cases may be missed.
-  virtual bool hasStoreToStackSlot(
-      const MachineInstr &MI,
-      SmallVectorImpl<const MachineMemOperand *> &Accesses) const;
+  virtual bool hasStoreToStackSlot(const MachineInstr &MI,
+                                   const MachineMemOperand *&MMO,
+                                   int &FrameIndex) const;
 
   /// Return true if the specified machine instruction
   /// is a copy of one stack slot to another and has no other effect.
@@ -349,7 +347,7 @@ public:
                              unsigned SubIdx, const MachineInstr &Orig,
                              const TargetRegisterInfo &TRI) const;
 
-  /// Clones instruction or the whole instruction bundle \p Orig and
+  /// \brief Clones instruction or the whole instruction bundle \p Orig and
   /// insert into \p MBB before \p InsertBefore. The target may update operands
   /// that are required to be unique.
   ///
@@ -846,33 +844,6 @@ public:
     llvm_unreachable("Target didn't implement TargetInstrInfo::copyPhysReg!");
   }
 
-protected:
-  /// Target-dependent implemenation for IsCopyInstr.
-  /// If the specific machine instruction is a instruction that moves/copies
-  /// value from one register to another register return true along with
-  /// @Source machine operand and @Destination machine operand.
-  virtual bool isCopyInstrImpl(const MachineInstr &MI,
-                               const MachineOperand *&Source,
-                               const MachineOperand *&Destination) const {
-    return false;
-  }
-
-public:
-  /// If the specific machine instruction is a instruction that moves/copies
-  /// value from one register to another register return true along with
-  /// @Source machine operand and @Destination machine operand.
-  /// For COPY-instruction the method naturally returns true, for all other
-  /// instructions the method calls target-dependent implementation.
-  bool isCopyInstr(const MachineInstr &MI, const MachineOperand *&Source,
-                   const MachineOperand *&Destination) const {
-    if (MI.isCopy()) {
-      Destination = &MI.getOperand(0);
-      Source = &MI.getOperand(1);
-      return true;
-    }
-    return isCopyInstrImpl(MI, Source, Destination);
-  }
-
   /// Store the specified register of the given register class to the specified
   /// stack frame index. The store instruction is to be added to the given
   /// machine basic block before the specified machine instruction. If isKill
@@ -927,7 +898,7 @@ public:
   /// The new instruction is inserted before MI, and the client is responsible
   /// for removing the old instruction.
   MachineInstr *foldMemoryOperand(MachineInstr &MI, ArrayRef<unsigned> Ops,
-                                  int FI,
+                                  int FrameIndex,
                                   LiveIntervals *LIS = nullptr) const;
 
   /// Same as the previous version except it allows folding of any load and
@@ -979,13 +950,13 @@ public:
   /// \param InsInstrs - Vector of new instructions that implement P
   /// \param DelInstrs - Old instructions, including Root, that could be
   /// replaced by InsInstr
-  /// \param InstIdxForVirtReg - map of virtual register to instruction in
+  /// \param InstrIdxForVirtReg - map of virtual register to instruction in
   /// InsInstr that defines it
   virtual void genAlternativeCodeSequence(
       MachineInstr &Root, MachineCombinerPattern Pattern,
       SmallVectorImpl<MachineInstr *> &InsInstrs,
       SmallVectorImpl<MachineInstr *> &DelInstrs,
-      DenseMap<unsigned, unsigned> &InstIdxForVirtReg) const;
+      DenseMap<unsigned, unsigned> &InstrIdxForVirtReg) const;
 
   /// Attempt to reassociate \P Root and \P Prev according to \P Pattern to
   /// reduce critical path length.
@@ -1007,6 +978,11 @@ public:
   /// Return true if the given SDNode can be copied during scheduling
   /// even if it has glue.
   virtual bool canCopyGluedNodeDuringSchedule(SDNode *N) const { return false; }
+
+  /// Remember what registers the specified instruction uses and modifies.
+  virtual void trackRegDefsUses(const MachineInstr &MI, BitVector &ModifiedRegs,
+                                BitVector &UsedRegs,
+                                const TargetRegisterInfo *TRI) const;
 
 protected:
   /// Target-dependent implementation for foldMemoryOperand.
@@ -1034,7 +1010,7 @@ protected:
     return nullptr;
   }
 
-  /// Target-dependent implementation of getRegSequenceInputs.
+  /// \brief Target-dependent implementation of getRegSequenceInputs.
   ///
   /// \returns true if it is possible to build the equivalent
   /// REG_SEQUENCE inputs with the pair \p MI, \p DefIdx. False otherwise.
@@ -1048,7 +1024,7 @@ protected:
     return false;
   }
 
-  /// Target-dependent implementation of getExtractSubregInputs.
+  /// \brief Target-dependent implementation of getExtractSubregInputs.
   ///
   /// \returns true if it is possible to build the equivalent
   /// EXTRACT_SUBREG inputs with the pair \p MI, \p DefIdx. False otherwise.
@@ -1062,7 +1038,7 @@ protected:
     return false;
   }
 
-  /// Target-dependent implementation of getInsertSubregInputs.
+  /// \brief Target-dependent implementation of getInsertSubregInputs.
   ///
   /// \returns true if it is possible to build the equivalent
   /// INSERT_SUBREG inputs with the pair \p MI, \p DefIdx. False otherwise.
@@ -1081,7 +1057,7 @@ public:
   /// getAddressSpaceForPseudoSourceKind - Given the kind of memory
   /// (e.g. stack) the target returns the corresponding address space.
   virtual unsigned
-  getAddressSpaceForPseudoSourceKind(unsigned Kind) const {
+  getAddressSpaceForPseudoSourceKind(PseudoSourceValue::PSVKind Kind) const {
     return 0;
   }
 
@@ -1136,11 +1112,11 @@ public:
     return false;
   }
 
-  /// Get the base operand and byte offset of an instruction that reads/writes
+  /// Get the base register and byte offset of an instruction that reads/writes
   /// memory.
-  virtual bool getMemOperandWithOffset(MachineInstr &MI,
-                                       MachineOperand *&BaseOp, int64_t &Offset,
-                                       const TargetRegisterInfo *TRI) const {
+  virtual bool getMemOpBaseRegImmOfs(MachineInstr &MemOp, unsigned &BaseReg,
+                                     int64_t &Offset,
+                                     const TargetRegisterInfo *TRI) const {
     return false;
   }
 
@@ -1164,8 +1140,8 @@ public:
   /// or
   ///   DAG->addMutation(createStoreClusterDAGMutation(DAG->TII, DAG->TRI));
   /// to TargetPassConfig::createMachineScheduler() to have an effect.
-  virtual bool shouldClusterMemOps(MachineOperand &BaseOp1,
-                                   MachineOperand &BaseOp2,
+  virtual bool shouldClusterMemOps(MachineInstr &FirstLdSt, unsigned BaseReg1,
+                                   MachineInstr &SecondLdSt, unsigned BaseReg2,
                                    unsigned NumLoads) const {
     llvm_unreachable("target did not implement shouldClusterMemOps()");
   }
@@ -1484,7 +1460,7 @@ public:
     return 0;
   }
 
-  /// Return the minimum clearance before an instruction that reads an
+  /// \brief Return the minimum clearance before an instruction that reads an
   /// unused register.
   ///
   /// For example, AVX instructions may copy part of a register operand into
@@ -1551,7 +1527,7 @@ public:
     return false;
   }
 
-  /// Return the value to use for the MachineCSE's LookAheadLimit,
+  /// \brief Return the value to use for the MachineCSE's LookAheadLimit,
   /// which is a heuristic used for CSE'ing phys reg defs.
   virtual unsigned getMachineCSELookAheadLimit() const {
     // The default lookahead is small to prevent unprofitable quadratic
@@ -1620,33 +1596,74 @@ public:
     return false;
   }
 
-  /// Returns a \p outliner::OutlinedFunction struct containing target-specific
+  /// Returns true if the target implements the MachineOutliner.
+  virtual bool useMachineOutliner() const { return false; }
+
+  /// \brief Describes the number of instructions that it will take to call and
+  /// construct a frame for a given outlining candidate.
+  struct MachineOutlinerInfo {
+    /// Number of instructions to call an outlined function for this candidate.
+    unsigned CallOverhead;
+
+    /// \brief Number of instructions to construct an outlined function frame
+    /// for this candidate.
+    unsigned FrameOverhead;
+
+    /// \brief Represents the specific instructions that must be emitted to
+    /// construct a call to this candidate.
+    unsigned CallConstructionID;
+
+    /// \brief Represents the specific instructions that must be emitted to
+    /// construct a frame for this candidate's outlined function.
+    unsigned FrameConstructionID;
+
+    MachineOutlinerInfo() {}
+    MachineOutlinerInfo(unsigned CallOverhead, unsigned FrameOverhead,
+                        unsigned CallConstructionID,
+                        unsigned FrameConstructionID)
+        : CallOverhead(CallOverhead), FrameOverhead(FrameOverhead),
+          CallConstructionID(CallConstructionID),
+          FrameConstructionID(FrameConstructionID) {}
+  };
+
+  /// \brief Returns a \p MachineOutlinerInfo struct containing target-specific
   /// information for a set of outlining candidates.
-  virtual outliner::OutlinedFunction getOutliningCandidateInfo(
-      std::vector<outliner::Candidate> &RepeatedSequenceLocs) const {
+  virtual MachineOutlinerInfo getOutlininingCandidateInfo(
+      std::vector<
+          std::pair<MachineBasicBlock::iterator, MachineBasicBlock::iterator>>
+          &RepeatedSequenceLocs) const {
     llvm_unreachable(
         "Target didn't implement TargetInstrInfo::getOutliningCandidateInfo!");
   }
 
+  /// Represents how an instruction should be mapped by the outliner.
+  /// \p Legal instructions are those which are safe to outline.
+  /// \p Illegal instructions are those which cannot be outlined.
+  /// \p Invisible instructions are instructions which can be outlined, but
+  /// shouldn't actually impact the outlining result.
+  enum MachineOutlinerInstrType { Legal, Illegal, Invisible };
+
   /// Returns how or if \p MI should be outlined.
-  virtual outliner::InstrType
+  virtual MachineOutlinerInstrType
   getOutliningType(MachineBasicBlock::iterator &MIT, unsigned Flags) const {
     llvm_unreachable(
         "Target didn't implement TargetInstrInfo::getOutliningType!");
   }
 
-  /// Optional target hook that returns true if \p MBB is safe to outline from,
-  /// and returns any target-specific information in \p Flags.
-  virtual bool isMBBSafeToOutlineFrom(MachineBasicBlock &MBB,
-                                      unsigned &Flags) const {
-    return true;
+  /// \brief Returns target-defined flags defining properties of the MBB for
+  /// the outliner.
+  virtual unsigned getMachineOutlinerMBBFlags(MachineBasicBlock &MBB) const {
+    return 0x0;
   }
 
-  /// Insert a custom frame for outlined functions.
-  virtual void buildOutlinedFrame(MachineBasicBlock &MBB, MachineFunction &MF,
-                                  const outliner::OutlinedFunction &OF) const {
+  /// Insert a custom epilogue for outlined functions.
+  /// This may be empty, in which case no epilogue or return statement will be
+  /// emitted.
+  virtual void insertOutlinerEpilogue(MachineBasicBlock &MBB,
+                                      MachineFunction &MF,
+                                      const MachineOutlinerInfo &MInfo) const {
     llvm_unreachable(
-        "Target didn't implement TargetInstrInfo::buildOutlinedFrame!");
+        "Target didn't implement TargetInstrInfo::insertOutlinerEpilogue!");
   }
 
   /// Insert a call to an outlined function into the program.
@@ -1655,9 +1672,18 @@ public:
   virtual MachineBasicBlock::iterator
   insertOutlinedCall(Module &M, MachineBasicBlock &MBB,
                      MachineBasicBlock::iterator &It, MachineFunction &MF,
-                     const outliner::Candidate &C) const {
+                     const MachineOutlinerInfo &MInfo) const {
     llvm_unreachable(
         "Target didn't implement TargetInstrInfo::insertOutlinedCall!");
+  }
+
+  /// Insert a custom prologue for outlined functions.
+  /// This may be empty, in which case no prologue will be emitted.
+  virtual void insertOutlinerPrologue(MachineBasicBlock &MBB,
+                                      MachineFunction &MF,
+                                      const MachineOutlinerInfo &MInfo) const {
+    llvm_unreachable(
+        "Target didn't implement TargetInstrInfo::insertOutlinerPrologue!");
   }
 
   /// Return true if the function can safely be outlined from.
@@ -1670,18 +1696,13 @@ public:
                      "TargetInstrInfo::isFunctionSafeToOutlineFrom!");
   }
 
-  /// Return true if the function should be outlined from by default.
-  virtual bool shouldOutlineFromFunctionByDefault(MachineFunction &MF) const {
-    return false;
-  }
-
 private:
   unsigned CallFrameSetupOpcode, CallFrameDestroyOpcode;
   unsigned CatchRetOpcode;
   unsigned ReturnOpcode;
 };
 
-/// Provide DenseMapInfo for TargetInstrInfo::RegSubRegPair.
+/// \brief Provide DenseMapInfo for TargetInstrInfo::RegSubRegPair.
 template <> struct DenseMapInfo<TargetInstrInfo::RegSubRegPair> {
   using RegInfo = DenseMapInfo<unsigned>;
 
@@ -1695,7 +1716,7 @@ template <> struct DenseMapInfo<TargetInstrInfo::RegSubRegPair> {
                                           RegInfo::getTombstoneKey());
   }
 
-  /// Reuse getHashValue implementation from
+  /// \brief Reuse getHashValue implementation from
   /// std::pair<unsigned, unsigned>.
   static unsigned getHashValue(const TargetInstrInfo::RegSubRegPair &Val) {
     std::pair<unsigned, unsigned> PairVal = std::make_pair(Val.Reg, Val.SubReg);

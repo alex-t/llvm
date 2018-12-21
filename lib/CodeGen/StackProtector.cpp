@@ -70,6 +70,32 @@ INITIALIZE_PASS_END(StackProtector, DEBUG_TYPE,
 
 FunctionPass *llvm::createStackProtectorPass() { return new StackProtector(); }
 
+StackProtector::SSPLayoutKind
+StackProtector::getSSPLayout(const AllocaInst *AI) const {
+  return AI ? Layout.lookup(AI) : SSPLK_None;
+}
+
+void StackProtector::adjustForColoring(const AllocaInst *From,
+                                       const AllocaInst *To) {
+  // When coloring replaces one alloca with another, transfer the SSPLayoutKind
+  // tag from the remapped to the target alloca. The remapped alloca should
+  // have a size smaller than or equal to the replacement alloca.
+  SSPLayoutMap::iterator I = Layout.find(From);
+  if (I != Layout.end()) {
+    SSPLayoutKind Kind = I->second;
+    Layout.erase(I);
+
+    // Transfer the tag, but make sure that SSPLK_AddrOf does not overwrite
+    // SSPLK_SmallArray or SSPLK_LargeArray, and make sure that
+    // SSPLK_SmallArray does not overwrite SSPLK_LargeArray.
+    I = Layout.find(To);
+    if (I == Layout.end())
+      Layout.insert(std::make_pair(To, Kind));
+    else if (I->second != SSPLK_LargeArray && Kind != SSPLK_AddrOf)
+      I->second = Kind;
+  }
+}
+
 void StackProtector::getAnalysisUsage(AnalysisUsage &AU) const {
   AU.addRequired<TargetPassConfig>();
   AU.addPreserved<DominatorTreeWrapperPass>();
@@ -199,19 +225,7 @@ bool StackProtector::HasAddressTaken(const Instruction *AI) {
   return false;
 }
 
-/// Search for the first call to the llvm.stackprotector intrinsic and return it
-/// if present.
-static const CallInst *findStackProtectorIntrinsic(Function &F) {
-  for (const BasicBlock &BB : F)
-    for (const Instruction &I : BB)
-      if (const CallInst *CI = dyn_cast<CallInst>(&I))
-        if (CI->getCalledFunction() ==
-            Intrinsic::getDeclaration(F.getParent(), Intrinsic::stackprotector))
-          return CI;
-  return nullptr;
-}
-
-/// Check whether or not this function needs a stack protector based
+/// \brief Check whether or not this function needs a stack protector based
 /// upon the stack protector level.
 ///
 /// We use two heuristics: a standard (ssp) and strong (sspstrong).
@@ -227,7 +241,13 @@ static const CallInst *findStackProtectorIntrinsic(Function &F) {
 bool StackProtector::RequiresStackProtector() {
   bool Strong = false;
   bool NeedsProtector = false;
-  HasPrologue = findStackProtectorIntrinsic(*F);
+  for (const BasicBlock &BB : *F)
+    for (const Instruction &I : BB)
+      if (const CallInst *CI = dyn_cast<CallInst>(&I))
+        if (CI->getCalledFunction() ==
+            Intrinsic::getDeclaration(F->getParent(),
+                                      Intrinsic::stackprotector))
+          HasPrologue = true;
 
   if (F->hasFnAttribute(Attribute::SafeStack))
     return false;
@@ -269,21 +289,18 @@ bool StackProtector::RequiresStackProtector() {
             if (CI->getLimitedValue(SSPBufferSize) >= SSPBufferSize) {
               // A call to alloca with size >= SSPBufferSize requires
               // stack protectors.
-              Layout.insert(std::make_pair(AI,
-                                           MachineFrameInfo::SSPLK_LargeArray));
+              Layout.insert(std::make_pair(AI, SSPLK_LargeArray));
               ORE.emit(RemarkBuilder);
               NeedsProtector = true;
             } else if (Strong) {
               // Require protectors for all alloca calls in strong mode.
-              Layout.insert(std::make_pair(AI,
-                                           MachineFrameInfo::SSPLK_SmallArray));
+              Layout.insert(std::make_pair(AI, SSPLK_SmallArray));
               ORE.emit(RemarkBuilder);
               NeedsProtector = true;
             }
           } else {
             // A call to alloca with a variable size requires protectors.
-            Layout.insert(std::make_pair(AI,
-                                         MachineFrameInfo::SSPLK_LargeArray));
+            Layout.insert(std::make_pair(AI, SSPLK_LargeArray));
             ORE.emit(RemarkBuilder);
             NeedsProtector = true;
           }
@@ -292,9 +309,8 @@ bool StackProtector::RequiresStackProtector() {
 
         bool IsLarge = false;
         if (ContainsProtectableArray(AI->getAllocatedType(), IsLarge, Strong)) {
-          Layout.insert(std::make_pair(AI, IsLarge
-                                       ? MachineFrameInfo::SSPLK_LargeArray
-                                       : MachineFrameInfo::SSPLK_SmallArray));
+          Layout.insert(std::make_pair(AI, IsLarge ? SSPLK_LargeArray
+                                                   : SSPLK_SmallArray));
           ORE.emit([&]() {
             return OptimizationRemark(DEBUG_TYPE, "StackProtectorBuffer", &I)
                    << "Stack protection applied to function "
@@ -308,7 +324,7 @@ bool StackProtector::RequiresStackProtector() {
 
         if (Strong && HasAddressTaken(AI)) {
           ++NumAddrTaken;
-          Layout.insert(std::make_pair(AI, MachineFrameInfo::SSPLK_AddrOf));
+          Layout.insert(std::make_pair(AI, SSPLK_AddrOf));
           ORE.emit([&]() {
             return OptimizationRemark(DEBUG_TYPE, "StackProtectorAddressTaken",
                                       &I)
@@ -385,8 +401,7 @@ bool StackProtector::InsertStackProtectors() {
   // protection in SDAG.
   bool SupportsSelectionDAGSP =
       TLI->useStackGuardXorFP() ||
-      (EnableSelectionDAGSP && !TM->Options.EnableFastISel &&
-       !TM->Options.EnableGlobalISel);
+      (EnableSelectionDAGSP && !TM->Options.EnableFastISel);
   AllocaInst *AI = nullptr;       // Place on stack that stores the stack guard.
 
   for (Function::iterator I = F->begin(), E = F->end(); I != E;) {
@@ -405,14 +420,6 @@ bool StackProtector::InsertStackProtectors() {
     // The epilogue instrumentation is postponed to SelectionDAG.
     if (SupportsSelectionDAGSP)
       break;
-
-    // Find the stack guard slot if the prologue was not created by this pass
-    // itself via a previous call to CreatePrologue().
-    if (!AI) {
-      const CallInst *SPCall = findStackProtectorIntrinsic(*F);
-      assert(SPCall && "Call to llvm.stackprotector is missing");
-      AI = cast<AllocaInst>(SPCall->getArgOperand(1));
-    }
 
     // Set HasIRCheck to true, so that SelectionDAG will not generate its own
     // version. SelectionDAG called 'shouldEmitSDCheck' to check whether
@@ -526,24 +533,4 @@ BasicBlock *StackProtector::CreateFailBB() {
 
 bool StackProtector::shouldEmitSDCheck(const BasicBlock &BB) const {
   return HasPrologue && !HasIRCheck && dyn_cast<ReturnInst>(BB.getTerminator());
-}
-
-void StackProtector::copyToMachineFrameInfo(MachineFrameInfo &MFI) const {
-  if (Layout.empty())
-    return;
-
-  for (int I = 0, E = MFI.getObjectIndexEnd(); I != E; ++I) {
-    if (MFI.isDeadObjectIndex(I))
-      continue;
-
-    const AllocaInst *AI = MFI.getObjectAllocation(I);
-    if (!AI)
-      continue;
-
-    SSPLayoutMap::const_iterator LI = Layout.find(AI);
-    if (LI == Layout.end())
-      continue;
-
-    MFI.setObjectSSPLayout(I, LI->second);
-  }
 }

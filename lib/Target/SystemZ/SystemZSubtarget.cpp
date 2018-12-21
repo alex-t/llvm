@@ -19,11 +19,6 @@ using namespace llvm;
 #define GET_SUBTARGETINFO_CTOR
 #include "SystemZGenSubtargetInfo.inc"
 
-static cl::opt<bool> UseSubRegLiveness(
-    "systemz-subreg-liveness",
-    cl::desc("Enable subregister liveness tracking for SystemZ (experimental)"),
-    cl::Hidden);
-
 // Pin the vtable to this file.
 void SystemZSubtarget::anchor() {}
 
@@ -58,11 +53,6 @@ SystemZSubtarget::SystemZSubtarget(const Triple &TT, const std::string &CPU,
       HasInsertReferenceBitsMultiple(false),
       TargetTriple(TT), InstrInfo(initializeSubtargetDependencies(CPU, FS)),
       TLInfo(TM, *this), TSInfo(), FrameLowering() {}
-
-
-bool SystemZSubtarget::enableSubRegLiveness() const {
-  return UseSubRegLiveness;
-}
 
 bool SystemZSubtarget::isPC32DBLSymbol(const GlobalValue *GV,
                                        CodeModel::Model CM) const {

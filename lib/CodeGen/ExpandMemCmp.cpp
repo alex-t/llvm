@@ -102,7 +102,7 @@ class MemCmpExpansion {
   MemCmpExpansion(CallInst *CI, uint64_t Size,
                   const TargetTransformInfo::MemCmpExpansionOptions &Options,
                   unsigned MaxNumLoads, const bool IsUsedForZeroCmp,
-                  unsigned MaxLoadsPerBlockForZeroCmp, const DataLayout &TheDataLayout);
+                  unsigned NumLoadsPerBlockForZeroCmp, const DataLayout &DL);
 
   unsigned getNumBlocks();
   uint64_t getNumLoads() const { return LoadSequence.size(); }

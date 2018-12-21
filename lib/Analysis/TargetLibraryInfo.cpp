@@ -62,18 +62,6 @@ static void initialize(TargetLibraryInfoImpl &TLI, const Triple &T,
                         }) &&
          "TargetLibraryInfoImpl function names must be sorted");
 
-  // Set IO unlocked variants as unavailable
-  // Set them as available per system below
-  TLI.setUnavailable(LibFunc_getchar_unlocked);
-  TLI.setUnavailable(LibFunc_putc_unlocked);
-  TLI.setUnavailable(LibFunc_putchar_unlocked);
-  TLI.setUnavailable(LibFunc_fputc_unlocked);
-  TLI.setUnavailable(LibFunc_fgetc_unlocked);
-  TLI.setUnavailable(LibFunc_fread_unlocked);
-  TLI.setUnavailable(LibFunc_fwrite_unlocked);
-  TLI.setUnavailable(LibFunc_fputs_unlocked);
-  TLI.setUnavailable(LibFunc_fgets_unlocked);
-
   bool ShouldExtI32Param = false, ShouldExtI32Return = false,
        ShouldSignExtI32Param = false;
   // PowerPC64, Sparc64, SystemZ need signext/zeroext on i32 parameters and
@@ -85,7 +73,8 @@ static void initialize(TargetLibraryInfoImpl &TLI, const Triple &T,
   }
   // Mips, on the other hand, needs signext on i32 parameters corresponding
   // to both signed and unsigned ints.
-  if (T.isMIPS()) {
+  if (T.getArch() == Triple::mips || T.getArch() == Triple::mipsel ||
+      T.getArch() == Triple::mips64 || T.getArch() == Triple::mips64el) {
     ShouldSignExtI32Param = true;
   }
   TLI.setShouldExtI32Param(ShouldExtI32Param);
@@ -118,12 +107,6 @@ static void initialize(TargetLibraryInfoImpl &TLI, const Triple &T,
   // memset_pattern16 is only available on iOS 3.0 and Mac OS X 10.5 and later.
   // All versions of watchOS support it.
   if (T.isMacOSX()) {
-    // available IO unlocked variants on Mac OS X
-    TLI.setAvailable(LibFunc_getc_unlocked);
-    TLI.setAvailable(LibFunc_getchar_unlocked);
-    TLI.setAvailable(LibFunc_putc_unlocked);
-    TLI.setAvailable(LibFunc_putchar_unlocked);
-
     if (T.isMacOSXVersionLT(10, 5))
       TLI.setUnavailable(LibFunc_memset_pattern16);
   } else if (T.isiOS()) {
@@ -282,6 +265,7 @@ static void initialize(TargetLibraryInfoImpl &TLI, const Triple &T,
     TLI.setUnavailable(LibFunc_ftello);
     TLI.setUnavailable(LibFunc_ftrylockfile);
     TLI.setUnavailable(LibFunc_funlockfile);
+    TLI.setUnavailable(LibFunc_getc_unlocked);
     TLI.setUnavailable(LibFunc_getitimer);
     TLI.setUnavailable(LibFunc_getlogin_r);
     TLI.setUnavailable(LibFunc_getpwnam);
@@ -413,17 +397,17 @@ static void initialize(TargetLibraryInfoImpl &TLI, const Triple &T,
     TLI.setUnavailable(LibFunc_flsll);
   }
 
-  // The following functions are only available on GNU/Linux (using glibc).
-  // Linux variants without glibc (eg: bionic, musl) may have some subset.
-  if (!T.isOSLinux() || !T.isGNUEnvironment()) {
+  // The following functions are available on Linux,
+  // but Android uses bionic instead of glibc.
+  if (!T.isOSLinux() || T.isAndroid()) {
     TLI.setUnavailable(LibFunc_dunder_strdup);
     TLI.setUnavailable(LibFunc_dunder_strtok_r);
     TLI.setUnavailable(LibFunc_dunder_isoc99_scanf);
     TLI.setUnavailable(LibFunc_dunder_isoc99_sscanf);
     TLI.setUnavailable(LibFunc_under_IO_getc);
     TLI.setUnavailable(LibFunc_under_IO_putc);
-    // But, Android and musl have memalign.
-    if (!T.isAndroid() && !T.isMusl())
+    // But, Android has memalign.
+    if (!T.isAndroid())
       TLI.setUnavailable(LibFunc_memalign);
     TLI.setUnavailable(LibFunc_fopen64);
     TLI.setUnavailable(LibFunc_fseeko64);
@@ -479,21 +463,6 @@ static void initialize(TargetLibraryInfoImpl &TLI, const Triple &T,
     TLI.setUnavailable(LibFunc_sinh_finite);
     TLI.setUnavailable(LibFunc_sinhf_finite);
     TLI.setUnavailable(LibFunc_sinhl_finite);
-  }
-
-  if ((T.isOSLinux() && T.isGNUEnvironment()) ||
-      (T.isAndroid() && !T.isAndroidVersionLT(28))) {
-    // available IO unlocked variants on GNU/Linux and Android P or later
-    TLI.setAvailable(LibFunc_getc_unlocked);
-    TLI.setAvailable(LibFunc_getchar_unlocked);
-    TLI.setAvailable(LibFunc_putc_unlocked);
-    TLI.setAvailable(LibFunc_putchar_unlocked);
-    TLI.setAvailable(LibFunc_fputc_unlocked);
-    TLI.setAvailable(LibFunc_fgetc_unlocked);
-    TLI.setAvailable(LibFunc_fread_unlocked);
-    TLI.setAvailable(LibFunc_fwrite_unlocked);
-    TLI.setAvailable(LibFunc_fputs_unlocked);
-    TLI.setAvailable(LibFunc_fgets_unlocked);
   }
 
   // As currently implemented in clang, NVPTX code has no standard library to
@@ -613,24 +582,6 @@ bool TargetLibraryInfoImpl::isValidProtoForLibFunc(const FunctionType &FTy,
   unsigned NumParams = FTy.getNumParams();
 
   switch (F) {
-  case LibFunc_execl:
-  case LibFunc_execlp:
-  case LibFunc_execle:
-    return (NumParams >= 2 && FTy.getParamType(0)->isPointerTy() &&
-            FTy.getParamType(1)->isPointerTy() &&
-            FTy.getReturnType()->isIntegerTy(32));
-  case LibFunc_execv:
-  case LibFunc_execvp:
-    return (NumParams == 2 && FTy.getParamType(0)->isPointerTy() &&
-            FTy.getParamType(1)->isPointerTy() &&
-            FTy.getReturnType()->isIntegerTy(32));
-  case LibFunc_execvP:
-  case LibFunc_execvpe:
-  case LibFunc_execve:
-    return (NumParams == 3 && FTy.getParamType(0)->isPointerTy() &&
-            FTy.getParamType(1)->isPointerTy() &&
-            FTy.getParamType(2)->isPointerTy() &&
-            FTy.getReturnType()->isIntegerTy(32));
   case LibFunc_strlen:
     return (NumParams == 1 && FTy.getParamType(0)->isPointerTy() &&
             FTy.getReturnType()->isIntegerTy());
@@ -741,12 +692,10 @@ bool TargetLibraryInfoImpl::isValidProtoForLibFunc(const FunctionType &FTy,
   case LibFunc_siprintf:
   case LibFunc_sprintf:
     return (NumParams >= 2 && FTy.getParamType(0)->isPointerTy() &&
-            FTy.getParamType(1)->isPointerTy() &&
-            FTy.getReturnType()->isIntegerTy(32));
+            FTy.getParamType(1)->isPointerTy());
   case LibFunc_snprintf:
     return (NumParams == 3 && FTy.getParamType(0)->isPointerTy() &&
-            FTy.getParamType(2)->isPointerTy() &&
-            FTy.getReturnType()->isIntegerTy(32));
+            FTy.getParamType(2)->isPointerTy());
   case LibFunc_setitimer:
     return (NumParams == 3 && FTy.getParamType(1)->isPointerTy() &&
             FTy.getParamType(2)->isPointerTy());
@@ -856,7 +805,6 @@ bool TargetLibraryInfoImpl::isValidProtoForLibFunc(const FunctionType &FTy,
   case LibFunc_feof:
   case LibFunc_fflush:
   case LibFunc_fgetc:
-  case LibFunc_fgetc_unlocked:
   case LibFunc_fileno:
   case LibFunc_flockfile:
   case LibFunc_free:
@@ -881,13 +829,10 @@ bool TargetLibraryInfoImpl::isValidProtoForLibFunc(const FunctionType &FTy,
     return (NumParams == 2 && FTy.getReturnType()->isPointerTy() &&
             FTy.getParamType(0)->isPointerTy() &&
             FTy.getParamType(1)->isPointerTy());
-  case LibFunc_fork:
-    return (NumParams == 0 && FTy.getReturnType()->isIntegerTy(32));
   case LibFunc_fdopen:
     return (NumParams == 2 && FTy.getReturnType()->isPointerTy() &&
             FTy.getParamType(1)->isPointerTy());
   case LibFunc_fputc:
-  case LibFunc_fputc_unlocked:
   case LibFunc_fstat:
   case LibFunc_frexp:
   case LibFunc_frexpf:
@@ -895,22 +840,18 @@ bool TargetLibraryInfoImpl::isValidProtoForLibFunc(const FunctionType &FTy,
   case LibFunc_fstatvfs:
     return (NumParams == 2 && FTy.getParamType(1)->isPointerTy());
   case LibFunc_fgets:
-  case LibFunc_fgets_unlocked:
     return (NumParams == 3 && FTy.getParamType(0)->isPointerTy() &&
             FTy.getParamType(2)->isPointerTy());
   case LibFunc_fread:
-  case LibFunc_fread_unlocked:
     return (NumParams == 4 && FTy.getParamType(0)->isPointerTy() &&
             FTy.getParamType(3)->isPointerTy());
   case LibFunc_fwrite:
-  case LibFunc_fwrite_unlocked:
     return (NumParams == 4 && FTy.getReturnType()->isIntegerTy() &&
             FTy.getParamType(0)->isPointerTy() &&
             FTy.getParamType(1)->isIntegerTy() &&
             FTy.getParamType(2)->isIntegerTy() &&
             FTy.getParamType(3)->isPointerTy());
   case LibFunc_fputs:
-  case LibFunc_fputs_unlocked:
     return (NumParams >= 2 && FTy.getParamType(0)->isPointerTy() &&
             FTy.getParamType(1)->isPointerTy());
   case LibFunc_fscanf:
@@ -923,7 +864,6 @@ bool TargetLibraryInfoImpl::isValidProtoForLibFunc(const FunctionType &FTy,
     return (NumParams >= 2 && FTy.getParamType(0)->isPointerTy() &&
             FTy.getParamType(1)->isPointerTy());
   case LibFunc_getchar:
-  case LibFunc_getchar_unlocked:
     return (NumParams == 0 && FTy.getReturnType()->isIntegerTy());
   case LibFunc_gets:
     return (NumParams == 1 && FTy.getParamType(0) == PCharTy);
@@ -936,7 +876,6 @@ bool TargetLibraryInfoImpl::isValidProtoForLibFunc(const FunctionType &FTy,
     return (NumParams == 2 && FTy.getParamType(0)->isPointerTy() &&
             FTy.getParamType(1)->isPointerTy());
   case LibFunc_putc:
-  case LibFunc_putc_unlocked:
     return (NumParams == 2 && FTy.getParamType(1)->isPointerTy());
   case LibFunc_pread:
   case LibFunc_pwrite:
@@ -1323,7 +1262,6 @@ bool TargetLibraryInfoImpl::isValidProtoForLibFunc(const FunctionType &FTy,
   case LibFunc_isascii:
   case LibFunc_toascii:
   case LibFunc_putchar:
-  case LibFunc_putchar_unlocked:
     return (NumParams == 1 && FTy.getReturnType()->isIntegerTy(32) &&
             FTy.getReturnType() == FTy.getParamType(0));
 
@@ -1419,10 +1357,10 @@ static bool compareWithVectorFnName(const VecDesc &LHS, StringRef S) {
 
 void TargetLibraryInfoImpl::addVectorizableFunctions(ArrayRef<VecDesc> Fns) {
   VectorDescs.insert(VectorDescs.end(), Fns.begin(), Fns.end());
-  llvm::sort(VectorDescs, compareByScalarFnName);
+  llvm::sort(VectorDescs.begin(), VectorDescs.end(), compareByScalarFnName);
 
   ScalarDescs.insert(ScalarDescs.end(), Fns.begin(), Fns.end());
-  llvm::sort(ScalarDescs, compareByVectorFnName);
+  llvm::sort(ScalarDescs.begin(), ScalarDescs.end(), compareByVectorFnName);
 }
 
 void TargetLibraryInfoImpl::addVectorizableFunctionsFromVecLib(
@@ -1480,14 +1418,6 @@ void TargetLibraryInfoImpl::addVectorizableFunctionsFromVecLib(
         {"sinf", "__svml_sinf8", 8},
         {"sinf", "__svml_sinf16", 16},
 
-        {"llvm.sin.f64", "__svml_sin2", 2},
-        {"llvm.sin.f64", "__svml_sin4", 4},
-        {"llvm.sin.f64", "__svml_sin8", 8},
-
-        {"llvm.sin.f32", "__svml_sinf4", 4},
-        {"llvm.sin.f32", "__svml_sinf8", 8},
-        {"llvm.sin.f32", "__svml_sinf16", 16},
-
         {"cos", "__svml_cos2", 2},
         {"cos", "__svml_cos4", 4},
         {"cos", "__svml_cos8", 8},
@@ -1495,14 +1425,6 @@ void TargetLibraryInfoImpl::addVectorizableFunctionsFromVecLib(
         {"cosf", "__svml_cosf4", 4},
         {"cosf", "__svml_cosf8", 8},
         {"cosf", "__svml_cosf16", 16},
-
-        {"llvm.cos.f64", "__svml_cos2", 2},
-        {"llvm.cos.f64", "__svml_cos4", 4},
-        {"llvm.cos.f64", "__svml_cos8", 8},
-
-        {"llvm.cos.f32", "__svml_cosf4", 4},
-        {"llvm.cos.f32", "__svml_cosf8", 8},
-        {"llvm.cos.f32", "__svml_cosf16", 16},
 
         {"pow", "__svml_pow2", 2},
         {"pow", "__svml_pow4", 4},

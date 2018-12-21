@@ -16,7 +16,7 @@
 #define LLVM_LIB_CODEGEN_ASMPRINTER_DEBUGHANDLERBASE_H
 
 #include "AsmPrinterHandler.h"
-#include "DbgEntityHistoryCalculator.h"
+#include "DbgValueHistoryCalculator.h"
 #include "llvm/ADT/Optional.h"
 #include "llvm/CodeGen/LexicalScopes.h"
 #include "llvm/CodeGen/MachineInstr.h"
@@ -82,9 +82,6 @@ protected:
   /// variable.  Variables are listed in order of appearance.
   DbgValueHistoryMap DbgValues;
 
-  /// Mapping of inlined labels and DBG_LABEL machine instruction.
-  DbgLabelInstrMap DbgLabels;
-
   /// Maps instruction with label emitted before instruction.
   /// FIXME: Make this private from DwarfDebug, we have the necessary accessors
   /// for it.
@@ -124,10 +121,6 @@ public:
 
   /// Return Label immediately following the instruction.
   MCSymbol *getLabelAfterInsn(const MachineInstr *MI);
-
-  /// Return the function-local offset of an instruction. A label for the
-  /// instruction \p MI should exist (\ref getLabelAfterInsn).
-  const MCExpr *getFunctionLocalOffsetAfterInsn(const MachineInstr *MI);
 
   /// If this type is derived from a base type then return base type size.
   static uint64_t getBaseTypeSize(const DITypeRef TyRef);

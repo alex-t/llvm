@@ -27,6 +27,7 @@ public:
   std::unique_ptr<PDBSymbol> getChildAtIndex(uint32_t Index) const override;
   std::unique_ptr<PDBSymbol> getNext() override;
   void reset() override;
+  DIAEnumSymbols *clone() const override;
 
 private:
   const DIASession &Session;

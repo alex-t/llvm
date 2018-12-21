@@ -16,14 +16,11 @@
 namespace llvm {
 namespace pdb {
 
-class DbiStream;
-
 class NativeExeSymbol : public NativeRawSymbol {
-  // EXE symbol is the authority on the various symbol types.
-  DbiStream *Dbi = nullptr;
-
 public:
-  NativeExeSymbol(NativeSession &Session, SymIndexId Id);
+  NativeExeSymbol(NativeSession &Session, SymIndexId SymbolId);
+
+  std::unique_ptr<NativeRawSymbol> clone() const override;
 
   std::unique_ptr<IPDBEnumSymbols>
   findChildren(PDB_SymType Type) const override;
@@ -33,6 +30,9 @@ public:
   codeview::GUID getGuid() const override;
   bool hasCTypes() const override;
   bool hasPrivateSymbols() const override;
+
+private:
+  PDBFile &File;
 };
 
 } // namespace pdb

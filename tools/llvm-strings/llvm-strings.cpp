@@ -60,27 +60,27 @@ static void strings(raw_ostream &OS, StringRef FileName, StringRef Contents) {
     if (L.size() < static_cast<size_t>(MinLength))
       return;
     if (PrintFileName)
-      OS << FileName << ": ";
+      OS << FileName << ":";
     switch (Radix) {
     case none:
       break;
     case octal:
-      OS << format("%7o ", Offset);
+      OS << format("%8o", Offset);
       break;
     case hexadecimal:
-      OS << format("%7x ", Offset);
+      OS << format("%8x", Offset);
       break;
     case decimal:
-      OS << format("%7u ", Offset);
+      OS << format("%8u", Offset);
       break;
     }
-    OS << L << '\n';
+    OS << " " << L << '\n';
   };
 
   const char *B = Contents.begin();
   const char *P = nullptr, *E = nullptr, *S = nullptr;
   for (P = Contents.begin(), E = Contents.end(); P < E; ++P) {
-    if (isPrint(*P) || *P == '\t') {
+    if (std::isgraph(*P) || std::isblank(*P)) {
       if (S == nullptr)
         S = P;
     } else if (S) {

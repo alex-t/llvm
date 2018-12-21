@@ -21,13 +21,16 @@ void MipsMCAsmInfo::anchor() { }
 MipsMCAsmInfo::MipsMCAsmInfo(const Triple &TheTriple) {
   IsLittleEndian = TheTriple.isLittleEndian();
 
-  if (TheTriple.isMIPS64() && TheTriple.getEnvironment() != Triple::GNUABIN32)
+  if ((TheTriple.getArch() == Triple::mips64el) ||
+      (TheTriple.getArch() == Triple::mips64)) {
     CodePointerSize = CalleeSaveStackSlotSize = 8;
+  }
 
   // FIXME: This condition isn't quite right but it's the best we can do until
   //        this object can identify the ABI. It will misbehave when using O32
   //        on a mips64*-* triple.
-  if (TheTriple.isMIPS32()) {
+  if ((TheTriple.getArch() == Triple::mipsel) ||
+      (TheTriple.getArch() == Triple::mips)) {
     PrivateGlobalPrefix = "$";
     PrivateLabelPrefix = "$";
   }
@@ -49,5 +52,17 @@ MipsMCAsmInfo::MipsMCAsmInfo(const Triple &TheTriple) {
   ExceptionsType = ExceptionHandling::DwarfCFI;
   DwarfRegNumForCFI = true;
   HasMipsExpressions = true;
-  UseIntegratedAssembler = true;
+
+  // Enable IAS by default for O32.
+  if (TheTriple.getArch() == Triple::mips ||
+      TheTriple.getArch() == Triple::mipsel)
+    UseIntegratedAssembler = true;
+
+  // Enable IAS by default for Debian mips64/mips64el.
+  if (TheTriple.getEnvironment() == Triple::GNUABI64)
+    UseIntegratedAssembler = true;
+
+  // Enable IAS by default for Android mips64el that uses N64 ABI.
+  if (TheTriple.getArch() == Triple::mips64el && TheTriple.isAndroid())
+    UseIntegratedAssembler = true;
 }

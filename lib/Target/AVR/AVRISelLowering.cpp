@@ -63,13 +63,6 @@ AVRTargetLowering::AVRTargetLowering(AVRTargetMachine &tm)
 
   setTruncStoreAction(MVT::i16, MVT::i8, Expand);
 
-  for (MVT VT : MVT::integer_valuetypes()) {
-    setOperationAction(ISD::ADDC, VT, Legal);
-    setOperationAction(ISD::SUBC, VT, Legal);
-    setOperationAction(ISD::ADDE, VT, Legal);
-    setOperationAction(ISD::SUBE, VT, Legal);
-  }
-
   // sub (x, imm) gets canonicalized to add (x, -imm), so for illegal types
   // revert into a sub since we don't have an add with immediate instruction.
   setOperationAction(ISD::ADD, MVT::i32, Custom);
@@ -1430,7 +1423,6 @@ MachineBasicBlock *AVRTargetLowering::insertShift(MachineInstr &MI,
                                                   MachineBasicBlock *BB) const {
   unsigned Opc;
   const TargetRegisterClass *RC;
-  bool HasRepeatedOperand = false;
   MachineFunction *F = BB->getParent();
   MachineRegisterInfo &RI = F->getRegInfo();
   const AVRTargetMachine &TM = (const AVRTargetMachine &)getTargetMachine();
@@ -1441,9 +1433,8 @@ MachineBasicBlock *AVRTargetLowering::insertShift(MachineInstr &MI,
   default:
     llvm_unreachable("Invalid shift opcode!");
   case AVR::Lsl8:
-    Opc = AVR::ADDRdRr; // LSL is an alias of ADD Rd, Rd
+    Opc = AVR::LSLRd;
     RC = &AVR::GPR8RegClass;
-    HasRepeatedOperand = true;
     break;
   case AVR::Lsl16:
     Opc = AVR::LSLWRd;
@@ -1466,9 +1457,8 @@ MachineBasicBlock *AVRTargetLowering::insertShift(MachineInstr &MI,
     RC = &AVR::DREGSRegClass;
     break;
   case AVR::Rol8:
-    Opc = AVR::ADCRdRr; // ROL is an alias of ADC Rd, Rd
+    Opc = AVR::ROLRd;
     RC = &AVR::GPR8RegClass;
-    HasRepeatedOperand = true;
     break;
   case AVR::Rol16:
     Opc = AVR::ROLWRd;
@@ -1538,11 +1528,7 @@ MachineBasicBlock *AVRTargetLowering::insertShift(MachineInstr &MI,
       .addMBB(BB)
       .addReg(ShiftAmtReg2)
       .addMBB(LoopBB);
-
-  auto ShiftMI = BuildMI(LoopBB, dl, TII.get(Opc), ShiftReg2).addReg(ShiftReg);
-  if (HasRepeatedOperand)
-    ShiftMI.addReg(ShiftReg);
-
+  BuildMI(LoopBB, dl, TII.get(Opc), ShiftReg2).addReg(ShiftReg);
   BuildMI(LoopBB, dl, TII.get(AVR::SUBIRdK), ShiftAmtReg2)
       .addReg(ShiftAmtReg)
       .addImm(1);

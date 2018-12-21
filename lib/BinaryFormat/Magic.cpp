@@ -31,7 +31,7 @@ static bool startswith(StringRef Magic, const char (&S)[N]) {
   return Magic.startswith(StringRef(S, N - 1));
 }
 
-/// Identify the magic in magic.
+/// @brief Identify the magic in magic.
 file_magic llvm::identify_magic(StringRef Magic) {
   if (Magic.size() < 4)
     return file_magic::unknown;
@@ -206,7 +206,7 @@ file_magic llvm::identify_magic(StringRef Magic) {
 }
 
 std::error_code llvm::identify_magic(const Twine &Path, file_magic &Result) {
-  auto FileOrError = MemoryBuffer::getFile(Path, -1LL, false);
+  auto FileOrError = MemoryBuffer::getFile(Path);
   if (!FileOrError)
     return FileOrError.getError();
 

@@ -26,6 +26,9 @@ def ExynosM3Model : SchedMachineModel {
   let CompleteModel         =   1; // Use the default model otherwise.
 
   list<Predicate> UnsupportedFeatures = [HasSVE];
+
+  // FIXME: Remove when all errors have been fixed.
+  let FullInstRWOverlapCheck = 0;
 }
 
 //===----------------------------------------------------------------------===//
@@ -104,6 +107,19 @@ def M3UnitNSHF : ProcResGroup<[M3UnitNSHF0,
                                M3UnitNSHF2]>;
 
 //===----------------------------------------------------------------------===//
+// Predicates.
+
+def M3BranchLinkFastPred  : SchedPredicate<[{MI->getOpcode() == AArch64::BLR &&
+                                             MI->getOperand(0).isReg() &&
+                                             MI->getOperand(0).getReg() != AArch64::LR}]>;
+def M3ResetFastPred       : SchedPredicate<[{TII->isExynosResetFast(*MI)}]>;
+def M3RotateRightFastPred : SchedPredicate<[{(MI->getOpcode() == AArch64::EXTRWrri ||
+                                              MI->getOpcode() == AArch64::EXTRXrri) &&
+                                             MI->getOperand(1).isReg() && MI->getOperand(2).isReg() &&
+                                             MI->getOperand(1).getReg() == MI->getOperand(2).getReg()}]>;
+def M3ShiftLeftFastPred   : SchedPredicate<[{TII->isExynosShiftLeftFast(*MI)}]>;
+
+//===----------------------------------------------------------------------===//
 // Coarse scheduling model.
 
 def M3WriteZ0 : SchedWriteRes<[]> { let Latency = 0;
@@ -124,23 +140,15 @@ def M3WriteAD : SchedWriteRes<[M3UnitALU,
                                              let NumMicroOps = 2; }
 def M3WriteC1 : SchedWriteRes<[M3UnitC]>   { let Latency = 1; }
 def M3WriteC2 : SchedWriteRes<[M3UnitC]>   { let Latency = 2; }
-def M3WriteAU : SchedWriteVariant<[SchedVar<IsCopyIdiomPred, [M3WriteZ0]>,
-                                   SchedVar<ExynosShiftPred, [M3WriteA1]>,
-                                   SchedVar<NoSchedPred,     [M3WriteAA]>]>;
-def M3WriteAV : SchedWriteVariant<[SchedVar<IsCopyIdiomPred, [M3WriteZ0]>,
-                                   SchedVar<NoSchedPred,     [M3WriteAA]>]>;
-def M3WriteAW : SchedWriteVariant<[SchedVar<IsZeroIdiomPred, [M3WriteZ0]>,
-                                   SchedVar<NoSchedPred,     [M3WriteAA]>]>;
-def M3WriteAX : SchedWriteVariant<[SchedVar<ExynosExtPred, [M3WriteA1]>,
-                                   SchedVar<NoSchedPred,   [M3WriteAA]>]>;
-def M3WriteAY : SchedWriteVariant<[SchedVar<ExynosRotateRightImmPred, [M3WriteA1]>,
-                                   SchedVar<NoSchedPred,              [M3WriteAA]>]>;
-def M3WriteAZ : SchedWriteVariant<[SchedVar<ExynosShiftPred, [M3WriteA1]>,
-                                   SchedVar<NoSchedPred,     [M3WriteAA]>]>;
+def M3WriteAX : SchedWriteVariant<[SchedVar<M3ResetFastPred,     [M3WriteZ0]>,
+                                   SchedVar<M3ShiftLeftFastPred, [M3WriteA1]>,
+                                   SchedVar<NoSchedPred,         [M3WriteAA]>]>;
+def M3WriteAY : SchedWriteVariant<[SchedVar<M3RotateRightFastPred, [M3WriteA1]>,
+                                   SchedVar<NoSchedPred,           [M3WriteAA]>]>;
 
 def M3WriteB1 : SchedWriteRes<[M3UnitB]> { let Latency = 1; }
-def M3WriteBX : SchedWriteVariant<[SchedVar<ExynosBranchLinkLRPred, [M3WriteAC]>,
-                                   SchedVar<NoSchedPred,            [M3WriteAB]>]>;
+def M3WriteBX : SchedWriteVariant<[SchedVar<M3BranchLinkFastPred, [M3WriteAB]>,
+                                   SchedVar<NoSchedPred,          [M3WriteAC]>]>;
 
 def M3WriteL4 : SchedWriteRes<[M3UnitL]> { let Latency = 4; }
 def M3WriteL5 : SchedWriteRes<[M3UnitL]> { let Latency = 5; }
@@ -157,24 +165,28 @@ def M3WriteLC : SchedWriteRes<[M3UnitA,
 def M3WriteLD : SchedWriteRes<[M3UnitA,
                                M3UnitL]> { let Latency = 4;
                                            let NumMicroOps = 2; }
-def M3WriteLE : SchedWriteRes<[M3UnitA,
-                               M3UnitL]> { let Latency = 6;
-                                           let NumMicroOps = 2; }
 def M3WriteLH : SchedWriteRes<[]>        { let Latency = 5;
                                            let NumMicroOps = 0; }
-def M3WriteLX : SchedWriteVariant<[SchedVar<ScaledIdxPred, [M3WriteLB]>,
-                                   SchedVar<NoSchedPred,   [M3WriteL5]>]>;
+
+def M3WriteLX : SchedWriteVariant<[SchedVar<M3ShiftLeftFastPred, [M3WriteL5]>,
+                                   SchedVar<NoSchedPred,         [M3WriteLB]>]>;
 
 def M3WriteS1 : SchedWriteRes<[M3UnitS]>   { let Latency = 1; }
 def M3WriteSA : SchedWriteRes<[M3UnitA,
                                M3UnitS,
-                               M3UnitFST]> { let Latency = 3;
+                               M3UnitFST]> { let Latency = 2;
                                              let NumMicroOps = 2; }
 def M3WriteSB : SchedWriteRes<[M3UnitA,
+                               M3UnitS]>   { let Latency = 1;
+                                             let NumMicroOps = 2; }
+def M3WriteSC : SchedWriteRes<[M3UnitA,
                                M3UnitS]>   { let Latency = 2;
                                              let NumMicroOps = 2; }
-def M3WriteSX : SchedWriteVariant<[SchedVar<ScaledIdxPred, [M3WriteSB]>,
-                                   SchedVar<NoSchedPred,   [M3WriteS1]>]>;
+
+def M3WriteSX : SchedWriteVariant<[SchedVar<M3ShiftLeftFastPred, [M3WriteS1]>,
+                                   SchedVar<NoSchedPred,         [M3WriteSB]>]>;
+def M3WriteSY : SchedWriteVariant<[SchedVar<M3ShiftLeftFastPred, [M3WriteS1]>,
+                                   SchedVar<NoSchedPred,         [M3WriteSC]>]>;
 
 def M3ReadAdrBase : SchedReadVariant<[SchedVar<ScaledIdxPred, [ReadDefault]>,
                                       SchedVar<NoSchedPred,   [ReadDefault]>]>;
@@ -204,7 +216,9 @@ def : WriteRes<WriteIM64, [M3UnitC]>  { let Latency = 4;
                                         let ResourceCycles = [2]; }
 
 // Miscellaneous instructions.
-def : SchedAlias<WriteExtr, M3WriteAY>;
+def : WriteRes<WriteExtr, [M3UnitALU,
+                           M3UnitALU]> { let Latency = 1;
+                                         let NumMicroOps = 2; }
 
 // Addressing modes.
 def : WriteRes<WriteAdr, []> { let Latency = 1;
@@ -287,22 +301,22 @@ def M3WriteNEONH   : SchedWriteRes<[M3UnitNALU,
 def M3WriteNEONI   : SchedWriteRes<[M3UnitNSHF,
                                     M3UnitS]>     { let Latency = 5;
                                                     let NumMicroOps = 2; }
-def M3WriteNEONV   : SchedWriteRes<[M3UnitFDIV0,
-                                    M3UnitFDIV1]>  { let Latency = 7;
-                                                     let NumMicroOps = 2;
-                                                     let ResourceCycles = [8, 8]; }
-def M3WriteNEONW   : SchedWriteRes<[M3UnitFDIV0,
-                                    M3UnitFDIV1]>  { let Latency = 12;
-                                                     let NumMicroOps = 2;
-                                                     let ResourceCycles = [13, 13]; }
+def M3WriteNEONV   : SchedWriteRes<[M3UnitFDIV,
+                                    M3UnitFDIV]>  { let Latency = 7;
+                                                    let NumMicroOps = 1;
+                                                    let ResourceCycles = [8]; }
+def M3WriteNEONW   : SchedWriteRes<[M3UnitFDIV,
+                                    M3UnitFDIV]>  { let Latency = 12;
+                                                    let NumMicroOps = 1;
+                                                    let ResourceCycles = [13]; }
 def M3WriteNEONX   : SchedWriteRes<[M3UnitFSQR,
                                     M3UnitFSQR]>  { let Latency = 18;
-                                                    let NumMicroOps = 2;
-                                                    let ResourceCycles = [19, 19]; }
+                                                    let NumMicroOps = 1;
+                                                    let ResourceCycles = [19]; }
 def M3WriteNEONY   : SchedWriteRes<[M3UnitFSQR,
                                     M3UnitFSQR]>  { let Latency = 25;
-                                                    let NumMicroOps = 2;
-                                                    let ResourceCycles = [26, 26]; }
+                                                    let NumMicroOps = 1;
+                                                    let ResourceCycles = [26]; }
 def M3WriteNEONZ   : SchedWriteRes<[M3UnitNMSC,
                                     M3UnitNMSC]>  { let Latency = 5;
                                                     let NumMicroOps = 2; }
@@ -351,50 +365,50 @@ def M3WriteVLDC    : SchedWriteRes<[M3UnitL,
 def M3WriteVLDD    : SchedWriteRes<[M3UnitL,
                                     M3UnitNALU]>  { let Latency = 7;
                                                     let NumMicroOps = 2;
-                                                    let ResourceCycles = [2, 1]; }
+                                                    let ResourceCycles = [2]; }
 def M3WriteVLDE    : SchedWriteRes<[M3UnitL,
                                     M3UnitNALU]>  { let Latency = 6;
                                                     let NumMicroOps = 2;
-                                                    let ResourceCycles = [2, 1]; }
+                                                    let ResourceCycles = [2]; }
 def M3WriteVLDF    : SchedWriteRes<[M3UnitL,
                                     M3UnitL]>     { let Latency = 10;
                                                     let NumMicroOps = 2;
-                                                    let ResourceCycles = [5, 5]; }
+                                                    let ResourceCycles = [5]; }
 def M3WriteVLDG    : SchedWriteRes<[M3UnitL,
                                     M3UnitNALU,
                                     M3UnitNALU]>  { let Latency = 7;
                                                     let NumMicroOps = 3;
-                                                    let ResourceCycles = [2, 1, 1]; }
+                                                    let ResourceCycles = [2]; }
 def M3WriteVLDH    : SchedWriteRes<[M3UnitL,
                                     M3UnitNALU,
                                     M3UnitNALU]>  { let Latency = 6;
                                                     let NumMicroOps = 3;
-                                                    let ResourceCycles = [2, 1, 1]; }
+                                                    let ResourceCycles = [2]; }
 def M3WriteVLDI    : SchedWriteRes<[M3UnitL,
                                     M3UnitL,
                                     M3UnitL]>     { let Latency = 12;
                                                     let NumMicroOps = 3;
-                                                    let ResourceCycles = [6, 6, 6]; }
+                                                    let ResourceCycles = [6]; }
 def M3WriteVLDJ    : SchedWriteRes<[M3UnitL,
                                     M3UnitNALU,
                                     M3UnitNALU,
                                     M3UnitNALU]>  { let Latency = 7;
                                                     let NumMicroOps = 4;
-                                                    let ResourceCycles = [2, 1, 1, 1]; }
+                                                    let ResourceCycles = [2]; }
 def M3WriteVLDK    : SchedWriteRes<[M3UnitL,
                                     M3UnitNALU,
                                     M3UnitNALU,
                                     M3UnitNALU,
                                     M3UnitNALU]>  { let Latency = 9;
                                                     let NumMicroOps = 5;
-                                                    let ResourceCycles = [4, 1, 1, 1, 1]; }
+                                                    let ResourceCycles = [4]; }
 def M3WriteVLDL    : SchedWriteRes<[M3UnitL,
                                     M3UnitNALU,
                                     M3UnitNALU,
                                     M3UnitL,
                                     M3UnitNALU]>  { let Latency = 6;
                                                     let NumMicroOps = 5;
-                                                    let ResourceCycles = [6, 1, 1, 6, 1]; }
+                                                    let ResourceCycles = [3]; }
 def M3WriteVLDM    : SchedWriteRes<[M3UnitL,
                                     M3UnitNALU,
                                     M3UnitNALU,
@@ -402,13 +416,13 @@ def M3WriteVLDM    : SchedWriteRes<[M3UnitL,
                                     M3UnitNALU,
                                     M3UnitNALU]>  { let Latency = 7;
                                                     let NumMicroOps = 6;
-                                                    let ResourceCycles = [6, 1, 1, 6, 1, 1]; }
+                                                    let ResourceCycles = [3]; }
 def M3WriteVLDN    : SchedWriteRes<[M3UnitL,
                                     M3UnitL,
                                     M3UnitL,
                                     M3UnitL]>     { let Latency = 14;
                                                     let NumMicroOps = 4;
-                                                    let ResourceCycles = [6, 6, 6, 6]; }
+                                                    let ResourceCycles = [7]; }
 def M3WriteVSTA    : WriteSequence<[WriteVST], 2>;
 def M3WriteVSTB    : WriteSequence<[WriteVST], 3>;
 def M3WriteVSTC    : WriteSequence<[WriteVST], 4>;
@@ -416,16 +430,16 @@ def M3WriteVSTD    : SchedWriteRes<[M3UnitS,
                                     M3UnitFST,
                                     M3UnitS,
                                     M3UnitFST]>   { let Latency = 7;
-                                                    let NumMicroOps = 4;
-                                                    let ResourceCycles = [1, 3, 1, 3]; }
+                                                    let NumMicroOps = 2;
+                                                    let ResourceCycles = [7]; }
 def M3WriteVSTE    : SchedWriteRes<[M3UnitS,
                                     M3UnitFST,
                                     M3UnitS,
                                     M3UnitFST,
                                     M3UnitS,
                                     M3UnitFST]>   { let Latency = 8;
-                                                    let NumMicroOps = 6;
-                                                    let ResourceCycles = [1, 3, 1, 3, 1, 3]; }
+                                                    let NumMicroOps = 3;
+                                                    let ResourceCycles = [8]; }
 def M3WriteVSTF    : SchedWriteRes<[M3UnitNALU,
                                     M3UnitFST,
                                     M3UnitFST,
@@ -433,8 +447,8 @@ def M3WriteVSTF    : SchedWriteRes<[M3UnitNALU,
                                     M3UnitFST,
                                     M3UnitS,
                                     M3UnitFST]>   { let Latency = 15;
-                                                    let NumMicroOps = 7;
-                                                    let ResourceCycles = [1, 3, 3, 1, 3, 1, 3]; }
+                                                    let NumMicroOps = 5;
+                                                    let ResourceCycles = [15]; }
 def M3WriteVSTG    : SchedWriteRes<[M3UnitNALU,
                                     M3UnitFST,
                                     M3UnitFST,
@@ -444,15 +458,15 @@ def M3WriteVSTG    : SchedWriteRes<[M3UnitNALU,
                                     M3UnitFST,
                                     M3UnitS,
                                     M3UnitFST]>   { let Latency = 16;
-                                                    let NumMicroOps = 9;
-                                                    let ResourceCycles = [1, 3, 3, 1, 3, 1, 3, 1, 3]; }
+                                                    let NumMicroOps = 6;
+                                                    let ResourceCycles = [16]; }
 def M3WriteVSTH    : SchedWriteRes<[M3UnitNALU,
                                     M3UnitFST,
                                     M3UnitFST,
                                     M3UnitS,
                                     M3UnitFST]>   { let Latency = 14;
-                                                    let NumMicroOps = 5;
-                                                    let ResourceCycles = [1, 3, 3, 1, 3]; }
+                                                    let NumMicroOps = 4;
+                                                    let ResourceCycles = [14]; }
 def M3WriteVSTI    : SchedWriteRes<[M3UnitNALU,
                                     M3UnitFST,
                                     M3UnitFST,
@@ -462,20 +476,16 @@ def M3WriteVSTI    : SchedWriteRes<[M3UnitNALU,
                                     M3UnitFST,
                                     M3UnitS,
                                     M3UnitFST]>   { let Latency = 17;
-                                                    let NumMicroOps = 9;
-                                                    let ResourceCycles = [1, 3, 3, 1, 3, 1, 3, 1, 3]; }
+                                                    let NumMicroOps = 7;
+                                                    let ResourceCycles = [17]; }
 
 // Special cases.
 def M3WriteAES     : SchedWriteRes<[M3UnitNCRY]>  { let Latency = 1; }
-def M3WriteCOPY    : SchedWriteVariant<[SchedVar<ExynosFPPred, [M3WriteNALU1]>,
-                                        SchedVar<NoSchedPred,  [M3WriteZ0]>]>;
-def M3WriteMOVI    : SchedWriteVariant<[SchedVar<IsZeroFPIdiomPred, [M3WriteZ0]>,
-                                        SchedVar<NoSchedPred,       [M3WriteNALU1]>]>;
-
-// Fast forwarding.
 def M3ReadAES      : SchedReadAdvance<1, [M3WriteAES]>;
 def M3ReadFMAC     : SchedReadAdvance<1, [M3WriteFMAC4,
                                           M3WriteFMAC5]>;
+def M3WriteMOVI    : SchedWriteVariant<[SchedVar<M3ResetFastPred, [M3WriteZ0]>,
+                                        SchedVar<NoSchedPred,     [M3WriteNALU1]>]>;
 def M3ReadNMUL     : SchedReadAdvance<1, [M3WriteNMUL3]>;
 
 // Branch instructions
@@ -486,40 +496,29 @@ def : InstRW<[M3WriteC1], (instregex "^CBN?Z[WX]")>;
 def : InstRW<[M3WriteAD], (instregex "^TBN?Z[WX]")>;
 
 // Arithmetic and logical integer instructions.
-def : InstRW<[M3WriteAZ], (instregex "^(ADD|AND|BIC|EON|EOR|ORN|SUB)[WX]rs$")>;
-def : InstRW<[M3WriteAU], (instrs ORRWrs, ORRXrs)>;
-def : InstRW<[M3WriteAX], (instregex "^(ADD|SUB)S?[WX]rx(64)?$")>;
-def : InstRW<[M3WriteAZ], (instregex "^(ADD|AND|BIC|SUB)S[WX]rs$")>;
-def : InstRW<[M3WriteAV], (instrs ADDWri, ADDXri)>;
-def : InstRW<[M3WriteAW], (instrs ORRWri, ORRXri)>;
+def : InstRW<[M3WriteA1], (instrs COPY)>;
+def : InstRW<[M3WriteAX], (instregex "^(ADD|SUB)S?Xrx64")>;
+def : InstRW<[M3WriteAX], (instregex "^(ADD|AND|BIC|EON|EOR|ORN|ORR|SUB)[WX]r[sx]$")>;
+def : InstRW<[M3WriteAX], (instregex "^(ADD|BIC|SUB)S[WX]r[sx]$")>;
+def : InstRW<[M3WriteAX], (instregex "^(ADD|AND|EOR|ORR|SUB)[WX]ri")>;
 
 // Move instructions.
-def : InstRW<[M3WriteCOPY], (instrs COPY)>;
-def : InstRW<[M3WriteZ0],   (instrs ADR, ADRP)>;
-def : InstRW<[M3WriteZ0],   (instregex "^MOV[NZ][WX]i")>;
+def : InstRW<[M3WriteZ0], (instrs ADR, ADRP)>;
+def : InstRW<[M3WriteZ0], (instregex "^MOV[NZ][WX]i")>;
 
 // Divide and multiply instructions.
 
 // Miscellaneous instructions.
+def : InstRW<[M3WriteAY], (instrs EXTRWrri, EXTRXrri)>;
 
 // Load instructions.
-def : InstRW<[M3WriteLB,
-              ReadAdrBase], (instregex "^LDR(BB|HH|SBW|SBX|SHW|SWX|SW|W|X)roW")>;
-def : InstRW<[M3WriteL5,
-              ReadAdrBase], (instregex "^LDR(BB|HH|SBW|SBX|SHW|SWX|SW|W|X)roX")>;
 def : InstRW<[M3WriteLD,
               WriteLDHi,
               WriteAdr],    (instregex "^LDP(SW|W|X)(post|pre)")>;
-def : InstRW<[M3WriteLB,
-              ReadAdrBase], (instrs PRFMroW)>;
-def : InstRW<[M3WriteL5,
-              ReadAdrBase], (instrs PRFMroX)>;
+def : InstRW<[M3WriteLX,
+              ReadAdrBase], (instregex "^PRFMro[WX]")>;
 
 // Store instructions.
-def : InstRW<[M3WriteSB,
-              ReadAdrBase], (instregex "^STR(BB|HH|W|X)roW")>;
-def : InstRW<[WriteST,
-              ReadAdrBase], (instregex "^STR(BB|HH|W|X)roX")>;
 
 // FP data instructions.
 def : InstRW<[M3WriteNSHF1],  (instregex "^FABS[DS]r")>;
@@ -556,11 +555,9 @@ def : InstRW<[WriteVLD],    (instregex "^LDUR[BDHSQ]i")>;
 def : InstRW<[WriteVLD,
               WriteAdr],    (instregex "^LDR[BDHSQ](post|pre)")>;
 def : InstRW<[WriteVLD],    (instregex "^LDR[BDHSQ]ui")>;
-def : InstRW<[M3WriteLE,
-              ReadAdrBase], (instregex "^LDR[BDHS]roW")>;
-def : InstRW<[WriteVLD,
-              ReadAdrBase], (instregex "^LDR[BDHS]roX")>;
-def : InstRW<[M3WriteLE,
+def : InstRW<[M3WriteLX,
+              ReadAdrBase], (instregex "^LDR[BDHS]ro[WX]")>;
+def : InstRW<[M3WriteLB,
               ReadAdrBase], (instregex "^LDRQro[WX]")>;
 def : InstRW<[WriteVLD,
               M3WriteLH],   (instregex "^LDN?P[DS]i")>;
@@ -578,10 +575,8 @@ def : InstRW<[WriteVST],    (instregex "^STUR[BDHSQ]i")>;
 def : InstRW<[WriteVST,
               WriteAdr],    (instregex "^STR[BDHSQ](post|pre)")>;
 def : InstRW<[WriteVST],    (instregex "^STR[BDHSQ]ui")>;
-def : InstRW<[M3WriteSA,
-              ReadAdrBase], (instregex "^STR[BDHS]roW")>;
-def : InstRW<[WriteVST,
-              ReadAdrBase], (instregex "^STR[BDHS]roX")>;
+def : InstRW<[M3WriteSY,
+              ReadAdrBase], (instregex "^STR[BDHS]ro[WX]")>;
 def : InstRW<[M3WriteSA,
               ReadAdrBase], (instregex "^STRQro[WX]")>;
 def : InstRW<[WriteVST],    (instregex "^STN?P[DSQ]i")>;
@@ -593,7 +588,7 @@ def : InstRW<[M3WriteSA,
 // ASIMD instructions.
 def : InstRW<[M3WriteNMSC3], (instregex "^[SU]ABAL?v")>;
 def : InstRW<[M3WriteNMSC1], (instregex "^[SU]ABDL?v")>;
-def : InstRW<[M3WriteNMSC1], (instregex "^((SQ)?ABS|SQNEG)v")>;
+def : InstRW<[M3WriteNMSC1], (instregex "^(SQ)?(ABS|NEG)v")>;
 def : InstRW<[M3WriteNALU1], (instregex "^(ADD|NEG|SUB)v")>;
 def : InstRW<[M3WriteNMSC3], (instregex "^[SU]?ADDL?Pv")>;
 def : InstRW<[M3WriteNMSC3], (instregex "^[SU]H(ADD|SUB)v")>;
@@ -602,6 +597,7 @@ def : InstRW<[M3WriteNMSC3], (instregex "^R?(ADD|SUB)HN2?v")>;
 def : InstRW<[M3WriteNMSC3], (instregex "^[SU]Q(ADD|SUB)v")>;
 def : InstRW<[M3WriteNMSC3], (instregex "^(SU|US)QADDv")>;
 def : InstRW<[M3WriteNMSC3], (instregex "^[SU]RHADDv")>;
+def : InstRW<[M3WriteNMSC3], (instregex "^[SU]?ADDL?Vv")>;
 def : InstRW<[M3WriteNMSC1], (instregex "^CM(EQ|GE|GT|HI|HS|LE|LT)v")>;
 def : InstRW<[M3WriteNALU1], (instregex "^CMTSTv")>;
 def : InstRW<[M3WriteNALU1], (instregex "^(AND|BIC|EOR|MVNI|NOT|ORN|ORR)v")>;

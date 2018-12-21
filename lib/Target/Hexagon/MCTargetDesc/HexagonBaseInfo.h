@@ -25,10 +25,12 @@ namespace llvm {
 /// HexagonII - This namespace holds all of the target specific flags that
 /// instruction info tracks.
 namespace HexagonII {
-  unsigned const TypeCVI_FIRST = TypeCVI_4SLOT_MPY;
-  unsigned const TypeCVI_LAST = TypeCVI_ZW;
+  unsigned const TypeCVI_FIRST = TypeCVI_HIST;
+  unsigned const TypeCVI_LAST = TypeCVI_VX_LATE;
 
   enum SubTarget {
+    HasV4SubT     = 0x3f,
+    HasV5SubT     = 0x3e,
     HasV55SubT    = 0x3c,
     HasV60SubT    = 0x38,
   };
@@ -55,117 +57,117 @@ namespace HexagonII {
   // MCInstrDesc TSFlags
   // *** Must match HexagonInstrFormat*.td ***
   enum {
-    // This 7-bit field describes the insn type.
-    TypePos = 0,
-    TypeMask = 0x7f,
+    // This 5-bit field describes the insn type.
+    TypePos  = 0,
+    TypeMask = 0x3f,
 
     // Solo instructions.
-    SoloPos = 7,
+    SoloPos  = 6,
     SoloMask = 0x1,
     // Packed only with A or X-type instructions.
-    SoloAXPos = 8,
+    SoloAXPos  = 7,
     SoloAXMask = 0x1,
     // Only A-type instruction in first slot or nothing.
-    RestrictSlot1AOKPos = 9,
+    RestrictSlot1AOKPos  = 8,
     RestrictSlot1AOKMask = 0x1,
 
     // Predicated instructions.
-    PredicatedPos = 10,
+    PredicatedPos  = 9,
     PredicatedMask = 0x1,
-    PredicatedFalsePos = 11,
+    PredicatedFalsePos  = 10,
     PredicatedFalseMask = 0x1,
-    PredicatedNewPos = 12,
+    PredicatedNewPos  = 11,
     PredicatedNewMask = 0x1,
-    PredicateLatePos = 13,
+    PredicateLatePos  = 12,
     PredicateLateMask = 0x1,
 
     // New-Value consumer instructions.
-    NewValuePos = 14,
+    NewValuePos  = 13,
     NewValueMask = 0x1,
     // New-Value producer instructions.
-    hasNewValuePos = 15,
+    hasNewValuePos  = 14,
     hasNewValueMask = 0x1,
     // Which operand consumes or produces a new value.
-    NewValueOpPos = 16,
+    NewValueOpPos  = 15,
     NewValueOpMask = 0x7,
     // Stores that can become new-value stores.
-    mayNVStorePos = 19,
+    mayNVStorePos  = 18,
     mayNVStoreMask = 0x1,
     // New-value store instructions.
-    NVStorePos = 20,
+    NVStorePos  = 19,
     NVStoreMask = 0x1,
     // Loads that can become current-value loads.
-    mayCVLoadPos = 21,
+    mayCVLoadPos  = 20,
     mayCVLoadMask = 0x1,
     // Current-value load instructions.
-    CVLoadPos = 22,
+    CVLoadPos  = 21,
     CVLoadMask = 0x1,
 
     // Extendable insns.
-    ExtendablePos = 23,
+    ExtendablePos  = 22,
     ExtendableMask = 0x1,
     // Insns must be extended.
-    ExtendedPos = 24,
+    ExtendedPos  = 23,
     ExtendedMask = 0x1,
     // Which operand may be extended.
-    ExtendableOpPos = 25,
+    ExtendableOpPos  = 24,
     ExtendableOpMask = 0x7,
     // Signed or unsigned range.
-    ExtentSignedPos = 28,
+    ExtentSignedPos  = 27,
     ExtentSignedMask = 0x1,
     // Number of bits of range before extending operand.
-    ExtentBitsPos = 29,
+    ExtentBitsPos  = 28,
     ExtentBitsMask = 0x1f,
     // Alignment power-of-two before extending operand.
-    ExtentAlignPos = 34,
+    ExtentAlignPos  = 33,
     ExtentAlignMask = 0x3,
 
-    CofMax1Pos = 36,
+    CofMax1Pos = 35,
     CofMax1Mask = 0x1,
-    CofRelax1Pos = 37,
+    CofRelax1Pos = 36,
     CofRelax1Mask = 0x1,
-    CofRelax2Pos = 38,
+    CofRelax2Pos = 37,
     CofRelax2Mask = 0x1,
 
-    RestrictNoSlot1StorePos = 39,
+    RestrictNoSlot1StorePos  = 38,
     RestrictNoSlot1StoreMask = 0x1,
 
     // Addressing mode for load/store instructions.
-    AddrModePos = 42,
+    AddrModePos  = 41,
     AddrModeMask = 0x7,
     // Access size for load/store instructions.
-    MemAccessSizePos = 45,
+    MemAccessSizePos = 44,
     MemAccesSizeMask = 0xf,
 
     // Branch predicted taken.
-    TakenPos = 49,
+    TakenPos = 48,
     TakenMask = 0x1,
 
     // Floating-point instructions.
-    FPPos = 50,
+    FPPos  = 49,
     FPMask = 0x1,
 
     // New-Value producer-2 instructions.
-    hasNewValuePos2 = 52,
+    hasNewValuePos2  = 51,
     hasNewValueMask2 = 0x1,
     // Which operand consumes or produces a new value.
-    NewValueOpPos2 = 53,
+    NewValueOpPos2  = 52,
     NewValueOpMask2 = 0x7,
 
     // Accumulator instructions.
-    AccumulatorPos = 56,
+    AccumulatorPos = 55,
     AccumulatorMask = 0x1,
 
     // Complex XU, prevent xu competition by preferring slot3
-    PrefersSlot3Pos = 57,
+    PrefersSlot3Pos = 56,
     PrefersSlot3Mask = 0x1,
 
     // v65
-    HasTmpDstPos = 60,
+    HasTmpDstPos = 59,
     HasTmpDstMask = 0x1,
 
-    CVINewPos = 62,
-    CVINewMask = 0x1,
+    CVINewPos = 61,
+    CVINewMask = 0x1
   };
 
   // *** The code above must match HexagonInstrFormat*.td *** //
@@ -174,7 +176,7 @@ namespace HexagonII {
   enum HexagonMOTargetFlagVal {
     // Hexagon-specific MachineOperand target flags.
     //
-    // When changing these, make sure to update
+    // When chaning these, make sure to update
     // getSerializableDirectMachineOperandTargetFlags and
     // getSerializableBitmaskMachineOperandTargetFlags if needed.
     MO_NO_FLAG,
@@ -187,8 +189,7 @@ namespace HexagonII {
     MO_GOT,
 
     // Low or high part of a symbol.
-    MO_LO16,
-    MO_HI16,
+    MO_LO16, MO_HI16,
 
     // Offset from the base of the SDA.
     MO_GPREL,

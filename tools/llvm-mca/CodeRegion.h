@@ -34,24 +34,22 @@
 #ifndef LLVM_TOOLS_LLVM_MCA_CODEREGION_H
 #define LLVM_TOOLS_LLVM_MCA_CODEREGION_H
 
-#include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/MC/MCInst.h"
 #include "llvm/Support/SMLoc.h"
 #include "llvm/Support/SourceMgr.h"
 #include <vector>
 
-namespace llvm {
 namespace mca {
 
-/// A region of assembly code.
+/// \brief A region of assembly code.
 ///
 /// It identifies a sequence of machine instructions.
 class CodeRegion {
   // An optional descriptor for this region.
   llvm::StringRef Description;
   // Instructions that form this region.
-  std::vector<llvm::MCInst> Instructions;
+  std::vector<std::unique_ptr<const llvm::MCInst>> Instructions;
   // Source location range.
   llvm::SMLoc RangeStart;
   llvm::SMLoc RangeEnd;
@@ -63,8 +61,8 @@ public:
   CodeRegion(llvm::StringRef Desc, llvm::SMLoc Start)
       : Description(Desc), RangeStart(Start), RangeEnd() {}
 
-  void addInstruction(const llvm::MCInst &Instruction) {
-    Instructions.emplace_back(Instruction);
+  void addInstruction(std::unique_ptr<const llvm::MCInst> Instruction) {
+    Instructions.emplace_back(std::move(Instruction));
   }
 
   llvm::SMLoc startLoc() const { return RangeStart; }
@@ -74,7 +72,10 @@ public:
   bool empty() const { return Instructions.empty(); }
   bool isLocInRange(llvm::SMLoc Loc) const;
 
-  llvm::ArrayRef<llvm::MCInst> getInstructions() const { return Instructions; }
+  const std::vector<std::unique_ptr<const llvm::MCInst>> &
+  getInstructions() const {
+    return Instructions;
+  }
 
   llvm::StringRef getDescription() const { return Description; }
 };
@@ -105,26 +106,26 @@ public:
 
   void beginRegion(llvm::StringRef Description, llvm::SMLoc Loc);
   void endRegion(llvm::SMLoc Loc);
-  void addInstruction(const llvm::MCInst &Instruction);
-  llvm::SourceMgr &getSourceMgr() const { return SM; }
+  void addInstruction(std::unique_ptr<const llvm::MCInst> Instruction);
 
   CodeRegions(llvm::SourceMgr &S) : SM(S) {
     // Create a default region for the input code sequence.
     addRegion("Default", llvm::SMLoc());
   }
 
-  llvm::ArrayRef<llvm::MCInst> getInstructionSequence(unsigned Idx) const {
+  const std::vector<std::unique_ptr<const llvm::MCInst>> &
+  getInstructionSequence(unsigned Idx) const {
     return Regions[Idx]->getInstructions();
   }
 
   bool empty() const {
-    return llvm::all_of(Regions, [](const std::unique_ptr<CodeRegion> &Region) {
-      return Region->empty();
-    });
+    return std::all_of(Regions.begin(), Regions.end(),
+                       [](const std::unique_ptr<CodeRegion> &Region) {
+                         return Region->empty();
+                       });
   }
 };
 
 } // namespace mca
-} // namespace llvm
 
 #endif

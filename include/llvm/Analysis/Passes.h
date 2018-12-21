@@ -61,10 +61,10 @@ namespace llvm {
 
   //===--------------------------------------------------------------------===//
   //
-  // createLegacyDivergenceAnalysisPass - This pass determines which branches in a GPU
+  // createDivergenceAnalysisPass - This pass determines which branches in a GPU
   // program are divergent.
   //
-  FunctionPass *createLegacyDivergenceAnalysisPass();
+  FunctionPass *createDivergenceAnalysisPass();
 
   //===--------------------------------------------------------------------===//
   //

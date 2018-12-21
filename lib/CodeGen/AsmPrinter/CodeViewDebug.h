@@ -14,7 +14,7 @@
 #ifndef LLVM_LIB_CODEGEN_ASMPRINTER_CODEVIEWDEBUG_H
 #define LLVM_LIB_CODEGEN_ASMPRINTER_CODEVIEWDEBUG_H
 
-#include "DbgEntityHistoryCalculator.h"
+#include "DbgValueHistoryCalculator.h"
 #include "DebugHandlerBase.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/DenseMap.h"
@@ -48,17 +48,11 @@ class MCStreamer;
 class MCSymbol;
 class MachineFunction;
 
-/// Collects and handles line tables information in a CodeView format.
+/// \brief Collects and handles line tables information in a CodeView format.
 class LLVM_LIBRARY_VISIBILITY CodeViewDebug : public DebugHandlerBase {
   MCStreamer &OS;
   BumpPtrAllocator Allocator;
   codeview::GlobalTypeTableBuilder TypeTable;
-
-  /// Whether to emit type record hashes into .debug$H.
-  bool EmitDebugGlobalHashes = false;
-
-  /// The codeview CPU type used by the translation unit.
-  codeview::CPUType TheCPU;
 
   /// Represents the most general definition range.
   struct LocalVarDefRange {
@@ -91,6 +85,10 @@ class LLVM_LIBRARY_VISIBILITY CodeViewDebug : public DebugHandlerBase {
   };
 
   static LocalVarDefRange createDefRangeMem(uint16_t CVRegister, int Offset);
+  static LocalVarDefRange createDefRangeGeneral(uint16_t CVRegister,
+                                                bool InMemory, int Offset,
+                                                bool IsSubfield,
+                                                uint16_t StructOffset);
 
   /// Similar to DbgVariable in DwarfDebug, but not dwarf-specific.
   struct LocalVariable {
@@ -146,33 +144,6 @@ class LLVM_LIBRARY_VISIBILITY CodeViewDebug : public DebugHandlerBase {
     const MCSymbol *End = nullptr;
     unsigned FuncId = 0;
     unsigned LastFileId = 0;
-
-    /// Number of bytes allocated in the prologue for all local stack objects.
-    unsigned FrameSize = 0;
-
-    /// Number of bytes of parameters on the stack.
-    unsigned ParamSize = 0;
-
-    /// Number of bytes pushed to save CSRs.
-    unsigned CSRSize = 0;
-
-    /// Adjustment to apply on x86 when using the VFRAME frame pointer.
-    int OffsetAdjustment = 0;
-
-    /// Two-bit value indicating which register is the designated frame pointer
-    /// register for local variables. Included in S_FRAMEPROC.
-    codeview::EncodedFramePtrReg EncodedLocalFramePtrReg =
-        codeview::EncodedFramePtrReg::None;
-
-    /// Two-bit value indicating which register is the designated frame pointer
-    /// register for stack parameters. Included in S_FRAMEPROC.
-    codeview::EncodedFramePtrReg EncodedParamFramePtrReg =
-        codeview::EncodedFramePtrReg::None;
-
-    codeview::FrameProcedureOptions FrameProcOpts;
-
-    bool HasStackRealignment = false;
-
     bool HaveLineInfo = false;
   };
   FunctionInfo *CurFn = nullptr;
@@ -254,7 +225,7 @@ class LLVM_LIBRARY_VISIBILITY CodeViewDebug : public DebugHandlerBase {
   using FileToFilepathMapTy = std::map<const DIFile *, std::string>;
   FileToFilepathMapTy FileToFilepathMap;
 
-  StringRef getFullFilepath(const DIFile *File);
+  StringRef getFullFilepath(const DIFile *S);
 
   unsigned maybeRecordFile(const DIFile *F);
 
@@ -278,8 +249,6 @@ class LLVM_LIBRARY_VISIBILITY CodeViewDebug : public DebugHandlerBase {
 
   void emitCompilerInformation();
 
-  void emitBuildInfo();
-
   void emitInlineeLinesSubsection();
 
   void emitDebugInfoForThunk(const Function *GV,
@@ -302,26 +271,17 @@ class LLVM_LIBRARY_VISIBILITY CodeViewDebug : public DebugHandlerBase {
   /// Returns an end label for use with endCVSubsection when the subsection is
   /// finished.
   MCSymbol *beginCVSubsection(codeview::DebugSubsectionKind Kind);
+
   void endCVSubsection(MCSymbol *EndLabel);
-
-  /// Opens a symbol record of the given kind. Returns an end label for use with
-  /// endSymbolRecord.
-  MCSymbol *beginSymbolRecord(codeview::SymbolKind Kind);
-  void endSymbolRecord(MCSymbol *SymEnd);
-
-  /// Emits an S_END, S_INLINESITE_END, or S_PROC_ID_END record. These records
-  /// are empty, so we emit them with a simpler assembly sequence that doesn't
-  /// involve labels.
-  void emitEndSymbolRecord(codeview::SymbolKind EndKind);
 
   void emitInlinedCallSite(const FunctionInfo &FI, const DILocation *InlinedAt,
                            const InlineSite &Site);
 
-  using InlinedEntity = DbgValueHistoryMap::InlinedEntity;
+  using InlinedVariable = DbgValueHistoryMap::InlinedVariable;
 
   void collectVariableInfo(const DISubprogram *SP);
 
-  void collectVariableInfoFromMFTable(DenseSet<InlinedEntity> &Processed);
+  void collectVariableInfoFromMFTable(DenseSet<InlinedVariable> &Processed);
 
   // Construct the lexical block tree for a routine, pruning emptpy lexical
   // scopes, and populate it with local variables.
@@ -337,11 +297,10 @@ class LLVM_LIBRARY_VISIBILITY CodeViewDebug : public DebugHandlerBase {
   void recordLocalVariable(LocalVariable &&Var, const LexicalScope *LS);
 
   /// Emits local variables in the appropriate order.
-  void emitLocalVariableList(const FunctionInfo &FI,
-                             ArrayRef<LocalVariable> Locals);
+  void emitLocalVariableList(ArrayRef<LocalVariable> Locals);
 
   /// Emits an S_LOCAL record and its associated defined ranges.
-  void emitLocalVariable(const FunctionInfo &FI, const LocalVariable &Var);
+  void emitLocalVariable(const LocalVariable &Var);
 
   /// Emits a sequence of lexical block scopes and their children.
   void emitLexicalBlockList(ArrayRef<LexicalBlock *> Blocks,
@@ -354,10 +313,6 @@ class LLVM_LIBRARY_VISIBILITY CodeViewDebug : public DebugHandlerBase {
   /// for it.
   codeview::TypeIndex getTypeIndex(DITypeRef TypeRef,
                                    DITypeRef ClassTyRef = DITypeRef());
-
-  codeview::TypeIndex
-  getTypeIndexForThisPtr(DITypeRef TypeRef,
-                         const DISubroutineType *SubroutineTy);
 
   codeview::TypeIndex getTypeIndexForReferenceTo(DITypeRef TypeRef);
 
@@ -385,10 +340,10 @@ class LLVM_LIBRARY_VISIBILITY CodeViewDebug : public DebugHandlerBase {
   codeview::TypeIndex lowerTypeModifier(const DIDerivedType *Ty);
   codeview::TypeIndex lowerTypeFunction(const DISubroutineType *Ty);
   codeview::TypeIndex lowerTypeVFTableShape(const DIDerivedType *Ty);
-  codeview::TypeIndex lowerTypeMemberFunction(
-      const DISubroutineType *Ty, const DIType *ClassTy, int ThisAdjustment,
-      bool IsStaticMethod,
-      codeview::FunctionOptions FO = codeview::FunctionOptions::None);
+  codeview::TypeIndex lowerTypeMemberFunction(const DISubroutineType *Ty,
+                                              const DIType *ClassTy,
+                                              int ThisAdjustment,
+                                              bool IsStaticMethod);
   codeview::TypeIndex lowerTypeEnum(const DICompositeType *Ty);
   codeview::TypeIndex lowerTypeClass(const DICompositeType *Ty);
   codeview::TypeIndex lowerTypeUnion(const DICompositeType *Ty);
@@ -424,21 +379,21 @@ class LLVM_LIBRARY_VISIBILITY CodeViewDebug : public DebugHandlerBase {
   unsigned getPointerSizeInBytes();
 
 protected:
-  /// Gather pre-function debug information.
+  /// \brief Gather pre-function debug information.
   void beginFunctionImpl(const MachineFunction *MF) override;
 
-  /// Gather post-function debug information.
+  /// \brief Gather post-function debug information.
   void endFunctionImpl(const MachineFunction *) override;
 
 public:
-  CodeViewDebug(AsmPrinter *AP);
+  CodeViewDebug(AsmPrinter *Asm);
 
   void setSymbolSize(const MCSymbol *, uint64_t) override {}
 
-  /// Emit the COFF section that holds the line table information.
+  /// \brief Emit the COFF section that holds the line table information.
   void endModule() override;
 
-  /// Process beginning of an instruction.
+  /// \brief Process beginning of an instruction.
   void beginInstruction(const MachineInstr *MI) override;
 };
 

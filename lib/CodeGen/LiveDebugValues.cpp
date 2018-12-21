@@ -40,8 +40,6 @@
 #include "llvm/CodeGen/TargetLowering.h"
 #include "llvm/CodeGen/TargetRegisterInfo.h"
 #include "llvm/CodeGen/TargetSubtargetInfo.h"
-#include "llvm/CodeGen/RegisterScavenging.h"
-#include "llvm/Config/llvm-config.h"
 #include "llvm/IR/DebugInfoMetadata.h"
 #include "llvm/IR/DebugLoc.h"
 #include "llvm/IR/Function.h"
@@ -66,7 +64,7 @@ using namespace llvm;
 
 STATISTIC(NumInserted, "Number of DBG_VALUE instructions inserted");
 
-// If @MI is a DBG_VALUE with debug value described by a defined
+// \brief If @MI is a DBG_VALUE with debug value described by a defined
 // register, returns the number of this register. In the other case, returns 0.
 static unsigned isDbgValueDescribedByReg(const MachineInstr &MI) {
   assert(MI.isDebugValue() && "expected a DBG_VALUE");
@@ -83,7 +81,6 @@ private:
   const TargetRegisterInfo *TRI;
   const TargetInstrInfo *TII;
   const TargetFrameLowering *TFI;
-  BitVector CalleeSavedRegs;
   LexicalScopes LS;
 
   /// Keeps track of lexical scopes associated with a user value's source
@@ -181,11 +178,11 @@ private:
   using VarLocMap = UniqueVector<VarLoc>;
   using VarLocSet = SparseBitVector<>;
   using VarLocInMBB = SmallDenseMap<const MachineBasicBlock *, VarLocSet>;
-  struct TransferDebugPair {
-    MachineInstr *TransferInst;
+  struct SpillDebugPair {
+    MachineInstr *SpillInst;
     MachineInstr *DebugInst;
   };
-  using TransferMap = SmallVector<TransferDebugPair, 4>;
+  using SpillMap = SmallVector<SpillDebugPair, 4>;
 
   /// This holds the working set of currently open ranges. For fast
   /// access, this is done both as a set of VarLocIDs, and a map of
@@ -238,28 +235,22 @@ private:
   bool isSpillInstruction(const MachineInstr &MI, MachineFunction *MF,
                           unsigned &Reg);
   int extractSpillBaseRegAndOffset(const MachineInstr &MI, unsigned &Reg);
-  void insertTransferDebugPair(MachineInstr &MI, OpenRangesSet &OpenRanges,
-                               TransferMap &Transfers, VarLocMap &VarLocIDs,
-                               unsigned OldVarID, unsigned NewReg = 0);
 
   void transferDebugValue(const MachineInstr &MI, OpenRangesSet &OpenRanges,
                           VarLocMap &VarLocIDs);
   void transferSpillInst(MachineInstr &MI, OpenRangesSet &OpenRanges,
-                         VarLocMap &VarLocIDs, TransferMap &Transfers);
-  void transferRegisterCopy(MachineInstr &MI, OpenRangesSet &OpenRanges,
-                            VarLocMap &VarLocIDs, TransferMap &Transfers);
+                         VarLocMap &VarLocIDs, SpillMap &Spills);
   void transferRegisterDef(MachineInstr &MI, OpenRangesSet &OpenRanges,
                            const VarLocMap &VarLocIDs);
   bool transferTerminatorInst(MachineInstr &MI, OpenRangesSet &OpenRanges,
                               VarLocInMBB &OutLocs, const VarLocMap &VarLocIDs);
-  bool process(MachineInstr &MI, OpenRangesSet &OpenRanges,
-               VarLocInMBB &OutLocs, VarLocMap &VarLocIDs,
-               TransferMap &Transfers, bool transferChanges);
+  bool transfer(MachineInstr &MI, OpenRangesSet &OpenRanges,
+                VarLocInMBB &OutLocs, VarLocMap &VarLocIDs, SpillMap &Spills,
+                bool transferSpills);
 
   bool join(MachineBasicBlock &MBB, VarLocInMBB &OutLocs, VarLocInMBB &InLocs,
             const VarLocMap &VarLocIDs,
-            SmallPtrSet<const MachineBasicBlock *, 16> &Visited,
-            SmallPtrSetImpl<const MachineBasicBlock *> &ArtificialBlocks);
+            SmallPtrSet<const MachineBasicBlock *, 16> &Visited);
 
   bool ExtendRanges(MachineFunction &MF);
 
@@ -324,10 +315,8 @@ void LiveDebugValues::printVarLocInMBB(const MachineFunction &MF,
                                        raw_ostream &Out) const {
   Out << '\n' << msg << '\n';
   for (const MachineBasicBlock &BB : MF) {
-    const VarLocSet &L = V.lookup(&BB);
-    if (L.empty())
-      continue;
-    Out << "MBB: " << BB.getNumber() << ":\n";
+    const auto &L = V.lookup(&BB);
+    Out << "MBB: " << BB.getName() << ":\n";
     for (unsigned VLL : L) {
       const VarLoc &VL = VarLocIDs[VLL];
       Out << " Var: " << VL.Var.getVar()->getName();
@@ -343,7 +332,7 @@ void LiveDebugValues::printVarLocInMBB(const MachineFunction &MF,
 /// address the spill location in a target independent way.
 int LiveDebugValues::extractSpillBaseRegAndOffset(const MachineInstr &MI,
                                                   unsigned &Reg) {
-  assert(MI.hasOneMemOperand() &&
+  assert(MI.hasOneMemOperand() && 
          "Spill instruction does not have exactly one memory operand?");
   auto MMOI = MI.memoperands_begin();
   const PseudoSourceValue *PVal = (*MMOI)->getPseudoValue();
@@ -378,54 +367,6 @@ void LiveDebugValues::transferDebugValue(const MachineInstr &MI,
     unsigned ID = VarLocIDs.insert(VL);
     OpenRanges.insert(ID, VL.Var);
   }
-}
-
-/// Create new TransferDebugPair and insert it in \p Transfers. The VarLoc
-/// with \p OldVarID should be deleted form \p OpenRanges and replaced with
-/// new VarLoc. If \p NewReg is different than default zero value then the
-/// new location will be register location created by the copy like instruction,
-/// otherwise it is variable's location on the stack.
-void LiveDebugValues::insertTransferDebugPair(
-    MachineInstr &MI, OpenRangesSet &OpenRanges, TransferMap &Transfers,
-    VarLocMap &VarLocIDs, unsigned OldVarID, unsigned NewReg) {
-  const MachineInstr *DMI = &VarLocIDs[OldVarID].MI;
-  MachineFunction *MF = MI.getParent()->getParent();
-  MachineInstr *NewDMI;
-  if (NewReg) {
-    // Create a DBG_VALUE instruction to describe the Var in its new
-    // register location.
-    NewDMI = BuildMI(*MF, DMI->getDebugLoc(), DMI->getDesc(),
-                     DMI->isIndirectDebugValue(), NewReg,
-                     DMI->getDebugVariable(), DMI->getDebugExpression());
-    if (DMI->isIndirectDebugValue())
-      NewDMI->getOperand(1).setImm(DMI->getOperand(1).getImm());
-    LLVM_DEBUG(dbgs() << "Creating DBG_VALUE inst for register copy: ";
-               NewDMI->print(dbgs(), false, false, false, TII));
-  } else {
-    // Create a DBG_VALUE instruction to describe the Var in its spilled
-    // location.
-    unsigned SpillBase;
-    int SpillOffset = extractSpillBaseRegAndOffset(MI, SpillBase);
-    auto *SpillExpr = DIExpression::prepend(DMI->getDebugExpression(),
-                                            DIExpression::NoDeref, SpillOffset);
-    NewDMI = BuildMI(*MF, DMI->getDebugLoc(), DMI->getDesc(), true, SpillBase,
-                     DMI->getDebugVariable(), SpillExpr);
-    LLVM_DEBUG(dbgs() << "Creating DBG_VALUE inst for spill: ";
-               NewDMI->print(dbgs(), false, false, false, TII));
-  }
-
-  // The newly created DBG_VALUE instruction NewDMI must be inserted after
-  // MI. Keep track of the pairing.
-  TransferDebugPair MIP = {&MI, NewDMI};
-  Transfers.push_back(MIP);
-
-  // End all previous ranges of Var.
-  OpenRanges.erase(VarLocIDs[OldVarID].Var);
-
-  // Add the VarLoc to OpenRanges.
-  VarLoc VL(*NewDMI, LS);
-  unsigned LocID = VarLocIDs.insert(VL);
-  OpenRanges.insert(LocID, VL.Var);
 }
 
 /// A definition of a register may mark the end of a range.
@@ -473,21 +414,16 @@ bool LiveDebugValues::isSpillInstruction(const MachineInstr &MI,
                                          MachineFunction *MF, unsigned &Reg) {
   const MachineFrameInfo &FrameInfo = MF->getFrameInfo();
   int FI;
-  SmallVector<const MachineMemOperand*, 1> Accesses;
+  const MachineMemOperand *MMO;
 
-  // TODO: Handle multiple stores folded into one.
+  // TODO: Handle multiple stores folded into one. 
   if (!MI.hasOneMemOperand())
     return false;
 
   // To identify a spill instruction, use the same criteria as in AsmPrinter.
-  if (!((TII->isStoreToStackSlotPostFE(MI, FI) &&
-         FrameInfo.isSpillSlotObjectIndex(FI)) ||
-        (TII->hasStoreToStackSlot(MI, Accesses) &&
-         llvm::any_of(Accesses, [&FrameInfo](const MachineMemOperand *MMO) {
-           return FrameInfo.isSpillSlotObjectIndex(
-               cast<FixedStackPseudoSourceValue>(MMO->getPseudoValue())
-                   ->getFrameIndex());
-         }))))
+  if (!((TII->isStoreToStackSlotPostFE(MI, FI) ||
+         TII->hasStoreToStackSlot(MI, MMO, FI)) &&
+        FrameInfo.isSpillSlotObjectIndex(FI)))
     return false;
 
   auto isKilledReg = [&](const MachineOperand MO, unsigned &Reg) {
@@ -527,14 +463,14 @@ bool LiveDebugValues::isSpillInstruction(const MachineInstr &MI,
 
 /// A spilled register may indicate that we have to end the current range of
 /// a variable and create a new one for the spill location.
-/// We don't want to insert any instructions in process(), so we just create
-/// the DBG_VALUE without inserting it and keep track of it in \p Transfers.
+/// We don't want to insert any instructions in transfer(), so we just create
+/// the DBG_VALUE witout inserting it and keep track of it in @Spills.
 /// It will be inserted into the BB when we're done iterating over the
 /// instructions.
 void LiveDebugValues::transferSpillInst(MachineInstr &MI,
                                         OpenRangesSet &OpenRanges,
                                         VarLocMap &VarLocIDs,
-                                        TransferMap &Transfers) {
+                                        SpillMap &Spills) {
   unsigned Reg;
   MachineFunction *MF = MI.getMF();
   if (!isSpillInstruction(MI, MF, Reg))
@@ -543,49 +479,35 @@ void LiveDebugValues::transferSpillInst(MachineInstr &MI,
   // Check if the register is the location of a debug value.
   for (unsigned ID : OpenRanges.getVarLocs()) {
     if (VarLocIDs[ID].isDescribedByReg() == Reg) {
-      LLVM_DEBUG(dbgs() << "Spilling Register " << printReg(Reg, TRI) << '('
-                        << VarLocIDs[ID].Var.getVar()->getName() << ")\n");
-      insertTransferDebugPair(MI, OpenRanges, Transfers, VarLocIDs, ID);
-      return;
-    }
-  }
-}
+      DEBUG(dbgs() << "Spilling Register " << printReg(Reg, TRI) << '('
+                   << VarLocIDs[ID].Var.getVar()->getName() << ")\n");
 
-/// If \p MI is a register copy instruction, that copies a previously tracked
-/// value from one register to another register that is callee saved, we
-/// create new DBG_VALUE instruction  described with copy destination register.
-void LiveDebugValues::transferRegisterCopy(MachineInstr &MI,
-                                           OpenRangesSet &OpenRanges,
-                                           VarLocMap &VarLocIDs,
-                                           TransferMap &Transfers) {
-  const MachineOperand *SrcRegOp, *DestRegOp;
+      // Create a DBG_VALUE instruction to describe the Var in its spilled
+      // location, but don't insert it yet to avoid invalidating the
+      // iterator in our caller.
+      unsigned SpillBase;
+      int SpillOffset = extractSpillBaseRegAndOffset(MI, SpillBase);
+      const MachineInstr *DMI = &VarLocIDs[ID].MI;
+      auto *SpillExpr = DIExpression::prepend(
+          DMI->getDebugExpression(), DIExpression::NoDeref, SpillOffset);
+      MachineInstr *SpDMI =
+          BuildMI(*MF, DMI->getDebugLoc(), DMI->getDesc(), true, SpillBase,
+                  DMI->getDebugVariable(), SpillExpr);
+      DEBUG(dbgs() << "Creating DBG_VALUE inst for spill: ";
+            SpDMI->print(dbgs(), false, TII));
 
-  if (!TII->isCopyInstr(MI, SrcRegOp, DestRegOp) || !SrcRegOp->isKill() ||
-      !DestRegOp->isDef())
-    return;
+      // The newly created DBG_VALUE instruction SpDMI must be inserted after
+      // MI. Keep track of the pairing.
+      SpillDebugPair MIP = {&MI, SpDMI};
+      Spills.push_back(MIP);
 
-  auto isCalleSavedReg = [&](unsigned Reg) {
-    for (MCRegAliasIterator RAI(Reg, TRI, true); RAI.isValid(); ++RAI)
-      if (CalleeSavedRegs.test(*RAI))
-        return true;
-    return false;
-  };
+      // End all previous ranges of Var.
+      OpenRanges.erase(VarLocIDs[ID].Var);
 
-  unsigned SrcReg = SrcRegOp->getReg();
-  unsigned DestReg = DestRegOp->getReg();
-
-  // We want to recognize instructions where destination register is callee
-  // saved register. If register that could be clobbered by the call is
-  // included, there would be a great chance that it is going to be clobbered
-  // soon. It is more likely that previous register location, which is callee
-  // saved, is going to stay unclobbered longer, even if it is killed.
-  if (!isCalleSavedReg(DestReg))
-    return;
-
-  for (unsigned ID : OpenRanges.getVarLocs()) {
-    if (VarLocIDs[ID].isDescribedByReg() == SrcReg) {
-      insertTransferDebugPair(MI, OpenRanges, Transfers, VarLocIDs, ID,
-                              DestReg);
+      // Add the VarLoc to OpenRanges.
+      VarLoc VL(*SpDMI, LS);
+      unsigned SpillLocID = VarLocIDs.insert(VL);
+      OpenRanges.insert(SpillLocID, VL.Var);
       return;
     }
   }
@@ -604,12 +526,10 @@ bool LiveDebugValues::transferTerminatorInst(MachineInstr &MI,
   if (OpenRanges.empty())
     return false;
 
-  LLVM_DEBUG(for (unsigned ID
-                  : OpenRanges.getVarLocs()) {
-    // Copy OpenRanges to OutLocs, if not already present.
-    dbgs() << "Add to OutLocs in MBB #" << CurMBB->getNumber() << ":  ";
-    VarLocIDs[ID].dump();
-  });
+  DEBUG(for (unsigned ID : OpenRanges.getVarLocs()) {
+          // Copy OpenRanges to OutLocs, if not already present.
+          dbgs() << "Add to OutLocs: "; VarLocIDs[ID].dump();
+        });
   VarLocSet &VLS = OutLocs[CurMBB];
   Changed = VLS |= OpenRanges.getVarLocs();
   OpenRanges.clear();
@@ -617,16 +537,14 @@ bool LiveDebugValues::transferTerminatorInst(MachineInstr &MI,
 }
 
 /// This routine creates OpenRanges and OutLocs.
-bool LiveDebugValues::process(MachineInstr &MI, OpenRangesSet &OpenRanges,
-                              VarLocInMBB &OutLocs, VarLocMap &VarLocIDs,
-                              TransferMap &Transfers, bool transferChanges) {
+bool LiveDebugValues::transfer(MachineInstr &MI, OpenRangesSet &OpenRanges,
+                               VarLocInMBB &OutLocs, VarLocMap &VarLocIDs,
+                               SpillMap &Spills, bool transferSpills) {
   bool Changed = false;
   transferDebugValue(MI, OpenRanges, VarLocIDs);
   transferRegisterDef(MI, OpenRanges, VarLocIDs);
-  if (transferChanges) {
-    transferRegisterCopy(MI, OpenRanges, VarLocIDs, Transfers);
-    transferSpillInst(MI, OpenRanges, VarLocIDs, Transfers);
-  }
+  if (transferSpills)
+    transferSpillInst(MI, OpenRanges, VarLocIDs, Spills);
   Changed = transferTerminatorInst(MI, OpenRanges, OutLocs, VarLocIDs);
   return Changed;
 }
@@ -634,12 +552,10 @@ bool LiveDebugValues::process(MachineInstr &MI, OpenRangesSet &OpenRanges,
 /// This routine joins the analysis results of all incoming edges in @MBB by
 /// inserting a new DBG_VALUE instruction at the start of the @MBB - if the same
 /// source variable in all the predecessors of @MBB reside in the same location.
-bool LiveDebugValues::join(
-    MachineBasicBlock &MBB, VarLocInMBB &OutLocs, VarLocInMBB &InLocs,
-    const VarLocMap &VarLocIDs,
-    SmallPtrSet<const MachineBasicBlock *, 16> &Visited,
-    SmallPtrSetImpl<const MachineBasicBlock *> &ArtificialBlocks) {
-  LLVM_DEBUG(dbgs() << "join MBB: " << MBB.getNumber() << "\n");
+bool LiveDebugValues::join(MachineBasicBlock &MBB, VarLocInMBB &OutLocs,
+                           VarLocInMBB &InLocs, const VarLocMap &VarLocIDs,
+                           SmallPtrSet<const MachineBasicBlock *, 16> &Visited) {
+  DEBUG(dbgs() << "join MBB: " << MBB.getName() << "\n");
   bool Changed = false;
 
   VarLocSet InLocsT; // Temporary incoming locations.
@@ -651,11 +567,8 @@ bool LiveDebugValues::join(
     // Ignore unvisited predecessor blocks.  As we are processing
     // the blocks in reverse post-order any unvisited block can
     // be considered to not remove any incoming values.
-    if (!Visited.count(p)) {
-      LLVM_DEBUG(dbgs() << "  ignoring unvisited pred MBB: " << p->getNumber()
-                        << "\n");
+    if (!Visited.count(p))
       continue;
-    }
     auto OL = OutLocs.find(p);
     // Join is null in case of empty OutLocs from any of the pred.
     if (OL == OutLocs.end())
@@ -667,32 +580,14 @@ bool LiveDebugValues::join(
       InLocsT = OL->second;
     else
       InLocsT &= OL->second;
-
-    LLVM_DEBUG({
-      if (!InLocsT.empty()) {
-        for (auto ID : InLocsT)
-          dbgs() << "  gathered candidate incoming var: "
-                 << VarLocIDs[ID].Var.getVar()->getName() << "\n";
-      }
-    });
-
     NumVisited++;
   }
 
   // Filter out DBG_VALUES that are out of scope.
   VarLocSet KillSet;
-  bool IsArtificial = ArtificialBlocks.count(&MBB);
-  if (!IsArtificial) {
-    for (auto ID : InLocsT) {
-      if (!VarLocIDs[ID].dominates(MBB)) {
-        KillSet.set(ID);
-        LLVM_DEBUG({
-          auto Name = VarLocIDs[ID].Var.getVar()->getName();
-          dbgs() << "  killing " << Name << ", it doesn't dominate MBB\n";
-        });
-      }
-    }
-  }
+  for (auto ID : InLocsT)
+    if (!VarLocIDs[ID].dominates(MBB))
+      KillSet.set(ID);
   InLocsT.intersectWithComplement(KillSet);
 
   // As we are processing blocks in reverse post-order we
@@ -711,7 +606,7 @@ bool LiveDebugValues::join(
   for (auto ID : Diff) {
     // This VarLoc is not found in InLocs i.e. it is not yet inserted. So, a
     // new range is started for the var from the mbb's beginning by inserting
-    // a new DBG_VALUE. process() will end this range however appropriate.
+    // a new DBG_VALUE. transfer() will end this range however appropriate.
     const VarLoc &DiffIt = VarLocIDs[ID];
     const MachineInstr *DMI = &DiffIt.MI;
     MachineInstr *MI =
@@ -720,7 +615,7 @@ bool LiveDebugValues::join(
                 DMI->getDebugVariable(), DMI->getDebugExpression());
     if (DMI->isIndirectDebugValue())
       MI->getOperand(1).setImm(DMI->getOperand(1).getImm());
-    LLVM_DEBUG(dbgs() << "Inserted: "; MI->dump(););
+    DEBUG(dbgs() << "Inserted: "; MI->dump(););
     ILS.set(ID);
     ++NumInserted;
     Changed = true;
@@ -731,7 +626,7 @@ bool LiveDebugValues::join(
 /// Calculate the liveness information for the given machine function and
 /// extend ranges across basic blocks.
 bool LiveDebugValues::ExtendRanges(MachineFunction &MF) {
-  LLVM_DEBUG(dbgs() << "\nDebug Range Extension\n");
+  DEBUG(dbgs() << "\nDebug Range Extension\n");
 
   bool Changed = false;
   bool OLChanged = false;
@@ -741,11 +636,7 @@ bool LiveDebugValues::ExtendRanges(MachineFunction &MF) {
   OpenRangesSet OpenRanges; // Ranges that are open until end of bb.
   VarLocInMBB OutLocs;      // Ranges that exist beyond bb.
   VarLocInMBB InLocs;       // Ranges that are incoming after joining.
-  TransferMap Transfers;    // DBG_VALUEs associated with spills.
-
-  // Blocks which are artificial, i.e. blocks which exclusively contain
-  // instructions without locations, or with line 0 locations.
-  SmallPtrSet<const MachineBasicBlock *, 16> ArtificialBlocks;
+  SpillMap Spills;          // DBG_VALUEs associated with spills.
 
   DenseMap<unsigned int, MachineBasicBlock *> OrderToBB;
   DenseMap<MachineBasicBlock *, unsigned int> BBToOrder;
@@ -756,8 +647,6 @@ bool LiveDebugValues::ExtendRanges(MachineFunction &MF) {
                       std::greater<unsigned int>>
       Pending;
 
-  enum : bool { dontTransferChanges = false, transferChanges = true };
-
   // Initialize every mbb with OutLocs.
   // We are not looking at any spill instructions during the initial pass
   // over the BBs. The LiveDebugVariables pass has already created DBG_VALUE
@@ -765,20 +654,11 @@ bool LiveDebugValues::ExtendRanges(MachineFunction &MF) {
   // within the BB in which the spill occurs.
   for (auto &MBB : MF)
     for (auto &MI : MBB)
-      process(MI, OpenRanges, OutLocs, VarLocIDs, Transfers,
-              dontTransferChanges);
+      transfer(MI, OpenRanges, OutLocs, VarLocIDs, Spills,
+               /*transferSpills=*/false);
 
-  auto hasNonArtificialLocation = [](const MachineInstr &MI) -> bool {
-    if (const DebugLoc &DL = MI.getDebugLoc())
-      return DL.getLine() != 0;
-    return false;
-  };
-  for (auto &MBB : MF)
-    if (none_of(MBB.instrs(), hasNonArtificialLocation))
-      ArtificialBlocks.insert(&MBB);
-
-  LLVM_DEBUG(printVarLocInMBB(MF, OutLocs, VarLocIDs,
-                              "OutLocs after initialization", dbgs()));
+  DEBUG(printVarLocInMBB(MF, OutLocs, VarLocIDs, "OutLocs after initialization",
+                         dbgs()));
 
   ReversePostOrderTraversal<MachineFunction *> RPOT(&MF);
   unsigned int RPONumber = 0;
@@ -789,7 +669,7 @@ bool LiveDebugValues::ExtendRanges(MachineFunction &MF) {
     ++RPONumber;
   }
   // This is a standard "union of predecessor outs" dataflow problem.
-  // To solve it, we perform join() and process() using the two worklist method
+  // To solve it, we perform join() and transfer() using the two worklist method
   // until the ranges converge.
   // Ranges have converged when both worklists are empty.
   SmallPtrSet<const MachineBasicBlock *, 16> Visited;
@@ -798,12 +678,11 @@ bool LiveDebugValues::ExtendRanges(MachineFunction &MF) {
     // thing twice.  We could avoid this with a custom priority queue, but this
     // is probably not worth it.
     SmallPtrSet<MachineBasicBlock *, 16> OnPending;
-    LLVM_DEBUG(dbgs() << "Processing Worklist\n");
+    DEBUG(dbgs() << "Processing Worklist\n");
     while (!Worklist.empty()) {
       MachineBasicBlock *MBB = OrderToBB[Worklist.top()];
       Worklist.pop();
-      MBBJoined =
-          join(*MBB, OutLocs, InLocs, VarLocIDs, Visited, ArtificialBlocks);
+      MBBJoined = join(*MBB, OutLocs, InLocs, VarLocIDs, Visited);
       Visited.insert(MBB);
       if (MBBJoined) {
         MBBJoined = false;
@@ -812,19 +691,19 @@ bool LiveDebugValues::ExtendRanges(MachineFunction &MF) {
         // examine spill instructions to see whether they spill registers that
         // correspond to user variables.
         for (auto &MI : *MBB)
-          OLChanged |= process(MI, OpenRanges, OutLocs, VarLocIDs, Transfers,
-                               transferChanges);
+          OLChanged |= transfer(MI, OpenRanges, OutLocs, VarLocIDs, Spills,
+                                /*transferSpills=*/true);
 
         // Add any DBG_VALUE instructions necessitated by spills.
-        for (auto &TR : Transfers)
-          MBB->insertAfter(MachineBasicBlock::iterator(*TR.TransferInst),
-                           TR.DebugInst);
-        Transfers.clear();
+        for (auto &SP : Spills)
+          MBB->insertAfter(MachineBasicBlock::iterator(*SP.SpillInst),
+                           SP.DebugInst);
+        Spills.clear();
 
-        LLVM_DEBUG(printVarLocInMBB(MF, OutLocs, VarLocIDs,
-                                    "OutLocs after propagating", dbgs()));
-        LLVM_DEBUG(printVarLocInMBB(MF, InLocs, VarLocIDs,
-                                    "InLocs after propagating", dbgs()));
+        DEBUG(printVarLocInMBB(MF, OutLocs, VarLocIDs,
+                               "OutLocs after propagating", dbgs()));
+        DEBUG(printVarLocInMBB(MF, InLocs, VarLocIDs,
+                               "InLocs after propagating", dbgs()));
 
         if (OLChanged) {
           OLChanged = false;
@@ -841,8 +720,8 @@ bool LiveDebugValues::ExtendRanges(MachineFunction &MF) {
     assert(Pending.empty() && "Pending should be empty");
   }
 
-  LLVM_DEBUG(printVarLocInMBB(MF, OutLocs, VarLocIDs, "Final OutLocs", dbgs()));
-  LLVM_DEBUG(printVarLocInMBB(MF, InLocs, VarLocIDs, "Final InLocs", dbgs()));
+  DEBUG(printVarLocInMBB(MF, OutLocs, VarLocIDs, "Final OutLocs", dbgs()));
+  DEBUG(printVarLocInMBB(MF, InLocs, VarLocIDs, "Final InLocs", dbgs()));
   return Changed;
 }
 
@@ -859,8 +738,6 @@ bool LiveDebugValues::runOnMachineFunction(MachineFunction &MF) {
   TRI = MF.getSubtarget().getRegisterInfo();
   TII = MF.getSubtarget().getInstrInfo();
   TFI = MF.getSubtarget().getFrameLowering();
-  TFI->determineCalleeSaves(MF, CalleeSavedRegs,
-                            make_unique<RegScavenger>().get());
   LS.initialize(MF);
 
   bool Changed = ExtendRanges(MF);

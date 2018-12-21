@@ -11,7 +11,7 @@
 ; CHECK:       Data
 ; CHECK-SAME:  Latency=3
 ; CHECK-NEXT:  Data
-; CHECK-SAME:  Latency=0
+; CHECK-SAME:  Latency=3
 
 define i32 @foo(i32* %a) nounwind optsize {
 entry:

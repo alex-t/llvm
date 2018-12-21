@@ -40,12 +40,11 @@ namespace orc {
 
 class KaleidoscopeJIT {
 public:
-  using ObjLayerT = LegacyRTDyldObjectLinkingLayer;
-  using CompileLayerT = LegacyIRCompileLayer<ObjLayerT, SimpleCompiler>;
+  using ObjLayerT = RTDyldObjectLinkingLayer;
+  using CompileLayerT = IRCompileLayer<ObjLayerT, SimpleCompiler>;
 
   KaleidoscopeJIT()
       : Resolver(createLegacyLookupResolver(
-            ES,
             [this](const std::string &Name) {
               return ObjectLayer.findSymbol(Name, true);
             },
@@ -89,7 +88,7 @@ private:
   }
 
   JITSymbol findMangledSymbol(const std::string &Name) {
-#ifdef _WIN32
+#ifdef LLVM_ON_WIN32
     // The symbol lookup of ObjectLinkingLayer uses the SymbolRef::SF_Exported
     // flag to decide whether a symbol will be visible or not, when we call
     // IRCompileLayer::findSymbolIn with ExportedSymbolsOnly set to true.
@@ -113,7 +112,7 @@ private:
     if (auto SymAddr = RTDyldMemoryManager::getSymbolAddressInProcess(Name))
       return JITSymbol(SymAddr, JITSymbolFlags::Exported);
 
-#ifdef _WIN32
+#ifdef LLVM_ON_WIN32
     // For Windows retry without "_" at beginning, as RTDyldMemoryManager uses
     // GetProcAddress and standard libraries like msvcrt.dll use names
     // with and without "_" (for example "_itoa" but "sin").

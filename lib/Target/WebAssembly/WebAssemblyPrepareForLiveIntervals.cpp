@@ -8,7 +8,7 @@
 //===----------------------------------------------------------------------===//
 ///
 /// \file
-/// Fix up code to meet LiveInterval's requirements.
+/// \brief Fix up code to meet LiveInterval's requirements.
 ///
 /// Some CodeGen passes don't preserve LiveInterval's requirements, because
 /// they run after register allocation and it isn't important. However,
@@ -70,9 +70,8 @@ static bool HasArgumentDef(unsigned Reg, const MachineRegisterInfo &MRI) {
   return false;
 }
 
-bool WebAssemblyPrepareForLiveIntervals::runOnMachineFunction(
-    MachineFunction &MF) {
-  LLVM_DEBUG({
+bool WebAssemblyPrepareForLiveIntervals::runOnMachineFunction(MachineFunction &MF) {
+  DEBUG({
     dbgs() << "********** Prepare For LiveIntervals **********\n"
            << "********** Function: " << MF.getName() << '\n';
   });
@@ -113,7 +112,7 @@ bool WebAssemblyPrepareForLiveIntervals::runOnMachineFunction(
 
   // Move ARGUMENT_* instructions to the top of the entry block, so that their
   // liveness reflects the fact that these really are live-in values.
-  for (auto MII = Entry.begin(), MIE = Entry.end(); MII != MIE;) {
+  for (auto MII = Entry.begin(), MIE = Entry.end(); MII != MIE; ) {
     MachineInstr &MI = *MII++;
     if (WebAssembly::isArgument(MI)) {
       MI.removeFromParent();

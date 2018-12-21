@@ -30,7 +30,7 @@ public:
                                         MachineModuleInfo *MMI,
                                         MCStreamer &Streamer) const override;
 
-  /// Describe a TLS variable address within debug info.
+  /// \brief Describe a TLS variable address within debug info.
   const MCExpr *getDebugThreadLocalSymbol(const MCSymbol *Sym) const override;
 
   MCSection *getExplicitSectionGlobal(const GlobalObject *GO, SectionKind Kind,

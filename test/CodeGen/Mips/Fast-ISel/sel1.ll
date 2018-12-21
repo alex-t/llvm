@@ -7,12 +7,13 @@ define i1 @sel_i1(i1 %j, i1 %k, i1 %l) {
 ; CHECK-LABEL: sel_i1:
 ; CHECK:       # %bb.0: # %entry
 ; CHECK-NEXT:    xor $1, $4, $zero
+; CHECK-NEXT:    sltu $1, $zero, $1
 ; CHECK-NEXT:    andi $1, $1, 1
 ; CHECK-NEXT:    movn $6, $5, $1
 ; CHECK-NEXT:    jr $ra
 ; CHECK-NEXT:    move $2, $6
 entry:
-  %cond = xor i1 %j, false
+  %cond = icmp ne i1 %j, 0
   %res = select i1 %cond, i1 %k, i1 %l
   ret i1 %res
 }

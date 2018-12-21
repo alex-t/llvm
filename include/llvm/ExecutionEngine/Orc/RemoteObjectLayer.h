@@ -322,7 +322,7 @@ public:
             *this, &ThisT::lookupInLogicalDylib);
   }
 
-  /// Add an object to the JIT.
+  /// @brief Add an object to the JIT.
   ///
   /// @return A handle that can be used to refer to the loaded object (for
   ///         symbol searching, finalization, freeing memory, etc.).
@@ -340,26 +340,26 @@ public:
       return HandleOrErr.takeError();
   }
 
-  /// Remove the given object from the JIT.
+  /// @brief Remove the given object from the JIT.
   Error removeObject(ObjHandleT H) {
     return this->Remote.template callB<RemoveObject>(H);
   }
 
-  /// Search for the given named symbol.
+  /// @brief Search for the given named symbol.
   JITSymbol findSymbol(StringRef Name, bool ExportedSymbolsOnly) {
     return remoteToJITSymbol(
              this->Remote.template callB<FindSymbol>(Name,
                                                      ExportedSymbolsOnly));
   }
 
-  /// Search for the given named symbol within the given context.
+  /// @brief Search for the given named symbol within the given context.
   JITSymbol findSymbolIn(ObjHandleT H, StringRef Name, bool ExportedSymbolsOnly) {
     return remoteToJITSymbol(
              this->Remote.template callB<FindSymbolIn>(H, Name,
                                                        ExportedSymbolsOnly));
   }
 
-  /// Immediately emit and finalize the object with the given handle.
+  /// @brief Immediately emit and finalize the object with the given handle.
   Error emitAndFinalize(ObjHandleT H) {
     return this->Remote.template callB<EmitAndFinalize>(H);
   }

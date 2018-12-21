@@ -49,10 +49,6 @@ struct Config {
   /// Use the new pass manager
   bool UseNewPM = false;
 
-  /// Flag to indicate that the optimizer should not assume builtins are present
-  /// on the target.
-  bool Freestanding = false;
-
   /// Disable entirely the optimizer, including importing for ThinLTO
   bool CodeGenOnly = false;
 
@@ -77,16 +73,11 @@ struct Config {
   /// Sample PGO profile path.
   std::string SampleProfile;
 
-  /// Name remapping file for profile data.
-  std::string ProfileRemapping;
-
   /// The directory to store .dwo files.
   std::string DwoDir;
 
-  /// The path to write a .dwo file to. This should generally only be used when
-  /// running an individual backend directly via thinBackend(), as otherwise
-  /// all .dwo files will be written to the same path.
-  std::string DwoPath;
+  /// The objcopy binary used to extract dwo files.
+  std::string Objcopy;
 
   /// Optimization remarks file path.
   std::string RemarksFilename = "";

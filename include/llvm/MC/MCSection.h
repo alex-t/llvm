@@ -40,7 +40,7 @@ class MCSection {
 public:
   enum SectionVariant { SV_COFF = 0, SV_ELF, SV_MachO, SV_Wasm };
 
-  /// Express the state of bundle locked groups while emitting code.
+  /// \brief Express the state of bundle locked groups while emitting code.
   enum BundleLockStateType {
     NotBundleLocked,
     BundleLocked,
@@ -65,22 +65,18 @@ private:
   /// The index of this section in the layout order.
   unsigned LayoutOrder;
 
-  /// Keeping track of bundle-locked state.
+  /// \brief Keeping track of bundle-locked state.
   BundleLockStateType BundleLockState = NotBundleLocked;
 
-  /// Current nesting depth of bundle_lock directives.
+  /// \brief Current nesting depth of bundle_lock directives.
   unsigned BundleLockNestingDepth = 0;
 
-  /// We've seen a bundle_lock directive but not its first instruction
+  /// \brief We've seen a bundle_lock directive but not its first instruction
   /// yet.
   bool BundleGroupBeforeFirstInst : 1;
 
   /// Whether this section has had instructions emitted into it.
   bool HasInstructions : 1;
-
-  /// Whether this section has had data emitted into it.
-  /// Right now this is only used by the ARM backend.
-  bool HasData : 1;
 
   bool IsRegistered : 1;
 
@@ -140,9 +136,6 @@ public:
 
   bool hasInstructions() const { return HasInstructions; }
   void setHasInstructions(bool Value) { HasInstructions = Value; }
-
-  bool hasData() const { return HasData; }
-  void setHasData(bool Value) { HasData = Value; }
 
   bool isRegistered() const { return IsRegistered; }
   void setIsRegistered(bool Value) { IsRegistered = Value; }

@@ -136,9 +136,9 @@ private:
   /// started.
   BitVector ReservedRegs;
 
-  using VRegToTypeMap = IndexedMap<LLT, VirtReg2IndexFunctor>;
-  /// Map generic virtual registers to their low-level type.
-  VRegToTypeMap VRegToType;
+  using VRegToTypeMap = DenseMap<unsigned, LLT>;
+  /// Map generic virtual registers to their actual size.
+  mutable std::unique_ptr<VRegToTypeMap> VRegToType;
 
   /// Keep track of the physical registers that are live in to the function.
   /// Live in values are typically arguments in registers.  LiveIn values are
@@ -689,14 +689,15 @@ public:
                                                unsigned MinNumRegs = 0);
 
   /// Constrain the register class or the register bank of the virtual register
-  /// \p Reg (and low-level type) to be a common subclass or a common bank of
-  /// both registers provided respectively (and a common low-level type). Do
-  /// nothing if any of the attributes (classes, banks, or low-level types) of
-  /// the registers are deemed incompatible, or if the resulting register will
-  /// have a class smaller than before and of size less than \p MinNumRegs.
-  /// Return true if such register attributes exist, false otherwise.
+  /// \p Reg to be a common subclass and a common bank of both registers
+  /// provided respectively. Do nothing if any of the attributes (classes,
+  /// banks, or low-level types) of the registers are deemed incompatible, or if
+  /// the resulting register will have a class smaller than before and of size
+  /// less than \p MinNumRegs. Return true if such register attributes exist,
+  /// false otherwise.
   ///
-  /// \note Use this method instead of constrainRegClass and
+  /// \note Assumes that each register has either a low-level type or a class
+  /// assigned, but not both. Use this method instead of constrainRegClass and
   /// RegisterBankInfo::constrainGenericRegister everywhere but SelectionDAG
   /// ISel / FastISel and GlobalISel's InstructionSelect pass respectively.
   bool constrainRegAttrs(unsigned Reg, unsigned ConstrainingReg,
@@ -716,17 +717,17 @@ public:
   unsigned createVirtualRegister(const TargetRegisterClass *RegClass,
                                  StringRef Name = "");
 
-  /// Create and return a new virtual register in the function with the same
-  /// attributes as the given register.
-  unsigned cloneVirtualRegister(unsigned VReg, StringRef Name = "");
-
-  /// Get the low-level type of \p Reg or LLT{} if Reg is not a generic
-  /// (target independent) virtual register.
-  LLT getType(unsigned Reg) const {
-    if (TargetRegisterInfo::isVirtualRegister(Reg) && VRegToType.inBounds(Reg))
-      return VRegToType[Reg];
-    return LLT{};
+  /// Accessor for VRegToType. This accessor should only be used
+  /// by global-isel related work.
+  VRegToTypeMap &getVRegToType() const {
+    if (!VRegToType)
+      VRegToType.reset(new VRegToTypeMap);
+    return *VRegToType.get();
   }
+
+  /// Get the low-level type of \p VReg or LLT{} if VReg is not a generic
+  /// (target independent) virtual register.
+  LLT getType(unsigned VReg) const;
 
   /// Set the low-level type of \p VReg to \p Ty.
   void setType(unsigned VReg, LLT Ty);

@@ -178,12 +178,8 @@ bool MachineCSE::PerformTrivialCopyPropagation(MachineInstr *MI,
       continue;
     if (!MRI->constrainRegAttrs(SrcReg, Reg))
       continue;
-    LLVM_DEBUG(dbgs() << "Coalescing: " << *DefMI);
-    LLVM_DEBUG(dbgs() << "***     to: " << *MI);
-
-    // Update matching debug values.
-    DefMI->changeDebugValuesDefReg(SrcReg);
-
+    DEBUG(dbgs() << "Coalescing: " << *DefMI);
+    DEBUG(dbgs() << "***     to: " << *MI);
     // Propagate SrcReg of copies to MI.
     MO.setReg(SrcReg);
     MRI->clearKillFlags(SrcReg);
@@ -235,21 +231,6 @@ MachineCSE::isPhysDefTriviallyDead(unsigned Reg,
   return false;
 }
 
-static bool isCallerPreservedOrConstPhysReg(unsigned Reg,
-                                            const MachineFunction &MF,
-                                            const TargetRegisterInfo &TRI) {
-  // MachineRegisterInfo::isConstantPhysReg directly called by
-  // MachineRegisterInfo::isCallerPreservedOrConstPhysReg expects the
-  // reserved registers to be frozen. That doesn't cause a problem  post-ISel as
-  // most (if not all) targets freeze reserved registers right after ISel.
-  //
-  // It does cause issues mid-GlobalISel, however, hence the additional
-  // reservedRegsFrozen check.
-  const MachineRegisterInfo &MRI = MF.getRegInfo();
-  return TRI.isCallerPreservedPhysReg(Reg, MF) ||
-         (MRI.reservedRegsFrozen() && MRI.isConstantPhysReg(Reg));
-}
-
 /// hasLivePhysRegDefUses - Return true if the specified instruction read/write
 /// physical registers (except for dead defs of physical registers). It also
 /// returns the physical register def by reference if it's the only one and the
@@ -269,7 +250,7 @@ bool MachineCSE::hasLivePhysRegDefUses(const MachineInstr *MI,
     if (TargetRegisterInfo::isVirtualRegister(Reg))
       continue;
     // Reading either caller preserved or constant physregs is ok.
-    if (!isCallerPreservedOrConstPhysReg(Reg, *MI->getMF(), *TRI))
+    if (!MRI->isCallerPreservedOrConstPhysReg(Reg))
       for (MCRegAliasIterator AI(Reg, TRI, true); AI.isValid(); ++AI)
         PhysRefs.insert(*AI);
   }
@@ -333,7 +314,7 @@ bool MachineCSE::PhysRegDefsReach(MachineInstr *CSMI, MachineInstr *MI,
   unsigned LookAheadLeft = LookAheadLimit;
   while (LookAheadLeft) {
     // Skip over dbg_value's.
-    while (I != E && I != EE && I->isDebugInstr())
+    while (I != E && I != EE && I->isDebugValue())
       ++I;
 
     if (I == EE) {
@@ -372,7 +353,7 @@ bool MachineCSE::PhysRegDefsReach(MachineInstr *CSMI, MachineInstr *MI,
 
 bool MachineCSE::isCSECandidate(MachineInstr *MI) {
   if (MI->isPosition() || MI->isPHI() || MI->isImplicitDef() || MI->isKill() ||
-      MI->isInlineAsm() || MI->isDebugInstr())
+      MI->isInlineAsm() || MI->isDebugValue())
     return false;
 
   // Ignore copies.
@@ -464,23 +445,25 @@ bool MachineCSE::isProfitableToCSE(unsigned CSReg, unsigned Reg,
   // Heuristics #3: If the common subexpression is used by PHIs, do not reuse
   // it unless the defined value is already used in the BB of the new use.
   bool HasPHI = false;
-  for (MachineInstr &UseMI : MRI->use_nodbg_instructions(CSReg)) {
-    HasPHI |= UseMI.isPHI();
-    if (UseMI.getParent() == MI->getParent())
-      return true;
+  SmallPtrSet<MachineBasicBlock*, 4> CSBBs;
+  for (MachineInstr &MI : MRI->use_nodbg_instructions(CSReg)) {
+    HasPHI |= MI.isPHI();
+    CSBBs.insert(MI.getParent());
   }
 
-  return !HasPHI;
+  if (!HasPHI)
+    return true;
+  return CSBBs.count(MI->getParent());
 }
 
 void MachineCSE::EnterScope(MachineBasicBlock *MBB) {
-  LLVM_DEBUG(dbgs() << "Entering: " << MBB->getName() << '\n');
+  DEBUG(dbgs() << "Entering: " << MBB->getName() << '\n');
   ScopeType *Scope = new ScopeType(VNT);
   ScopeMap[MBB] = Scope;
 }
 
 void MachineCSE::ExitScope(MachineBasicBlock *MBB) {
-  LLVM_DEBUG(dbgs() << "Exiting: " << MBB->getName() << '\n');
+  DEBUG(dbgs() << "Exiting: " << MBB->getName() << '\n');
   DenseMap<MachineBasicBlock*, ScopeType*>::iterator SI = ScopeMap.find(MBB);
   assert(SI != ScopeMap.end());
   delete SI->second;
@@ -564,12 +547,13 @@ bool MachineCSE::ProcessBlock(MachineBasicBlock *MBB) {
     // Found a common subexpression, eliminate it.
     unsigned CSVN = VNT.lookup(MI);
     MachineInstr *CSMI = Exps[CSVN];
-    LLVM_DEBUG(dbgs() << "Examining: " << *MI);
-    LLVM_DEBUG(dbgs() << "*** Found a common subexpression: " << *CSMI);
+    DEBUG(dbgs() << "Examining: " << *MI);
+    DEBUG(dbgs() << "*** Found a common subexpression: " << *CSMI);
 
     // Check if it's profitable to perform this CSE.
     bool DoCSE = true;
-    unsigned NumDefs = MI->getNumDefs();
+    unsigned NumDefs = MI->getDesc().getNumDefs() +
+                       MI->getDesc().getNumImplicitDefs();
 
     for (unsigned i = 0, e = MI->getNumOperands(); NumDefs && i != e; ++i) {
       MachineOperand &MO = MI->getOperand(i);
@@ -598,7 +582,7 @@ bool MachineCSE::ProcessBlock(MachineBasicBlock *MBB) {
              "Do not CSE physical register defs!");
 
       if (!isProfitableToCSE(NewReg, OldReg, CSMI, MI)) {
-        LLVM_DEBUG(dbgs() << "*** Not profitable, avoid CSE!\n");
+        DEBUG(dbgs() << "*** Not profitable, avoid CSE!\n");
         DoCSE = false;
         break;
       }
@@ -607,8 +591,7 @@ bool MachineCSE::ProcessBlock(MachineBasicBlock *MBB) {
       // within the constraints (register class, bank, or low-level type) of
       // the old instruction.
       if (!MRI->constrainRegAttrs(NewReg, OldReg)) {
-        LLVM_DEBUG(
-            dbgs() << "*** Not the same register constraints, avoid CSE!\n");
+        DEBUG(dbgs() << "*** Not the same register constraints, avoid CSE!\n");
         DoCSE = false;
         break;
       }

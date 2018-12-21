@@ -10,8 +10,6 @@
 #include "llvm/Passes/PassPlugin.h"
 #include "llvm/Support/raw_ostream.h"
 
-#include <cstdint>
-
 using namespace llvm;
 
 Expected<PassPlugin> PassPlugin::Load(const std::string &Filename) {
@@ -24,8 +22,8 @@ Expected<PassPlugin> PassPlugin::Load(const std::string &Filename) {
                                    inconvertibleErrorCode());
 
   PassPlugin P{Filename, Library};
-  intptr_t getDetailsFn =
-      (intptr_t)Library.SearchForAddressOfSymbol("llvmGetPassPluginInfo");
+  auto *getDetailsFn =
+      Library.SearchForAddressOfSymbol("llvmGetPassPluginInfo");
 
   if (!getDetailsFn)
     // If the symbol isn't found, this is probably a legacy plugin, which is an

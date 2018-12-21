@@ -45,21 +45,18 @@ public:
         IsIndexSignExt(IsIndexSignExt) {}
 
   SDValue getBase() { return Base; }
-  SDValue getBase() const { return Base; }
   SDValue getIndex() { return Index; }
-  SDValue getIndex() const { return Index; }
 
-  bool equalBaseIndex(const BaseIndexOffset &Other,
-                      const SelectionDAG &DAG) const {
+  bool equalBaseIndex(BaseIndexOffset &Other, const SelectionDAG &DAG) {
     int64_t Off;
     return equalBaseIndex(Other, DAG, Off);
   }
 
-  bool equalBaseIndex(const BaseIndexOffset &Other, const SelectionDAG &DAG,
-                      int64_t &Off) const;
+  bool equalBaseIndex(BaseIndexOffset &Other, const SelectionDAG &DAG,
+                      int64_t &Off);
 
   /// Parses tree in Ptr for base, index, offset addresses.
-  static BaseIndexOffset match(const LSBaseSDNode *N, const SelectionDAG &DAG);
+  static BaseIndexOffset match(LSBaseSDNode *N, const SelectionDAG &DAG);
 };
 
 } // end namespace llvm

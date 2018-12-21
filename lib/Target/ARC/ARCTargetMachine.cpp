@@ -26,6 +26,12 @@ static Reloc::Model getRelocModel(Optional<Reloc::Model> RM) {
   return *RM;
 }
 
+static CodeModel::Model getEffectiveCodeModel(Optional<CodeModel::Model> CM) {
+  if (CM)
+    return *CM;
+  return CodeModel::Small;
+}
+
 /// ARCTargetMachine ctor - Create an ILP32 architecture model
 ARCTargetMachine::ARCTargetMachine(const Target &T, const Triple &TT,
                                    StringRef CPU, StringRef FS,
@@ -37,7 +43,7 @@ ARCTargetMachine::ARCTargetMachine(const Target &T, const Triple &TT,
                         "e-m:e-p:32:32-i1:8:32-i8:8:32-i16:16:32-i32:32:32-"
                         "f32:32:32-i64:32-f64:32-a:0:32-n32",
                         TT, CPU, FS, Options, getRelocModel(RM),
-                        getEffectiveCodeModel(CM, CodeModel::Small), OL),
+                        getEffectiveCodeModel(CM), OL),
       TLOF(make_unique<TargetLoweringObjectFileELF>()),
       Subtarget(TT, CPU, FS, *this) {
   initAsmInfo();

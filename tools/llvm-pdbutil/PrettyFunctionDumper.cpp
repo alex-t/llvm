@@ -53,10 +53,7 @@ FunctionDumper::FunctionDumper(LinePrinter &P)
 void FunctionDumper::start(const PDBSymbolTypeFunctionSig &Symbol,
                            const char *Name, PointerType Pointer) {
   auto ReturnType = Symbol.getReturnType();
-  if (!ReturnType)
-    Printer << "<unknown-type>";
-  else
-    ReturnType->dump(*this);
+  ReturnType->dump(*this);
   Printer << " ";
   uint32_t ClassParentId = Symbol.getClassParentId();
   auto ClassParent =
@@ -228,10 +225,9 @@ void FunctionDumper::dump(const PDBSymbolTypeFunctionArg &Symbol) {
   // through to the real thing and dump it.
   uint32_t TypeId = Symbol.getTypeId();
   auto Type = Symbol.getSession().getSymbolById(TypeId);
-  if (Type)
-    Printer << "<unknown-type>";
-  else
-    Type->dump(*this);
+  if (!Type)
+    return;
+  Type->dump(*this);
 }
 
 void FunctionDumper::dump(const PDBSymbolTypeTypedef &Symbol) {

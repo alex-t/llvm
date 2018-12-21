@@ -36,6 +36,7 @@ void llvm::initializeTransformUtils(PassRegistry &Registry) {
   initializePromoteLegacyPassPass(Registry);
   initializeStripNonLineTableDebugInfoPass(Registry);
   initializeUnifyFunctionExitNodesPass(Registry);
+  initializeInstSimplifierPass(Registry);
   initializeMetaRenamerPass(Registry);
   initializeStripGCRelocatesPass(Registry);
   initializePredicateInfoPrinterLegacyPassPass(Registry);

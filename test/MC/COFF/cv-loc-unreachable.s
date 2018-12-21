@@ -14,6 +14,9 @@
 #   do_exit();
 # }
 
+# We should *not* see t.cpp:6 in the inline line table because we change
+# sections before the next instruction. We should only see t.cpp:5.
+
 # CHECK-LABEL: InlineeSourceLine {
 # CHECK:   Inlinee: do_exit (0x1002)
 # CHECK:   FileID: C:\src\llvm-project\build\t.cpp (0x0)
@@ -27,8 +30,7 @@
 # CHECK-NEXT:     ChangeLineOffset: 1
 # CHECK-NEXT:     ChangeCodeLength: 0x9
 # CHECK-NEXT:     ChangeCodeOffsetAndLineOffset: {CodeOffset: 0x1, LineOffset: 1}
-# CHECK-NEXT:     ChangeCodeOffsetAndLineOffset: {CodeOffset: 0x8, LineOffset: 1}
-# CHECK-NEXT:     ChangeCodeLength: 0x0
+# CHECK-NEXT:     ChangeCodeLength: 0x8
 # CHECK-NEXT:   ]
 # CHECK: }
 

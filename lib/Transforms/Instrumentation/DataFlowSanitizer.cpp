@@ -56,7 +56,7 @@
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/Triple.h"
-#include "llvm/Transforms/Utils/Local.h"
+#include "llvm/Analysis/Utils/Local.h"
 #include "llvm/Analysis/ValueTracking.h"
 #include "llvm/IR/Argument.h"
 #include "llvm/IR/Attributes.h"
@@ -231,17 +231,17 @@ struct TransformedFunction {
   TransformedFunction& operator=(TransformedFunction&&) = default;
 
   /// Type of the function before the transformation.
-  FunctionType *OriginalType;
+  FunctionType* const OriginalType;
 
   /// Type of the function after the transformation.
-  FunctionType *TransformedType;
+  FunctionType* const TransformedType;
 
   /// Transforming a function may change the position of arguments.  This
   /// member records the mapping from each argument's old position to its new
   /// position.  Argument positions are zero-indexed.  If the transformation
   /// from F to F' made the first argument of F into the third argument of F',
   /// then ArgumentIndexMapping[0] will equal 2.
-  std::vector<unsigned> ArgumentIndexMapping;
+  const std::vector<unsigned> ArgumentIndexMapping;
 };
 
 /// Given function attributes from a call site for the original function,
@@ -539,7 +539,8 @@ TransformedFunction DataFlowSanitizer::getCustomFunctionType(FunctionType *T) {
 bool DataFlowSanitizer::doInitialization(Module &M) {
   Triple TargetTriple(M.getTargetTriple());
   bool IsX86_64 = TargetTriple.getArch() == Triple::x86_64;
-  bool IsMIPS64 = TargetTriple.isMIPS64();
+  bool IsMIPS64 = TargetTriple.getArch() == Triple::mips64 ||
+                  TargetTriple.getArch() == Triple::mips64el;
   bool IsAArch64 = TargetTriple.getArch() == Triple::aarch64 ||
                    TargetTriple.getArch() == Triple::aarch64_be;
 
@@ -645,8 +646,8 @@ DataFlowSanitizer::buildWrapperFunction(Function *F, StringRef NewFName,
                                         GlobalValue::LinkageTypes NewFLink,
                                         FunctionType *NewFT) {
   FunctionType *FT = F->getFunctionType();
-  Function *NewF = Function::Create(NewFT, NewFLink, F->getAddressSpace(),
-                                    NewFName, F->getParent());
+  Function *NewF = Function::Create(NewFT, NewFLink, NewFName,
+                                    F->getParent());
   NewF->copyAttributesFrom(F);
   NewF->removeAttributes(
       AttributeList::ReturnIndex,
@@ -819,8 +820,7 @@ bool DataFlowSanitizer::runOnModule(Module &M) {
       // easily identify cases of mismatching ABIs.
       if (getInstrumentedABI() == IA_Args && !IsZeroArgsVoidRet) {
         FunctionType *NewFT = getArgsFunctionType(FT);
-        Function *NewF = Function::Create(NewFT, F.getLinkage(),
-                                          F.getAddressSpace(), "", &M);
+        Function *NewF = Function::Create(NewFT, F.getLinkage(), "", &M);
         NewF->copyAttributesFrom(&F);
         NewF->removeAttributes(
             AttributeList::ReturnIndex,
@@ -925,7 +925,7 @@ bool DataFlowSanitizer::runOnModule(Module &M) {
         Instruction *Next = Inst->getNextNode();
         // DFSanVisitor may delete Inst, so keep track of whether it was a
         // terminator.
-        bool IsTerminator = Inst->isTerminator();
+        bool IsTerminator = isa<TerminatorInst>(Inst);
         if (!DFSF.SkipInsts.count(Inst))
           DFSanVisitor(DFSF).visit(Inst);
         if (IsTerminator)

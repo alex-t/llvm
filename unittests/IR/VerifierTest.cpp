@@ -178,10 +178,9 @@ TEST(VerifierTest, DetectInvalidDebugInfo) {
         "f", FunctionType::get(Type::getVoidTy(C), false)));
     IRBuilder<> Builder(BasicBlock::Create(C, "", F));
     Builder.CreateUnreachable();
-    F->setSubprogram(DIB.createFunction(
-        CU, "f", "f", DIB.createFile("broken.c", "/"), 1, nullptr, 1,
-        DINode::FlagZero,
-        DISubprogram::SPFlagLocalToUnit | DISubprogram::SPFlagDefinition));
+    F->setSubprogram(DIB.createFunction(CU, "f", "f",
+                                        DIB.createFile("broken.c", "/"), 1,
+                                        nullptr, true, true, 1));
     DIB.finalize();
     EXPECT_FALSE(verifyModule(M));
 

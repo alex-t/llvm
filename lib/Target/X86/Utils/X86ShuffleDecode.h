@@ -15,7 +15,6 @@
 #ifndef LLVM_LIB_TARGET_X86_UTILS_X86SHUFFLEDECODE_H
 #define LLVM_LIB_TARGET_X86_UTILS_X86SHUFFLEDECODE_H
 
-#include "llvm/ADT/APInt.h"
 #include "llvm/ADT/SmallVector.h"
 
 //===----------------------------------------------------------------------===//
@@ -109,7 +108,7 @@ void DecodeSubVectorBroadcast(unsigned DstNumElts, unsigned SrcNumElts,
 
 /// Decode a PSHUFB mask from a raw array of constants such as from
 /// BUILD_VECTOR.
-void DecodePSHUFBMask(ArrayRef<uint64_t> RawMask, const APInt &UndefElts,
+void DecodePSHUFBMask(ArrayRef<uint64_t> RawMask,
                       SmallVectorImpl<int> &ShuffleMask);
 
 /// Decode a BLEND immediate mask into a shuffle mask.
@@ -132,7 +131,7 @@ void DecodeVPERMMask(unsigned NumElts, unsigned Imm,
 /// BUILD_VECTOR.
 /// This can only basic masks (permutes + zeros), not any of the other
 /// operations that VPPERM can perform.
-void DecodeVPPERMMask(ArrayRef<uint64_t> RawMask, const APInt &UndefElts,
+void DecodeVPPERMMask(ArrayRef<uint64_t> RawMask,
                       SmallVectorImpl<int> &ShuffleMask);
 
 /// Decode a zero extension instruction as a shuffle mask.
@@ -157,20 +156,20 @@ void DecodeINSERTQIMask(unsigned NumElts, unsigned EltSize, int Len, int Idx,
 
 /// Decode a VPERMILPD/VPERMILPS variable mask from a raw array of constants.
 void DecodeVPERMILPMask(unsigned NumElts, unsigned ScalarBits,
-                        ArrayRef<uint64_t> RawMask, const APInt &UndefElts,
+                        ArrayRef<uint64_t> RawMask,
                         SmallVectorImpl<int> &ShuffleMask);
 
 /// Decode a VPERMIL2PD/VPERMIL2PS variable mask from a raw array of constants.
 void DecodeVPERMIL2PMask(unsigned NumElts, unsigned ScalarBits, unsigned M2Z,
-                         ArrayRef<uint64_t> RawMask, const APInt &UndefElts,
+                         ArrayRef<uint64_t> RawMask,
                          SmallVectorImpl<int> &ShuffleMask);
 
 /// Decode a VPERM W/D/Q/PS/PD mask from a raw array of constants.
-void DecodeVPERMVMask(ArrayRef<uint64_t> RawMask, const APInt &UndefElts,
+void DecodeVPERMVMask(ArrayRef<uint64_t> RawMask,
                       SmallVectorImpl<int> &ShuffleMask);
 
 /// Decode a VPERMT2 W/D/Q/PS/PD mask from a raw array of constants.
-void DecodeVPERMV3Mask(ArrayRef<uint64_t> RawMask, const APInt &UndefElts,
+void DecodeVPERMV3Mask(ArrayRef<uint64_t> RawMask,
                       SmallVectorImpl<int> &ShuffleMask);
 } // llvm namespace
 

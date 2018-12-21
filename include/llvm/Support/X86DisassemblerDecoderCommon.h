@@ -414,7 +414,7 @@ enum OperandEncoding {
   ENUM_ENTRY(TYPE_R16,        "2-byte")                                        \
   ENUM_ENTRY(TYPE_R32,        "4-byte")                                        \
   ENUM_ENTRY(TYPE_R64,        "8-byte")                                        \
-  ENUM_ENTRY(TYPE_IMM,        "immediate operand")                             \
+  ENUM_ENTRY(TYPE_IMM,        "immediate operand")                      \
   ENUM_ENTRY(TYPE_IMM3,       "1-byte immediate operand between 0 and 7")      \
   ENUM_ENTRY(TYPE_IMM5,       "1-byte immediate operand between 0 and 31")     \
   ENUM_ENTRY(TYPE_AVX512ICC,  "1-byte immediate operand for AVX512 icmp")      \
@@ -452,7 +452,7 @@ enum OperandType {
 };
 #undef ENUM_ENTRY
 
-/// The specification for how to extract and interpret one operand.
+/// \brief The specification for how to extract and interpret one operand.
 struct OperandSpecifier {
   uint8_t encoding;
   uint8_t type;

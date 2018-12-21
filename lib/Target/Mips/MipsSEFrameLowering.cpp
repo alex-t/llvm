@@ -299,12 +299,8 @@ bool ExpandPseudo::expandBuildPairF64(MachineBasicBlock &MBB,
   // register). Unfortunately, we have to make this decision before register
   // allocation so for now we use a spill/reload sequence for all
   // double-precision values in regardless of being an odd/even register.
-  //
-  // For the cases that should be covered here MipsSEISelDAGToDAG adds $sp as
-  // implicit operand, so other passes (like ShrinkWrapping) are aware that
-  // stack is used.
-  if (I->getNumOperands() == 4 && I->getOperand(3).isReg()
-      && I->getOperand(3).getReg() == Mips::SP) {
+  if ((Subtarget.isABI_FPXX() && !Subtarget.hasMTHC1()) ||
+      (FP64 && !Subtarget.useOddSPReg())) {
     unsigned DstReg = I->getOperand(0).getReg();
     unsigned LoReg = I->getOperand(1).getReg();
     unsigned HiReg = I->getOperand(2).getReg();
@@ -364,12 +360,9 @@ bool ExpandPseudo::expandExtractElementF64(MachineBasicBlock &MBB,
   // register). Unfortunately, we have to make this decision before register
   // allocation so for now we use a spill/reload sequence for all
   // double-precision values in regardless of being an odd/even register.
-  //
-  // For the cases that should be covered here MipsSEISelDAGToDAG adds $sp as
-  // implicit operand, so other passes (like ShrinkWrapping) are aware that
-  // stack is used.
-  if (I->getNumOperands() == 4 && I->getOperand(3).isReg()
-      && I->getOperand(3).getReg() == Mips::SP) {
+
+  if ((Subtarget.isABI_FPXX() && !Subtarget.hasMTHC1()) ||
+      (FP64 && !Subtarget.useOddSPReg())) {
     unsigned DstReg = I->getOperand(0).getReg();
     unsigned SrcReg = Op1.getReg();
     unsigned N = Op2.getImm();
@@ -401,6 +394,7 @@ MipsSEFrameLowering::MipsSEFrameLowering(const MipsSubtarget &STI)
 
 void MipsSEFrameLowering::emitPrologue(MachineFunction &MF,
                                        MachineBasicBlock &MBB) const {
+  assert(&MF.front() == &MBB && "Shrink-wrapping not yet supported");
   MachineFrameInfo &MFI    = MF.getFrameInfo();
   MipsFunctionInfo *MipsFI = MF.getInfo<MipsFunctionInfo>();
 
@@ -688,7 +682,7 @@ void MipsSEFrameLowering::emitInterruptPrologueStub(
 
 void MipsSEFrameLowering::emitEpilogue(MachineFunction &MF,
                                        MachineBasicBlock &MBB) const {
-  MachineBasicBlock::iterator MBBI = MBB.getFirstTerminator();
+  MachineBasicBlock::iterator MBBI = MBB.getLastNonDebugInstr();
   MachineFrameInfo &MFI            = MF.getFrameInfo();
   MipsFunctionInfo *MipsFI = MF.getInfo<MipsFunctionInfo>();
 
@@ -697,7 +691,7 @@ void MipsSEFrameLowering::emitEpilogue(MachineFunction &MF,
   const MipsRegisterInfo &RegInfo =
       *static_cast<const MipsRegisterInfo *>(STI.getRegisterInfo());
 
-  DebugLoc DL = MBBI != MBB.end() ? MBBI->getDebugLoc() : DebugLoc();
+  DebugLoc DL = MBBI->getDebugLoc();
   MipsABIInfo ABI = STI.getABI();
   unsigned SP = ABI.GetStackPtr();
   unsigned FP = ABI.GetFramePtr();
@@ -796,6 +790,7 @@ spillCalleeSavedRegisters(MachineBasicBlock &MBB,
                           const std::vector<CalleeSavedInfo> &CSI,
                           const TargetRegisterInfo *TRI) const {
   MachineFunction *MF = MBB.getParent();
+  MachineBasicBlock *EntryBlock = &MF->front();
   const TargetInstrInfo &TII = *STI.getInstrInfo();
 
   for (unsigned i = 0, e = CSI.size(); i != e; ++i) {
@@ -808,7 +803,7 @@ spillCalleeSavedRegisters(MachineBasicBlock &MBB,
     bool IsRAAndRetAddrIsTaken = (Reg == Mips::RA || Reg == Mips::RA_64)
         && MF->getFrameInfo().isReturnAddressTaken();
     if (!IsRAAndRetAddrIsTaken)
-      MBB.addLiveIn(Reg);
+      EntryBlock->addLiveIn(Reg);
 
     // ISRs require HI/LO to be spilled into kernel registers to be then
     // spilled to the stack frame.
@@ -833,7 +828,7 @@ spillCalleeSavedRegisters(MachineBasicBlock &MBB,
     // Insert the spill to the stack frame.
     bool IsKill = !IsRAAndRetAddrIsTaken;
     const TargetRegisterClass *RC = TRI->getMinimalPhysRegClass(Reg);
-    TII.storeRegToStackSlot(MBB, MI, Reg, IsKill,
+    TII.storeRegToStackSlot(*EntryBlock, MI, Reg, IsKill,
                             CSI[i].getFrameIdx(), RC, TRI);
   }
 
@@ -887,10 +882,9 @@ void MipsSEFrameLowering::determineCalleeSaves(MachineFunction &MF,
   // Expand pseudo instructions which load, store or copy accumulators.
   // Add an emergency spill slot if a pseudo was expanded.
   if (ExpandPseudo(MF).expand()) {
-    // The spill slot should be half the size of the accumulator. If target have
-    // general-purpose registers 64 bits wide, it should be 64-bit, otherwise
-    // it should be 32-bit.
-    const TargetRegisterClass &RC = STI.isGP64bit() ?
+    // The spill slot should be half the size of the accumulator. If target is
+    // mips64, it should be 64-bit, otherwise it should be 32-bt.
+    const TargetRegisterClass &RC = STI.hasMips64() ?
       Mips::GPR64RegClass : Mips::GPR32RegClass;
     int FI = MF.getFrameInfo().CreateStackObject(TRI->getSpillSize(RC),
                                                  TRI->getSpillAlignment(RC),

@@ -7,9 +7,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LLVM_TOOLS_DSYMUTIL_CFBUNDLE_H
-#define LLVM_TOOLS_DSYMUTIL_CFBUNDLE_H
-
 #include "llvm/ADT/StringRef.h"
 #include <string>
 
@@ -27,5 +24,3 @@ CFBundleInfo getBundleInfo(llvm::StringRef ExePath);
 
 } // end namespace dsymutil
 } // end namespace llvm
-
-#endif

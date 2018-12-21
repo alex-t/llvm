@@ -589,12 +589,6 @@ Value *SCEVExpander::expandAddToGEP(const SCEV *const *op_begin,
   return expand(SE.getAddExpr(Ops));
 }
 
-Value *SCEVExpander::expandAddToGEP(const SCEV *Op, PointerType *PTy, Type *Ty,
-                                    Value *V) {
-  const SCEV *const Ops[1] = {Op};
-  return expandAddToGEP(Ops, Ops + 1, PTy, Ty, V);
-}
-
 /// PickMostRelevantLoop - Given two loops pick the one that's most relevant for
 /// SCEV expansion. If they are nested, this is the most nested. If they are
 /// neighboring, pick the later.
@@ -1042,7 +1036,8 @@ Value *SCEVExpander::expandIVInc(PHINode *PN, Value *StepV, const Loop *L,
     if (!isa<ConstantInt>(StepV))
       GEPPtrTy = PointerType::get(Type::getInt1Ty(SE.getContext()),
                                   GEPPtrTy->getAddressSpace());
-    IncV = expandAddToGEP(SE.getSCEV(StepV), GEPPtrTy, IntTy, PN);
+    const SCEV *const StepArray[1] = { SE.getSCEV(StepV) };
+    IncV = expandAddToGEP(StepArray, StepArray+1, GEPPtrTy, IntTy, PN);
     if (IncV->getType() != PN->getType()) {
       IncV = Builder.CreateBitCast(IncV, PN->getType());
       rememberInstruction(IncV);
@@ -1056,7 +1051,7 @@ Value *SCEVExpander::expandIVInc(PHINode *PN, Value *StepV, const Loop *L,
   return IncV;
 }
 
-/// Hoist the addrec instruction chain rooted in the loop phi above the
+/// \brief Hoist the addrec instruction chain rooted in the loop phi above the
 /// position. This routine assumes that this is possible (has been checked).
 void SCEVExpander::hoistBeforePos(DominatorTree *DT, Instruction *InstToHoist,
                                   Instruction *Pos, PHINode *LoopPhi) {
@@ -1072,7 +1067,7 @@ void SCEVExpander::hoistBeforePos(DominatorTree *DT, Instruction *InstToHoist,
   } while (InstToHoist != LoopPhi);
 }
 
-/// Check whether we can cheaply express the requested SCEV in terms of
+/// \brief Check whether we can cheaply express the requested SCEV in terms of
 /// the available PHI SCEV by truncation and/or inversion of the step.
 static bool canBeCheaplyTransformed(ScalarEvolution &SE,
                                     const SCEVAddRecExpr *Phi,
@@ -1174,11 +1169,8 @@ SCEVExpander::getAddRecExprPHILiterally(const SCEVAddRecExpr *Normalized,
       if (!IsMatchingSCEV && !TryNonMatchingSCEV)
           continue;
 
-      // TODO: this possibly can be reworked to avoid this cast at all.
       Instruction *TempIncV =
-          dyn_cast<Instruction>(PN.getIncomingValueForBlock(LatchBlock));
-      if (!TempIncV)
-        continue;
+          cast<Instruction>(PN.getIncomingValueForBlock(LatchBlock));
 
       // Check whether we can reuse this PHI node.
       if (LSRMode) {
@@ -1448,9 +1440,12 @@ Value *SCEVExpander::expandAddRecExprLiterally(const SCEVAddRecExpr *S) {
     if (PointerType *PTy = dyn_cast<PointerType>(ExpandTy)) {
       if (Result->getType()->isIntegerTy()) {
         Value *Base = expandCodeFor(PostLoopOffset, ExpandTy);
-        Result = expandAddToGEP(SE.getUnknown(Result), PTy, IntTy, Base);
+        const SCEV *const OffsetArray[1] = {SE.getUnknown(Result)};
+        Result = expandAddToGEP(OffsetArray, OffsetArray + 1, PTy, IntTy, Base);
       } else {
-        Result = expandAddToGEP(PostLoopOffset, PTy, IntTy, Result);
+        const SCEV *const OffsetArray[1] = {PostLoopOffset};
+        Result =
+            expandAddToGEP(OffsetArray, OffsetArray + 1, PTy, IntTy, Result);
       }
     } else {
       Result = InsertNoopCastOfTo(Result, IntTy);
@@ -1502,9 +1497,9 @@ Value *SCEVExpander::visitAddRecExpr(const SCEVAddRecExpr *S) {
     // Turn things like ptrtoint+arithmetic+inttoptr into GEP. See the
     // comments on expandAddToGEP for details.
     const SCEV *Base = S->getStart();
+    const SCEV *RestArray[1] = { Rest };
     // Dig into the expression to find the pointer base for a GEP.
-    const SCEV *ExposedRest = Rest;
-    ExposePointerBase(Base, ExposedRest, SE);
+    ExposePointerBase(Base, RestArray[0], SE);
     // If we found a pointer, expand the AddRec with a GEP.
     if (PointerType *PTy = dyn_cast<PointerType>(Base->getType())) {
       // Make sure the Base isn't something exotic, such as a multiplied
@@ -1513,7 +1508,7 @@ Value *SCEVExpander::visitAddRecExpr(const SCEVAddRecExpr *S) {
       if (!isa<SCEVMulExpr>(Base) && !isa<SCEVUDivExpr>(Base)) {
         Value *StartV = expand(Base);
         assert(StartV->getType() == PTy && "Pointer type mismatch for GEP!");
-        return expandAddToGEP(ExposedRest, PTy, Ty, StartV);
+        return expandAddToGEP(RestArray, RestArray+1, PTy, Ty, StartV);
       }
     }
 
@@ -1867,7 +1862,7 @@ SCEVExpander::replaceCongruentIVs(Loop *L, const DominatorTree *DT,
     Phis.push_back(&PN);
 
   if (TTI)
-    llvm::sort(Phis, [](Value *LHS, Value *RHS) {
+    llvm::sort(Phis.begin(), Phis.end(), [](Value *LHS, Value *RHS) {
       // Put pointers at the back and make sure pointer < pointer = false.
       if (!LHS->getType()->isIntegerTy() || !RHS->getType()->isIntegerTy())
         return RHS->getType()->isIntegerTy() && !LHS->getType()->isIntegerTy();
@@ -2159,9 +2154,8 @@ Value *SCEVExpander::generateOverflowCheck(const SCEVAddRecExpr *AR,
   const SCEV *Step = AR->getStepRecurrence(SE);
   const SCEV *Start = AR->getStart();
 
-  Type *ARTy = AR->getType();
   unsigned SrcBits = SE.getTypeSizeInBits(ExitCount->getType());
-  unsigned DstBits = SE.getTypeSizeInBits(ARTy);
+  unsigned DstBits = SE.getTypeSizeInBits(AR->getType());
 
   // The expression {Start,+,Step} has nusw/nssw if
   //   Step < 0, Start - |Step| * Backedge <= Start
@@ -2173,12 +2167,11 @@ Value *SCEVExpander::generateOverflowCheck(const SCEVAddRecExpr *AR,
   Value *TripCountVal = expandCodeFor(ExitCount, CountTy, Loc);
 
   IntegerType *Ty =
-      IntegerType::get(Loc->getContext(), SE.getTypeSizeInBits(ARTy));
-  Type *ARExpandTy = DL.isNonIntegralPointerType(ARTy) ? ARTy : Ty;
+      IntegerType::get(Loc->getContext(), SE.getTypeSizeInBits(AR->getType()));
 
   Value *StepValue = expandCodeFor(Step, Ty, Loc);
   Value *NegStepValue = expandCodeFor(SE.getNegativeSCEV(Step), Ty, Loc);
-  Value *StartValue = expandCodeFor(Start, ARExpandTy, Loc);
+  Value *StartValue = expandCodeFor(Start, Ty, Loc);
 
   ConstantInt *Zero =
       ConstantInt::get(Loc->getContext(), APInt::getNullValue(DstBits));
@@ -2201,18 +2194,8 @@ Value *SCEVExpander::generateOverflowCheck(const SCEVAddRecExpr *AR,
   // Compute:
   //   Start + |Step| * Backedge < Start
   //   Start - |Step| * Backedge > Start
-  Value *Add = nullptr, *Sub = nullptr;
-  if (PointerType *ARPtrTy = dyn_cast<PointerType>(ARExpandTy)) {
-    const SCEV *MulS = SE.getSCEV(MulV);
-    const SCEV *NegMulS = SE.getNegativeSCEV(MulS);
-    Add = Builder.CreateBitCast(expandAddToGEP(MulS, ARPtrTy, Ty, StartValue),
-                                ARPtrTy);
-    Sub = Builder.CreateBitCast(
-        expandAddToGEP(NegMulS, ARPtrTy, Ty, StartValue), ARPtrTy);
-  } else {
-    Add = Builder.CreateAdd(StartValue, MulV);
-    Sub = Builder.CreateSub(StartValue, MulV);
-  }
+  Value *Add = Builder.CreateAdd(StartValue, MulV);
+  Value *Sub = Builder.CreateSub(StartValue, MulV);
 
   Value *EndCompareGT = Builder.CreateICmp(
       Signed ? ICmpInst::ICMP_SGT : ICmpInst::ICMP_UGT, Sub, StartValue);

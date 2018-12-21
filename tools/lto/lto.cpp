@@ -96,7 +96,7 @@ struct LTOToolDiagnosticHandler : public DiagnosticHandler {
 // Initialize the configured targets if they have not been initialized.
 static void lto_initialize() {
   if (!initialized) {
-#ifdef _WIN32
+#ifdef LLVM_ON_WIN32
     // Dialog box on crash disabling doesn't work across DLL boundaries, so do
     // it here.
     llvm::sys::DisableSystemDialogsOnCrash();
@@ -588,13 +588,6 @@ void thinlto_codegen_set_final_cache_size_relative_to_available_space(
 
 void thinlto_codegen_set_cache_size_bytes(
     thinlto_code_gen_t cg, unsigned MaxSizeBytes) {
-  return unwrap(cg)->setCacheMaxSizeBytes(MaxSizeBytes);
-}
-
-void thinlto_codegen_set_cache_size_megabytes(
-    thinlto_code_gen_t cg, unsigned MaxSizeMegabytes) {
-  uint64_t MaxSizeBytes = MaxSizeMegabytes;
-  MaxSizeBytes *= 1024 * 1024;
   return unwrap(cg)->setCacheMaxSizeBytes(MaxSizeBytes);
 }
 

@@ -15,7 +15,6 @@ tablegen(LLVM AArch64GenRegisterBank.inc -gen-register-bank)
 tablegen(LLVM AArch64GenRegisterInfo.inc -gen-register-info)
 tablegen(LLVM AArch64GenSubtargetInfo.inc -gen-subtarget)
 tablegen(LLVM AArch64GenSystemOperands.inc -gen-searchable-tables)
-tablegen(LLVM AArch64GenExegesis.inc -gen-exegesis)
 
 add_public_tablegen_target(AArch64CommonTableGen)
 
@@ -23,7 +22,6 @@ add_llvm_target(AArch64CodeGen
   AArch64A57FPLoadBalancing.cpp
   AArch64AdvSIMDScalarPass.cpp
   AArch64AsmPrinter.cpp
-  AArch64BranchTargets.cpp
   AArch64CallLowering.cpp
   AArch64CleanupLocalDynamicTLSPass.cpp
   AArch64CollectLOH.cpp
@@ -35,7 +33,6 @@ add_llvm_target(AArch64CodeGen
   AArch64FastISel.cpp
   AArch64A53Fix835769.cpp
   AArch64FrameLowering.cpp
-  AArch64CompressJumpTables.cpp
   AArch64ConditionOptimizer.cpp
   AArch64RedundantCopyElimination.cpp
   AArch64ISelDAGToDAG.cpp
@@ -46,7 +43,6 @@ add_llvm_target(AArch64CodeGen
   AArch64LoadStoreOptimizer.cpp
   AArch64MacroFusion.cpp
   AArch64MCInstLower.cpp
-  AArch64PreLegalizerCombiner.cpp
   AArch64PromoteConstant.cpp
   AArch64PBQPRegAlloc.cpp
   AArch64RegisterBankInfo.cpp

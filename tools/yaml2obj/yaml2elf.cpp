@@ -8,7 +8,7 @@
 //===----------------------------------------------------------------------===//
 ///
 /// \file
-/// The ELF component of yaml2obj.
+/// \brief The ELF component of yaml2obj.
 ///
 //===----------------------------------------------------------------------===//
 
@@ -103,7 +103,7 @@ static void zero(T &Obj) {
 }
 
 namespace {
-/// "Single point of truth" for the ELF file construction.
+/// \brief "Single point of truth" for the ELF file construction.
 /// TODO: This class still has a ways to go before it is truly a "single
 /// point of truth".
 template <class ELFT>
@@ -114,18 +114,16 @@ class ELFState {
   typedef typename ELFT::Sym Elf_Sym;
   typedef typename ELFT::Rel Elf_Rel;
   typedef typename ELFT::Rela Elf_Rela;
-  typedef typename ELFT::Relr Elf_Relr;
-  typedef typename ELFT::Dyn Elf_Dyn;
 
   enum class SymtabType { Static, Dynamic };
 
-  /// The future ".strtab" section.
+  /// \brief The future ".strtab" section.
   StringTableBuilder DotStrtab{StringTableBuilder::ELF};
 
-  /// The future ".shstrtab" section.
+  /// \brief The future ".shstrtab" section.
   StringTableBuilder DotShStrtab{StringTableBuilder::ELF};
 
-  /// The future ".dynstr" section.
+  /// \brief The future ".dynstr" section.
   StringTableBuilder DotDynstr{StringTableBuilder::ELF};
 
   NameToIdxMap SN2I;
@@ -226,16 +224,6 @@ void ELFState<ELFT>::initProgramHeaders(std::vector<Elf_Phdr> &PHeaders) {
   }
 }
 
-static bool convertSectionIndex(NameToIdxMap &SN2I, StringRef SecName,
-                                StringRef IndexSrc, unsigned &IndexDest) {
-  if (SN2I.lookup(IndexSrc, IndexDest) && !to_integer(IndexSrc, IndexDest)) {
-    WithColor::error() << "Unknown section referenced: '" << IndexSrc
-                       << "' at YAML section '" << SecName << "'.\n";
-    return false;
-  }
-  return true;
-}
-
 template <class ELFT>
 bool ELFState<ELFT>::initSectionHeaders(std::vector<Elf_Shdr> &SHeaders,
                                         ContiguousBlobAccumulator &CBA) {
@@ -255,8 +243,11 @@ bool ELFState<ELFT>::initSectionHeaders(std::vector<Elf_Shdr> &SHeaders,
 
     if (!Sec->Link.empty()) {
       unsigned Index;
-      if (!convertSectionIndex(SN2I, Sec->Name, Sec->Link, Index))
+      if (SN2I.lookup(Sec->Link, Index)) {
+        WithColor::error() << "Unknown section referenced: '" << Sec->Link
+                           << "' at YAML section '" << Sec->Name << "'.\n";
         return false;
+      }
       SHeader.sh_link = Index;
     }
 
@@ -268,14 +259,20 @@ bool ELFState<ELFT>::initSectionHeaders(std::vector<Elf_Shdr> &SHeaders,
         SHeader.sh_link = getDotSymTabSecNo();
 
       unsigned Index;
-      if (!convertSectionIndex(SN2I, S->Name, S->Info, Index))
-        return false;
+      if (SN2I.lookup(S->Info, Index)) {
+        if (S->Info.getAsInteger(0, Index)) {
+          WithColor::error() << "Unknown section referenced: '" << S->Info
+                             << "' at YAML section '" << S->Name << "'.\n";
+          return false;
+        }
+      }
       SHeader.sh_info = Index;
+
       if (!writeSectionContent(SHeader, *S, CBA))
         return false;
     } else if (auto S = dyn_cast<ELFYAML::Group>(Sec.get())) {
       unsigned SymIdx;
-      if (SymN2I.lookup(S->Info, SymIdx) && !to_integer(S->Info, SymIdx)) {
+      if (SymN2I.lookup(S->Info, SymIdx)) {
         WithColor::error() << "Unknown symbol referenced: '" << S->Info
                            << "' at YAML section '" << S->Name << "'.\n";
         return false;
@@ -462,14 +459,7 @@ ELFState<ELFT>::writeSectionContent(Elf_Shdr &SHeader,
   Section.Content.writeAsBinary(OS);
   for (auto i = Section.Content.binary_size(); i < Section.Size; ++i)
     OS.write(0);
-  if (Section.EntSize)
-    SHeader.sh_entsize = *Section.EntSize;
-  else if (Section.Type == llvm::ELF::SHT_RELR)
-    SHeader.sh_entsize = sizeof(Elf_Relr);
-  else if (Section.Type == llvm::ELF::SHT_DYNAMIC)
-    SHeader.sh_entsize = sizeof(Elf_Dyn);
-  else
-    SHeader.sh_entsize = 0;
+  SHeader.sh_entsize = 0;
   SHeader.sh_size = Section.Size;
 }
 
@@ -538,9 +528,12 @@ bool ELFState<ELFT>::writeSectionContent(Elf_Shdr &SHeader,
     unsigned int sectionIndex = 0;
     if (member.sectionNameOrType == "GRP_COMDAT")
       sectionIndex = llvm::ELF::GRP_COMDAT;
-    else if (!convertSectionIndex(SN2I, Section.Name, member.sectionNameOrType,
-                                  sectionIndex))
+    else if (SN2I.lookup(member.sectionNameOrType, sectionIndex)) {
+      WithColor::error() << "Unknown section referenced: '"
+                         << member.sectionNameOrType << "' at YAML section' "
+                         << Section.Name << "\n";
       return false;
+    }
     SIdx = sectionIndex;
     OS.write((const char *)&SIdx, sizeof(SIdx));
   }
@@ -685,8 +678,7 @@ template <class ELFT> bool ELFState<ELFT>::hasDynamicSymbols() const {
          Doc.DynamicSymbols.Local.size() > 0;
 }
 
-template <class ELFT>
-SmallVector<const char *, 5> ELFState<ELFT>::implicitSectionNames() const {
+template <class ELFT> SmallVector<const char *, 5> ELFState<ELFT>::implicitSectionNames() const {
   if (!hasDynamicSymbols())
     return {".symtab", ".strtab", ".shstrtab"};
   return {".symtab", ".strtab", ".shstrtab", ".dynsym", ".dynstr"};

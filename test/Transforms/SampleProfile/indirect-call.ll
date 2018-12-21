@@ -1,5 +1,4 @@
 ; RUN: opt < %s -sample-profile -sample-profile-file=%S/Inputs/indirect-call.prof -S | FileCheck %s
-; RUN: opt < %s -sample-profile -sample-profile-file=%S/Inputs/indirect-call.compact.afdo -S | FileCheck %s
 
 ; CHECK-LABEL: @test
 define void @test(void ()*) !dbg !3 {

@@ -5,7 +5,6 @@
 ; RUN: opt < %s -instcombine -S -mtriple "i386-pc-mingw32" | FileCheck -check-prefix=ALL -check-prefix=DO-SIMPLIFY %s
 ; RUN: opt < %s -instcombine -S -mtriple "x86_64-pc-mingw32" | FileCheck -check-prefix=ALL -check-prefix=DO-SIMPLIFY %s
 ; RUN: opt < %s -instcombine -S -mtriple "sparc-sun-solaris" | FileCheck -check-prefix=ALL -check-prefix=DO-SIMPLIFY %s
-; RUN: opt < %s -enable-debugify -instcombine -S -mtriple "x86_64-pc-win32" 2>&1 | FileCheck -check-prefix=DBG-VALID %s
 
 declare double @floor(double)
 declare double @ceil(double)
@@ -686,5 +685,3 @@ define float @test_no_shrink_intrin_fabs_multi_use_fpext(half %C) {
   %F = fptrunc double %E to float
   ret float %F
 }
-
-; DBG-VALID: CheckModuleDebugify: PASS

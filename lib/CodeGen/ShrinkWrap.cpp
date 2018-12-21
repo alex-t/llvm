@@ -63,7 +63,6 @@
 #include "llvm/CodeGen/MachineInstr.h"
 #include "llvm/CodeGen/MachineLoopInfo.h"
 #include "llvm/CodeGen/MachineOperand.h"
-#include "llvm/CodeGen/MachineOptimizationRemarkEmitter.h"
 #include "llvm/CodeGen/MachinePostDominators.h"
 #include "llvm/CodeGen/RegisterClassInfo.h"
 #include "llvm/CodeGen/RegisterScavenging.h"
@@ -100,7 +99,7 @@ EnableShrinkWrapOpt("enable-shrink-wrap", cl::Hidden,
 
 namespace {
 
-/// Class to determine where the safe point to insert the
+/// \brief Class to determine where the safe point to insert the
 /// prologue and epilogue are.
 /// Unlike the paper from Fred C. Chow, PLDI'88, that introduces the
 /// shrink-wrapping term for prologue/epilogue placement, this pass
@@ -131,9 +130,6 @@ class ShrinkWrap : public MachineFunctionPass {
   /// are in the same loop.
   MachineLoopInfo *MLI;
 
-  // Emit remarks.
-  MachineOptimizationRemarkEmitter *ORE = nullptr;
-
   /// Frequency of the Entry block.
   uint64_t EntryFreq;
 
@@ -157,7 +153,7 @@ class ShrinkWrap : public MachineFunctionPass {
   /// Current MachineFunction.
   MachineFunction *MachineFunc;
 
-  /// Check if \p MI uses or defines a callee-saved register or
+  /// \brief Check if \p MI uses or defines a callee-saved register or
   /// a frame index. If this is the case, this means \p MI must happen
   /// after Save and before Restore.
   bool useOrDefCSROrFI(const MachineInstr &MI, RegScavenger *RS) const;
@@ -177,14 +173,14 @@ class ShrinkWrap : public MachineFunctionPass {
     return CurrentCSRs;
   }
 
-  /// Update the Save and Restore points such that \p MBB is in
+  /// \brief Update the Save and Restore points such that \p MBB is in
   /// the region that is dominated by Save and post-dominated by Restore
   /// and Save and Restore still match the safe point definition.
   /// Such point may not exist and Save and/or Restore may be null after
   /// this call.
   void updateSaveRestorePoints(MachineBasicBlock &MBB, RegScavenger *RS);
 
-  /// Initialize the pass for \p MF.
+  /// \brief Initialize the pass for \p MF.
   void init(MachineFunction &MF) {
     RCI.runOnMachineFunction(MF);
     MDT = &getAnalysis<MachineDominatorTree>();
@@ -193,7 +189,6 @@ class ShrinkWrap : public MachineFunctionPass {
     Restore = nullptr;
     MBFI = &getAnalysis<MachineBlockFrequencyInfo>();
     MLI = &getAnalysis<MachineLoopInfo>();
-    ORE = &getAnalysis<MachineOptimizationRemarkEmitterPass>().getORE();
     EntryFreq = MBFI->getEntryFreq();
     const TargetSubtargetInfo &Subtarget = MF.getSubtarget();
     const TargetInstrInfo &TII = *Subtarget.getInstrInfo();
@@ -211,7 +206,7 @@ class ShrinkWrap : public MachineFunctionPass {
   /// shrink-wrapping.
   bool ArePointsInteresting() const { return Save != Entry && Save && Restore; }
 
-  /// Check if shrink wrapping is enabled for this target and function.
+  /// \brief Check if shrink wrapping is enabled for this target and function.
   static bool isShrinkWrapEnabled(const MachineFunction &MF);
 
 public:
@@ -227,7 +222,6 @@ public:
     AU.addRequired<MachineDominatorTree>();
     AU.addRequired<MachinePostDominatorTree>();
     AU.addRequired<MachineLoopInfo>();
-    AU.addRequired<MachineOptimizationRemarkEmitterPass>();
     MachineFunctionPass::getAnalysisUsage(AU);
   }
 
@@ -238,7 +232,7 @@ public:
 
   StringRef getPassName() const override { return "Shrink Wrapping analysis"; }
 
-  /// Perform the shrink-wrapping analysis and update
+  /// \brief Perform the shrink-wrapping analysis and update
   /// the MachineFrameInfo attached to \p MF with the results.
   bool runOnMachineFunction(MachineFunction &MF) override;
 };
@@ -254,14 +248,13 @@ INITIALIZE_PASS_DEPENDENCY(MachineBlockFrequencyInfo)
 INITIALIZE_PASS_DEPENDENCY(MachineDominatorTree)
 INITIALIZE_PASS_DEPENDENCY(MachinePostDominatorTree)
 INITIALIZE_PASS_DEPENDENCY(MachineLoopInfo)
-INITIALIZE_PASS_DEPENDENCY(MachineOptimizationRemarkEmitterPass)
 INITIALIZE_PASS_END(ShrinkWrap, DEBUG_TYPE, "Shrink Wrap Pass", false, false)
 
 bool ShrinkWrap::useOrDefCSROrFI(const MachineInstr &MI,
                                  RegScavenger *RS) const {
   if (MI.getOpcode() == FrameSetupOpcode ||
       MI.getOpcode() == FrameDestroyOpcode) {
-    LLVM_DEBUG(dbgs() << "Frame instruction: " << MI << '\n');
+    DEBUG(dbgs() << "Frame instruction: " << MI << '\n');
     return true;
   }
   for (const MachineOperand &MO : MI.operands()) {
@@ -293,15 +286,15 @@ bool ShrinkWrap::useOrDefCSROrFI(const MachineInstr &MI,
     }
     // Skip FrameIndex operands in DBG_VALUE instructions.
     if (UseOrDefCSR || (MO.isFI() && !MI.isDebugValue())) {
-      LLVM_DEBUG(dbgs() << "Use or define CSR(" << UseOrDefCSR << ") or FI("
-                        << MO.isFI() << "): " << MI << '\n');
+      DEBUG(dbgs() << "Use or define CSR(" << UseOrDefCSR << ") or FI("
+                   << MO.isFI() << "): " << MI << '\n');
       return true;
     }
   }
   return false;
 }
 
-/// Helper function to find the immediate (post) dominator.
+/// \brief Helper function to find the immediate (post) dominator.
 template <typename ListOfBBs, typename DominanceAnalysis>
 static MachineBasicBlock *FindIDom(MachineBasicBlock &Block, ListOfBBs BBs,
                                    DominanceAnalysis &Dom) {
@@ -325,7 +318,7 @@ void ShrinkWrap::updateSaveRestorePoints(MachineBasicBlock &MBB,
     Save = MDT->findNearestCommonDominator(Save, &MBB);
 
   if (!Save) {
-    LLVM_DEBUG(dbgs() << "Found a block that is not reachable from Entry\n");
+    DEBUG(dbgs() << "Found a block that is not reachable from Entry\n");
     return;
   }
 
@@ -359,8 +352,7 @@ void ShrinkWrap::updateSaveRestorePoints(MachineBasicBlock &MBB,
   }
 
   if (!Restore) {
-    LLVM_DEBUG(
-        dbgs() << "Restore point needs to be spanned on several blocks\n");
+    DEBUG(dbgs() << "Restore point needs to be spanned on several blocks\n");
     return;
   }
 
@@ -439,24 +431,11 @@ void ShrinkWrap::updateSaveRestorePoints(MachineBasicBlock &MBB,
   }
 }
 
-static bool giveUpWithRemarks(MachineOptimizationRemarkEmitter *ORE,
-                              StringRef RemarkName, StringRef RemarkMessage,
-                              const DiagnosticLocation &Loc,
-                              const MachineBasicBlock *MBB) {
-  ORE->emit([&]() {
-    return MachineOptimizationRemarkMissed(DEBUG_TYPE, RemarkName, Loc, MBB)
-           << RemarkMessage;
-  });
-
-  LLVM_DEBUG(dbgs() << RemarkMessage << '\n');
-  return false;
-}
-
 bool ShrinkWrap::runOnMachineFunction(MachineFunction &MF) {
   if (skipFunction(MF.getFunction()) || MF.empty() || !isShrinkWrapEnabled(MF))
     return false;
 
-  LLVM_DEBUG(dbgs() << "**** Analysing " << MF.getName() << '\n');
+  DEBUG(dbgs() << "**** Analysing " << MF.getName() << '\n');
 
   init(MF);
 
@@ -468,9 +447,8 @@ bool ShrinkWrap::runOnMachineFunction(MachineFunction &MF) {
     // results. Moreover, we may miss that the prologue and
     // epilogue are not in the same loop, leading to unbalanced
     // construction/deconstruction of the stack frame.
-    return giveUpWithRemarks(ORE, "UnsupportedIrreducibleCFG",
-                             "Irreducible CFGs are not supported yet.",
-                             MF.getFunction().getSubprogram(), &MF.front());
+    DEBUG(dbgs() << "Irreducible CFGs are not supported yet\n");
+    return false;
   }
 
   const TargetRegisterInfo *TRI = MF.getSubtarget().getRegisterInfo();
@@ -478,13 +456,13 @@ bool ShrinkWrap::runOnMachineFunction(MachineFunction &MF) {
       TRI->requiresRegisterScavenging(MF) ? new RegScavenger() : nullptr);
 
   for (MachineBasicBlock &MBB : MF) {
-    LLVM_DEBUG(dbgs() << "Look into: " << MBB.getNumber() << ' '
-                      << MBB.getName() << '\n');
+    DEBUG(dbgs() << "Look into: " << MBB.getNumber() << ' ' << MBB.getName()
+                 << '\n');
 
-    if (MBB.isEHFuncletEntry())
-      return giveUpWithRemarks(ORE, "UnsupportedEHFunclets",
-                               "EH Funclets are not supported yet.",
-                               MBB.front().getDebugLoc(), &MBB);
+    if (MBB.isEHFuncletEntry()) {
+      DEBUG(dbgs() << "EH Funclets are not supported yet.\n");
+      return false;
+    }
 
     if (MBB.isEHPad()) {
       // Push the prologue and epilogue outside of
@@ -496,7 +474,7 @@ bool ShrinkWrap::runOnMachineFunction(MachineFunction &MF) {
       // basic block can jump out from the middle.
       updateSaveRestorePoints(MBB, RS.get());
       if (!ArePointsInteresting()) {
-        LLVM_DEBUG(dbgs() << "EHPad prevents shrink-wrapping\n");
+        DEBUG(dbgs() << "EHPad prevents shrink-wrapping\n");
         return false;
       }
       continue;
@@ -511,7 +489,7 @@ bool ShrinkWrap::runOnMachineFunction(MachineFunction &MF) {
       // If we are at a point where we cannot improve the placement of
       // save/restore instructions, just give up.
       if (!ArePointsInteresting()) {
-        LLVM_DEBUG(dbgs() << "No Shrink wrap candidate found\n");
+        DEBUG(dbgs() << "No Shrink wrap candidate found\n");
         return false;
       }
       // No need to look for other instructions, this basic block
@@ -524,21 +502,20 @@ bool ShrinkWrap::runOnMachineFunction(MachineFunction &MF) {
     // because it means we did not encounter any frame/CSR related code.
     // Otherwise, we would have returned from the previous loop.
     assert(!Save && !Restore && "We miss a shrink-wrap opportunity?!");
-    LLVM_DEBUG(dbgs() << "Nothing to shrink-wrap\n");
+    DEBUG(dbgs() << "Nothing to shrink-wrap\n");
     return false;
   }
 
-  LLVM_DEBUG(dbgs() << "\n ** Results **\nFrequency of the Entry: " << EntryFreq
-                    << '\n');
+  DEBUG(dbgs() << "\n ** Results **\nFrequency of the Entry: " << EntryFreq
+               << '\n');
 
   const TargetFrameLowering *TFI = MF.getSubtarget().getFrameLowering();
   do {
-    LLVM_DEBUG(dbgs() << "Shrink wrap candidates (#, Name, Freq):\nSave: "
-                      << Save->getNumber() << ' ' << Save->getName() << ' '
-                      << MBFI->getBlockFreq(Save).getFrequency()
-                      << "\nRestore: " << Restore->getNumber() << ' '
-                      << Restore->getName() << ' '
-                      << MBFI->getBlockFreq(Restore).getFrequency() << '\n');
+    DEBUG(dbgs() << "Shrink wrap candidates (#, Name, Freq):\nSave: "
+                 << Save->getNumber() << ' ' << Save->getName() << ' '
+                 << MBFI->getBlockFreq(Save).getFrequency() << "\nRestore: "
+                 << Restore->getNumber() << ' ' << Restore->getName() << ' '
+                 << MBFI->getBlockFreq(Restore).getFrequency() << '\n');
 
     bool IsSaveCheap, TargetCanUseSaveAsPrologue = false;
     if (((IsSaveCheap = EntryFreq >= MBFI->getBlockFreq(Save).getFrequency()) &&
@@ -546,8 +523,7 @@ bool ShrinkWrap::runOnMachineFunction(MachineFunction &MF) {
         ((TargetCanUseSaveAsPrologue = TFI->canUseAsPrologue(*Save)) &&
          TFI->canUseAsEpilogue(*Restore)))
       break;
-    LLVM_DEBUG(
-        dbgs() << "New points are too expensive or invalid for the target\n");
+    DEBUG(dbgs() << "New points are too expensive or invalid for the target\n");
     MachineBasicBlock *NewBB;
     if (!IsSaveCheap || !TargetCanUseSaveAsPrologue) {
       Save = FindIDom<>(*Save, Save->predecessors(), *MDT);
@@ -569,10 +545,9 @@ bool ShrinkWrap::runOnMachineFunction(MachineFunction &MF) {
     return false;
   }
 
-  LLVM_DEBUG(dbgs() << "Final shrink wrap candidates:\nSave: "
-                    << Save->getNumber() << ' ' << Save->getName()
-                    << "\nRestore: " << Restore->getNumber() << ' '
-                    << Restore->getName() << '\n');
+  DEBUG(dbgs() << "Final shrink wrap candidates:\nSave: " << Save->getNumber()
+               << ' ' << Save->getName() << "\nRestore: "
+               << Restore->getNumber() << ' ' << Restore->getName() << '\n');
 
   MachineFrameInfo &MFI = MF.getFrameInfo();
   MFI.setSavePoint(Save);

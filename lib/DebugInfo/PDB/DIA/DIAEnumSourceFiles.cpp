@@ -42,3 +42,10 @@ std::unique_ptr<IPDBSourceFile> DIAEnumSourceFiles::getNext() {
 }
 
 void DIAEnumSourceFiles::reset() { Enumerator->Reset(); }
+
+DIAEnumSourceFiles *DIAEnumSourceFiles::clone() const {
+  CComPtr<IDiaEnumSourceFiles> EnumeratorClone;
+  if (S_OK != Enumerator->Clone(&EnumeratorClone))
+    return nullptr;
+  return new DIAEnumSourceFiles(Session, EnumeratorClone);
+}

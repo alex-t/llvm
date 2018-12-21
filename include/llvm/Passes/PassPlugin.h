@@ -102,13 +102,13 @@ private:
 ///
 /// ```
 /// extern "C" ::llvm::PassPluginLibraryInfo LLVM_ATTRIBUTE_WEAK
-/// llvmGetPassPluginInfo() {
+/// LLVM_PLUGIN_EXPORT llvmGetPassPluginInfo() {
 ///   return {
 ///     LLVM_PLUGIN_API_VERSION, "MyPlugin", "v0.1", [](PassBuilder &PB) { ... }
 ///   };
 /// }
 /// ```
-extern "C" ::llvm::PassPluginLibraryInfo LLVM_ATTRIBUTE_WEAK
+extern "C" ::llvm::PassPluginLibraryInfo LLVM_ATTRIBUTE_WEAK LLVM_PLUGIN_IMPORT
 llvmGetPassPluginInfo();
 
 #endif /* LLVM_PASSES_PASSPLUGIN_H */

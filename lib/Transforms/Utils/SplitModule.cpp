@@ -101,8 +101,7 @@ static void findPartitions(Module *M, ClusterIDMapType &ClusterIDMap,
   // At this point module should have the proper mix of globals and locals.
   // As we attempt to partition this module, we must not change any
   // locals to globals.
-  LLVM_DEBUG(dbgs() << "Partition module with (" << M->size()
-                    << ")functions\n");
+  DEBUG(dbgs() << "Partition module with (" << M->size() << ")functions\n");
   ClusterMapType GVtoClusterMap;
   ComdatMembersType ComdatMembers;
 
@@ -181,29 +180,30 @@ static void findPartitions(Module *M, ClusterIDMapType &ClusterIDMap,
           std::make_pair(std::distance(GVtoClusterMap.member_begin(I),
                                        GVtoClusterMap.member_end()), I));
 
-  llvm::sort(Sets, [](const SortType &a, const SortType &b) {
-    if (a.first == b.first)
-      return a.second->getData()->getName() > b.second->getData()->getName();
-    else
-      return a.first > b.first;
-  });
+  llvm::sort(Sets.begin(), Sets.end(),
+             [](const SortType &a, const SortType &b) {
+               if (a.first == b.first)
+                 return a.second->getData()->getName() >
+                        b.second->getData()->getName();
+               else
+                 return a.first > b.first;
+             });
 
   for (auto &I : Sets) {
     unsigned CurrentClusterID = BalancinQueue.top().first;
     unsigned CurrentClusterSize = BalancinQueue.top().second;
     BalancinQueue.pop();
 
-    LLVM_DEBUG(dbgs() << "Root[" << CurrentClusterID << "] cluster_size("
-                      << I.first << ") ----> " << I.second->getData()->getName()
-                      << "\n");
+    DEBUG(dbgs() << "Root[" << CurrentClusterID << "] cluster_size(" << I.first
+                 << ") ----> " << I.second->getData()->getName() << "\n");
 
     for (ClusterMapType::member_iterator MI =
              GVtoClusterMap.findLeader(I.second);
          MI != GVtoClusterMap.member_end(); ++MI) {
       if (!Visited.insert(*MI).second)
         continue;
-      LLVM_DEBUG(dbgs() << "----> " << (*MI)->getName()
-                        << ((*MI)->hasLocalLinkage() ? " l " : " e ") << "\n");
+      DEBUG(dbgs() << "----> " << (*MI)->getName()
+                   << ((*MI)->hasLocalLinkage() ? " l " : " e ") << "\n");
       Visited.insert(*MI);
       ClusterIDMap[*MI] = CurrentClusterID;
       CurrentClusterSize++;

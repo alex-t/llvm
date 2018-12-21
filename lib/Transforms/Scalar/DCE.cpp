@@ -20,11 +20,10 @@
 #include "llvm/ADT/SetVector.h"
 #include "llvm/ADT/Statistic.h"
 #include "llvm/Analysis/TargetLibraryInfo.h"
-#include "llvm/Transforms/Utils/Local.h"
+#include "llvm/Analysis/Utils/Local.h"
 #include "llvm/IR/InstIterator.h"
 #include "llvm/IR/Instruction.h"
 #include "llvm/Pass.h"
-#include "llvm/Support/DebugCounter.h"
 #include "llvm/Transforms/Scalar.h"
 using namespace llvm;
 
@@ -32,8 +31,6 @@ using namespace llvm;
 
 STATISTIC(DIEEliminated, "Number of insts removed by DIE pass");
 STATISTIC(DCEEliminated, "Number of insts removed");
-DEBUG_COUNTER(DCECounter, "dce-transform",
-              "Controls which instructions are eliminated");
 
 namespace {
   //===--------------------------------------------------------------------===//
@@ -53,8 +50,6 @@ namespace {
       for (BasicBlock::iterator DI = BB.begin(); DI != BB.end(); ) {
         Instruction *Inst = &*DI++;
         if (isInstructionTriviallyDead(Inst, TLI)) {
-          if (!DebugCounter::shouldExecute(DCECounter))
-            continue;
           salvageDebugInfo(*Inst);
           Inst->eraseFromParent();
           Changed = true;
@@ -82,9 +77,6 @@ static bool DCEInstruction(Instruction *I,
                            SmallSetVector<Instruction *, 16> &WorkList,
                            const TargetLibraryInfo *TLI) {
   if (isInstructionTriviallyDead(I, TLI)) {
-    if (!DebugCounter::shouldExecute(DCECounter))
-      return false;
-
     salvageDebugInfo(*I);
 
     // Null out all of the instruction's operands to see if any operand becomes

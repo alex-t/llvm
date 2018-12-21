@@ -51,8 +51,7 @@ def prepare_html_report(host_llvm_cov, profile, report_dir, binaries,
     subprocess.check_call(invocation)
     with open(os.path.join(report_dir, 'summary.txt'), 'wb') as Summary:
         subprocess.check_call([host_llvm_cov, 'report'] + objects +
-                               ['-instr-profile', profile] + restricted_dirs,
-                               stdout=Summary)
+                               ['-instr-profile', profile], stdout=Summary)
     print('Done!')
 
 def prepare_html_reports(host_llvm_cov, profdata_path, report_dir, binaries,

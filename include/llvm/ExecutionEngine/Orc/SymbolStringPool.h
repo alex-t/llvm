@@ -14,7 +14,6 @@
 #ifndef LLVM_EXECUTIONENGINE_ORC_SYMBOLSTRINGPOOL_H
 #define LLVM_EXECUTIONENGINE_ORC_SYMBOLSTRINGPOOL_H
 
-#include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/StringMap.h"
 #include <atomic>
 #include <mutex>
@@ -24,20 +23,20 @@ namespace orc {
 
 class SymbolStringPtr;
 
-/// String pool for symbol names used by the JIT.
+/// @brief String pool for symbol names used by the JIT.
 class SymbolStringPool {
   friend class SymbolStringPtr;
 public:
-  /// Destroy a SymbolStringPool.
+  /// @brief Destroy a SymbolStringPool.
   ~SymbolStringPool();
 
-  /// Create a symbol string pointer from the given string.
+  /// @brief Create a symbol string pointer from the given string.
   SymbolStringPtr intern(StringRef S);
 
-  /// Remove from the pool any entries that are no longer referenced.
+  /// @brief Remove from the pool any entries that are no longer referenced.
   void clearDeadEntries();
 
-  /// Returns true if the pool is empty.
+  /// @brief Returns true if the pool is empty.
   bool empty() const;
 private:
   using RefCountType = std::atomic<size_t>;
@@ -47,15 +46,12 @@ private:
   PoolMap Pool;
 };
 
-/// Pointer to a pooled string representing a symbol name.
+/// @brief Pointer to a pooled string representing a symbol name.
 class SymbolStringPtr {
   friend class SymbolStringPool;
-  friend struct DenseMapInfo<SymbolStringPtr>;
   friend bool operator==(const SymbolStringPtr &LHS,
                          const SymbolStringPtr &RHS);
   friend bool operator<(const SymbolStringPtr &LHS, const SymbolStringPtr &RHS);
-
-  static SymbolStringPool::PoolMapEntry Tombstone;
 
 public:
   SymbolStringPtr() = default;
@@ -146,29 +142,6 @@ inline bool SymbolStringPool::empty() const {
 }
 
 } // end namespace orc
-
-template <>
-struct DenseMapInfo<orc::SymbolStringPtr> {
-
-  static orc::SymbolStringPtr getEmptyKey() {
-    return orc::SymbolStringPtr();
-  }
-
-  static orc::SymbolStringPtr getTombstoneKey() {
-    return orc::SymbolStringPtr(&orc::SymbolStringPtr::Tombstone);
-  }
-
-  static unsigned getHashValue(orc::SymbolStringPtr V) {
-    uintptr_t IV = reinterpret_cast<uintptr_t>(V.S);
-    return unsigned(IV) ^ unsigned(IV >> 9);
-  }
-
-  static bool isEqual(const orc::SymbolStringPtr &LHS,
-                      const orc::SymbolStringPtr &RHS) {
-    return LHS.S == RHS.S;
-  }
-};
-
 } // end namespace llvm
 
 #endif // LLVM_EXECUTIONENGINE_ORC_SYMBOLSTRINGPOOL_H

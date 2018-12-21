@@ -32,7 +32,7 @@
 namespace llvm {
 namespace object {
 
-/// Base class for object file relocation visitors.
+/// @brief Base class for object file relocation visitors.
 class RelocVisitor {
 public:
   explicit RelocVisitor(const ObjectFile &Obj) : ObjToVisit(Obj) {}
@@ -333,7 +333,6 @@ private:
       case wasm::R_WEBASSEMBLY_GLOBAL_INDEX_LEB:
       case wasm::R_WEBASSEMBLY_FUNCTION_OFFSET_I32:
       case wasm::R_WEBASSEMBLY_SECTION_OFFSET_I32:
-      case wasm::R_WEBASSEMBLY_EVENT_INDEX_LEB:
         // For wasm section, its offset at 0 -- ignoring Value
         return 0;
       }

@@ -14,7 +14,6 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/Pass.h"
-#include "llvm/Config/llvm-config.h"
 #include "llvm/IR/Attributes.h"
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/Function.h"
@@ -160,8 +159,8 @@ bool FunctionPass::skipFunction(const Function &F) const {
     return true;
 
   if (F.hasFnAttribute(Attribute::OptimizeNone)) {
-    LLVM_DEBUG(dbgs() << "Skipping pass '" << getPassName() << "' on function "
-                      << F.getName() << "\n");
+    DEBUG(dbgs() << "Skipping pass '" << getPassName() << "' on function "
+                 << F.getName() << "\n");
     return true;
   }
   return false;
@@ -195,8 +194,8 @@ bool BasicBlockPass::skipBasicBlock(const BasicBlock &BB) const {
   if (F->hasFnAttribute(Attribute::OptimizeNone)) {
     // Report this only once per function.
     if (&BB == &F->getEntryBlock())
-      LLVM_DEBUG(dbgs() << "Skipping pass '" << getPassName()
-                        << "' on function " << F->getName() << "\n");
+      DEBUG(dbgs() << "Skipping pass '" << getPassName()
+            << "' on function " << F->getName() << "\n");
     return true;
   }
   return false;

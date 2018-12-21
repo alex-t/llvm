@@ -603,7 +603,7 @@ void InstrProfRecord::addValueData(uint32_t ValueKind, uint32_t Site,
 #include "llvm/ProfileData/InstrProfData.inc"
 
 /*!
- * ValueProfRecordClosure Interface implementation for  InstrProfRecord
+ * \brief ValueProfRecordClosure Interface implementation for  InstrProfRecord
  *  class. These C wrappers are used as adaptors so that C++ code can be
  *  invoked as callbacks.
  */
@@ -926,7 +926,8 @@ bool needsComdatForCounter(const Function &F, const Module &M) {
   if (F.hasComdat())
     return true;
 
-  if (!Triple(M.getTargetTriple()).supportsCOMDAT())
+  Triple TT(M.getTargetTriple());
+  if (!TT.isOSBinFormatELF() && !TT.isOSBinFormatWasm())
     return false;
 
   // See createPGOFuncNameVar for more details. To avoid link errors, profile

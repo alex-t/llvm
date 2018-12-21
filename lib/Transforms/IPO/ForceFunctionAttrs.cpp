@@ -58,7 +58,6 @@ static Attribute::AttrKind parseAttrKind(StringRef Kind) {
       .Case("sanitize_hwaddress", Attribute::SanitizeHWAddress)
       .Case("sanitize_memory", Attribute::SanitizeMemory)
       .Case("sanitize_thread", Attribute::SanitizeThread)
-      .Case("speculative_load_hardening", Attribute::SpeculativeLoadHardening)
       .Case("ssp", Attribute::StackProtect)
       .Case("sspreq", Attribute::StackProtectReq)
       .Case("sspstrong", Attribute::StackProtectStrong)
@@ -76,8 +75,8 @@ static void addForcedAttributes(Function &F) {
 
     auto Kind = parseAttrKind(KV.second);
     if (Kind == Attribute::None) {
-      LLVM_DEBUG(dbgs() << "ForcedAttribute: " << KV.second
-                        << " unknown or not handled!\n");
+      DEBUG(dbgs() << "ForcedAttribute: " << KV.second
+                   << " unknown or not handled!\n");
       continue;
     }
     if (F.hasFnAttribute(Kind))

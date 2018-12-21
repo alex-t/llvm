@@ -8,7 +8,7 @@
 //===----------------------------------------------------------------------===//
 ///
 /// \file
-/// This file declares WebAssembly-specific per-machine-function
+/// \brief This file declares WebAssembly-specific per-machine-function
 /// information.
 ///
 //===----------------------------------------------------------------------===//
@@ -17,9 +17,7 @@
 #define LLVM_LIB_TARGET_WEBASSEMBLY_WEBASSEMBLYMACHINEFUNCTIONINFO_H
 
 #include "MCTargetDesc/WebAssemblyMCTargetDesc.h"
-#include "llvm/BinaryFormat/Wasm.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
-#include "llvm/MC/MCSymbolWasm.h"
 
 namespace llvm {
 
@@ -52,7 +50,7 @@ class WebAssemblyFunctionInfo final : public MachineFunctionInfo {
   // overaligned values on the user stack.
   unsigned BasePtrVreg = -1U;
 
-public:
+ public:
   explicit WebAssemblyFunctionInfo(MachineFunction &MF) : MF(MF) {}
   ~WebAssemblyFunctionInfo() override;
 
@@ -61,11 +59,6 @@ public:
 
   void addResult(MVT VT) { Results.push_back(VT); }
   const std::vector<MVT> &getResults() const { return Results; }
-
-  void clearParamsAndResults() {
-    Params.clear();
-    Results.clear();
-  }
 
   void setNumLocals(size_t NumLocals) { Locals.resize(NumLocals, MVT::i32); }
   void setLocal(size_t i, MVT VT) { Locals[i] = VT; }
@@ -88,29 +81,25 @@ public:
 
   void stackifyVReg(unsigned VReg) {
     assert(MF.getRegInfo().getUniqueVRegDef(VReg));
-    auto I = TargetRegisterInfo::virtReg2Index(VReg);
-    if (I >= VRegStackified.size())
-      VRegStackified.resize(I + 1);
-    VRegStackified.set(I);
+    if (TargetRegisterInfo::virtReg2Index(VReg) >= VRegStackified.size())
+      VRegStackified.resize(TargetRegisterInfo::virtReg2Index(VReg) + 1);
+    VRegStackified.set(TargetRegisterInfo::virtReg2Index(VReg));
   }
   bool isVRegStackified(unsigned VReg) const {
-    auto I = TargetRegisterInfo::virtReg2Index(VReg);
-    if (I >= VRegStackified.size())
+    if (TargetRegisterInfo::virtReg2Index(VReg) >= VRegStackified.size())
       return false;
-    return VRegStackified.test(I);
+    return VRegStackified.test(TargetRegisterInfo::virtReg2Index(VReg));
   }
 
   void initWARegs();
   void setWAReg(unsigned VReg, unsigned WAReg) {
     assert(WAReg != UnusedReg);
-    auto I = TargetRegisterInfo::virtReg2Index(VReg);
-    assert(I < WARegs.size());
-    WARegs[I] = WAReg;
+    assert(TargetRegisterInfo::virtReg2Index(VReg) < WARegs.size());
+    WARegs[TargetRegisterInfo::virtReg2Index(VReg)] = WAReg;
   }
-  unsigned getWAReg(unsigned VReg) const {
-    auto I = TargetRegisterInfo::virtReg2Index(VReg);
-    assert(I < WARegs.size());
-    return WARegs[I];
+  unsigned getWAReg(unsigned Reg) const {
+    assert(TargetRegisterInfo::virtReg2Index(Reg) < WARegs.size());
+    return WARegs[TargetRegisterInfo::virtReg2Index(Reg)];
   }
 
   // For a given stackified WAReg, return the id number to print with push/pop.
@@ -120,21 +109,12 @@ public:
   }
 };
 
-void ComputeLegalValueVTs(const Function &F, const TargetMachine &TM, Type *Ty,
-                          SmallVectorImpl<MVT> &ValueVTs);
+void ComputeLegalValueVTs(const Function &F, const TargetMachine &TM,
+                          Type *Ty, SmallVectorImpl<MVT> &ValueVTs);
 
-// Compute the signature for a given FunctionType (Ty). Note that it's not the
-// signature for F (F is just used to get varous context)
-void ComputeSignatureVTs(const FunctionType *Ty, const Function &F,
-                         const TargetMachine &TM, SmallVectorImpl<MVT> &Params,
+void ComputeSignatureVTs(const Function &F, const TargetMachine &TM,
+                         SmallVectorImpl<MVT> &Params,
                          SmallVectorImpl<MVT> &Results);
-
-void ValTypesFromMVTs(const ArrayRef<MVT> &In,
-                      SmallVectorImpl<wasm::ValType> &Out);
-
-std::unique_ptr<wasm::WasmSignature>
-SignatureFromMVTs(const SmallVectorImpl<MVT> &Results,
-                  const SmallVectorImpl<MVT> &Params);
 
 } // end namespace llvm
 

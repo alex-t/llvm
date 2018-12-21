@@ -1245,8 +1245,9 @@ Function *FunctionAST::codegen() {
   unsigned ScopeLine = LineNo;
   DISubprogram *SP = DBuilder->createFunction(
       FContext, P.getName(), StringRef(), Unit, LineNo,
-      CreateFunctionType(TheFunction->arg_size(), Unit), ScopeLine,
-      DINode::FlagPrototyped, DISubprogram::SPFlagDefinition);
+      CreateFunctionType(TheFunction->arg_size(), Unit),
+      false /* internal linkage */, true /* definition */, ScopeLine,
+      DINode::FlagPrototyped, false);
   TheFunction->setSubprogram(SP);
 
   // Push the current scope.
@@ -1378,7 +1379,7 @@ static void MainLoop() {
 // "Library" functions that can be "extern'd" from user code.
 //===----------------------------------------------------------------------===//
 
-#ifdef _WIN32
+#ifdef LLVM_ON_WIN32
 #define DLLEXPORT __declspec(dllexport)
 #else
 #define DLLEXPORT

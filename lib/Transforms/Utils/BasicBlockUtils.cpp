@@ -20,13 +20,11 @@
 #include "llvm/Analysis/CFG.h"
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/Analysis/MemoryDependenceAnalysis.h"
-#include "llvm/Analysis/MemorySSAUpdater.h"
-#include "llvm/Analysis/PostDominators.h"
+#include "llvm/Analysis/Utils/Local.h"
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/CFG.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DebugInfoMetadata.h"
-#include "llvm/IR/DomTreeUpdater.h"
 #include "llvm/IR/Dominators.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/InstrTypes.h"
@@ -39,7 +37,6 @@
 #include "llvm/IR/Value.h"
 #include "llvm/IR/ValueHandle.h"
 #include "llvm/Support/Casting.h"
-#include "llvm/Transforms/Utils/Local.h"
 #include <cassert>
 #include <cstdint>
 #include <string>
@@ -48,20 +45,20 @@
 
 using namespace llvm;
 
-void llvm::DeleteDeadBlock(BasicBlock *BB, DomTreeUpdater *DTU) {
+void llvm::DeleteDeadBlock(BasicBlock *BB, DeferredDominance *DDT) {
   assert((pred_begin(BB) == pred_end(BB) ||
          // Can delete self loop.
          BB->getSinglePredecessor() == BB) && "Block is not dead!");
-  Instruction *BBTerm = BB->getTerminator();
+  TerminatorInst *BBTerm = BB->getTerminator();
   std::vector<DominatorTree::UpdateType> Updates;
 
   // Loop through all of our successors and make sure they know that one
   // of their predecessors is going away.
-  if (DTU)
+  if (DDT)
     Updates.reserve(BBTerm->getNumSuccessors());
-  for (BasicBlock *Succ : successors(BBTerm)) {
+  for (BasicBlock *Succ : BBTerm->successors()) {
     Succ->removePredecessor(BB);
-    if (DTU)
+    if (DDT)
       Updates.push_back({DominatorTree::Delete, BB, Succ});
   }
 
@@ -77,15 +74,10 @@ void llvm::DeleteDeadBlock(BasicBlock *BB, DomTreeUpdater *DTU) {
       I.replaceAllUsesWith(UndefValue::get(I.getType()));
     BB->getInstList().pop_back();
   }
-  new UnreachableInst(BB->getContext(), BB);
-  assert(BB->getInstList().size() == 1 &&
-         isa<UnreachableInst>(BB->getTerminator()) &&
-         "The successor list of BB isn't empty before "
-         "applying corresponding DTU updates.");
 
-  if (DTU) {
-    DTU->applyUpdates(Updates, /*ForceRemoveDuplicates*/ true);
-    DTU->deleteBB(BB);
+  if (DDT) {
+    DDT->applyUpdates(Updates);
+    DDT->deleteBB(BB); // Deferred deletion of BB.
   } else {
     BB->eraseFromParent(); // Zap the block!
   }
@@ -123,11 +115,11 @@ bool llvm::DeleteDeadPHIs(BasicBlock *BB, const TargetLibraryInfo *TLI) {
   return Changed;
 }
 
-bool llvm::MergeBlockIntoPredecessor(BasicBlock *BB, DomTreeUpdater *DTU,
-                                     LoopInfo *LI, MemorySSAUpdater *MSSAU,
+bool llvm::MergeBlockIntoPredecessor(BasicBlock *BB, DominatorTree *DT,
+                                     LoopInfo *LI,
                                      MemoryDependenceResults *MemDep) {
-  if (BB->hasAddressTaken())
-    return false;
+  // Don't merge away blocks who have their address taken.
+  if (BB->hasAddressTaken()) return false;
 
   // Can't merge if there are multiple predecessors, or no predecessors.
   BasicBlock *PredBB = BB->getUniquePredecessor();
@@ -136,12 +128,19 @@ bool llvm::MergeBlockIntoPredecessor(BasicBlock *BB, DomTreeUpdater *DTU,
   // Don't break self-loops.
   if (PredBB == BB) return false;
   // Don't break unwinding instructions.
-  if (PredBB->getTerminator()->isExceptionalTerminator())
+  if (PredBB->getTerminator()->isExceptional())
     return false;
 
-  // Can't merge if there are multiple distinct successors.
-  if (PredBB->getUniqueSuccessor() != BB)
-    return false;
+  succ_iterator SI(succ_begin(PredBB)), SE(succ_end(PredBB));
+  BasicBlock *OnlySucc = BB;
+  for (; SI != SE; ++SI)
+    if (*SI != OnlySucc) {
+      OnlySucc = nullptr;     // There are multiple distinct successors!
+      break;
+    }
+
+  // Can't merge if there are multiple successors.
+  if (!OnlySucc) return false;
 
   // Can't merge if there is PHI loop.
   for (PHINode &PN : BB->phis())
@@ -150,29 +149,13 @@ bool llvm::MergeBlockIntoPredecessor(BasicBlock *BB, DomTreeUpdater *DTU,
         return false;
 
   // Begin by getting rid of unneeded PHIs.
-  SmallVector<AssertingVH<Value>, 4> IncomingValues;
+  SmallVector<Value *, 4> IncomingValues;
   if (isa<PHINode>(BB->front())) {
     for (PHINode &PN : BB->phis())
-      if (!isa<PHINode>(PN.getIncomingValue(0)) ||
-          cast<PHINode>(PN.getIncomingValue(0))->getParent() != BB)
+      if (PN.getIncomingValue(0) != &PN)
         IncomingValues.push_back(PN.getIncomingValue(0));
     FoldSingleEntryPHINodes(BB, MemDep);
   }
-
-  // DTU update: Collect all the edges that exit BB.
-  // These dominator edges will be redirected from Pred.
-  std::vector<DominatorTree::UpdateType> Updates;
-  if (DTU) {
-    Updates.reserve(1 + (2 * succ_size(BB)));
-    Updates.push_back({DominatorTree::Delete, PredBB, BB});
-    for (auto I = succ_begin(BB), E = succ_end(BB); I != E; ++I) {
-      Updates.push_back({DominatorTree::Delete, BB, *I});
-      Updates.push_back({DominatorTree::Insert, PredBB, *I});
-    }
-  }
-
-  if (MSSAU)
-    MSSAU->moveAllAfterMergeBlocks(BB, PredBB, &*(BB->begin()));
 
   // Delete the unconditional branch from the predecessor...
   PredBB->getInstList().pop_back();
@@ -183,11 +166,10 @@ bool llvm::MergeBlockIntoPredecessor(BasicBlock *BB, DomTreeUpdater *DTU,
 
   // Move all definitions in the successor to the predecessor...
   PredBB->getInstList().splice(PredBB->end(), BB->getInstList());
-  new UnreachableInst(BB->getContext(), BB);
 
   // Eliminate duplicate dbg.values describing the entry PHI node post-splice.
-  for (auto Incoming : IncomingValues) {
-    if (isa<Instruction>(*Incoming)) {
+  for (auto *Incoming : IncomingValues) {
+    if (isa<Instruction>(Incoming)) {
       SmallVector<DbgValueInst *, 2> DbgValues;
       SmallDenseSet<std::pair<DILocalVariable *, DIExpression *>, 2>
           DbgValueSet;
@@ -204,25 +186,24 @@ bool llvm::MergeBlockIntoPredecessor(BasicBlock *BB, DomTreeUpdater *DTU,
   if (!PredBB->hasName())
     PredBB->takeName(BB);
 
+  // Finally, erase the old block and update dominator info.
+  if (DT)
+    if (DomTreeNode *DTN = DT->getNode(BB)) {
+      DomTreeNode *PredDTN = DT->getNode(PredBB);
+      SmallVector<DomTreeNode *, 8> Children(DTN->begin(), DTN->end());
+      for (DomTreeNode *DI : Children)
+        DT->changeImmediateDominator(DI, PredDTN);
+
+      DT->eraseNode(BB);
+    }
+
   if (LI)
     LI->removeBlock(BB);
 
   if (MemDep)
     MemDep->invalidateCachedPredecessors();
 
-  // Finally, erase the old block and update dominator info.
-  if (DTU) {
-    assert(BB->getInstList().size() == 1 &&
-           isa<UnreachableInst>(BB->getTerminator()) &&
-           "The successor list of BB isn't empty before "
-           "applying corresponding DTU updates.");
-    DTU->applyUpdates(Updates, /*ForceRemoveDuplicates*/ true);
-    DTU->deleteBB(BB);
-  }
-
-  else {
-    BB->eraseFromParent(); // Nuke BB if DTU is nullptr.
-  }
+  BB->eraseFromParent();
   return true;
 }
 
@@ -266,14 +247,13 @@ void llvm::ReplaceInstWithInst(Instruction *From, Instruction *To) {
 }
 
 BasicBlock *llvm::SplitEdge(BasicBlock *BB, BasicBlock *Succ, DominatorTree *DT,
-                            LoopInfo *LI, MemorySSAUpdater *MSSAU) {
+                            LoopInfo *LI) {
   unsigned SuccNum = GetSuccessorNumber(BB, Succ);
 
   // If this is a critical edge, let SplitCriticalEdge do it.
-  Instruction *LatchTerm = BB->getTerminator();
-  if (SplitCriticalEdge(
-          LatchTerm, SuccNum,
-          CriticalEdgeSplittingOptions(DT, LI, MSSAU).setPreserveLCSSA()))
+  TerminatorInst *LatchTerm = BB->getTerminator();
+  if (SplitCriticalEdge(LatchTerm, SuccNum, CriticalEdgeSplittingOptions(DT, LI)
+                                                .setPreserveLCSSA()))
     return LatchTerm->getSuccessor(SuccNum);
 
   // If the edge isn't critical, then BB has a single successor or Succ has a
@@ -283,14 +263,14 @@ BasicBlock *llvm::SplitEdge(BasicBlock *BB, BasicBlock *Succ, DominatorTree *DT,
     // block.
     assert(SP == BB && "CFG broken");
     SP = nullptr;
-    return SplitBlock(Succ, &Succ->front(), DT, LI, MSSAU);
+    return SplitBlock(Succ, &Succ->front(), DT, LI);
   }
 
   // Otherwise, if BB has a single successor, split it at the bottom of the
   // block.
   assert(BB->getTerminator()->getNumSuccessors() == 1 &&
          "Should have a single succ!");
-  return SplitBlock(BB, BB->getTerminator(), DT, LI, MSSAU);
+  return SplitBlock(BB, BB->getTerminator(), DT, LI);
 }
 
 unsigned
@@ -298,7 +278,7 @@ llvm::SplitAllCriticalEdges(Function &F,
                             const CriticalEdgeSplittingOptions &Options) {
   unsigned NumBroken = 0;
   for (BasicBlock &BB : F) {
-    Instruction *TI = BB.getTerminator();
+    TerminatorInst *TI = BB.getTerminator();
     if (TI->getNumSuccessors() > 1 && !isa<IndirectBrInst>(TI))
       for (unsigned i = 0, e = TI->getNumSuccessors(); i != e; ++i)
         if (SplitCriticalEdge(TI, i, Options))
@@ -308,8 +288,7 @@ llvm::SplitAllCriticalEdges(Function &F,
 }
 
 BasicBlock *llvm::SplitBlock(BasicBlock *Old, Instruction *SplitPt,
-                             DominatorTree *DT, LoopInfo *LI,
-                             MemorySSAUpdater *MSSAU) {
+                             DominatorTree *DT, LoopInfo *LI) {
   BasicBlock::iterator SplitIt = SplitPt->getIterator();
   while (isa<PHINode>(SplitIt) || SplitIt->isEHPad())
     ++SplitIt;
@@ -331,11 +310,6 @@ BasicBlock *llvm::SplitBlock(BasicBlock *Old, Instruction *SplitPt,
         DT->changeImmediateDominator(I, NewNode);
     }
 
-  // Move MemoryAccesses still tracked in Old, but part of New now.
-  // Update accesses in successor blocks accordingly.
-  if (MSSAU)
-    MSSAU->moveAllAfterSpliceBlocks(Old, New, &*(New->begin()));
-
   return New;
 }
 
@@ -343,7 +317,6 @@ BasicBlock *llvm::SplitBlock(BasicBlock *Old, Instruction *SplitPt,
 static void UpdateAnalysisInformation(BasicBlock *OldBB, BasicBlock *NewBB,
                                       ArrayRef<BasicBlock *> Preds,
                                       DominatorTree *DT, LoopInfo *LI,
-                                      MemorySSAUpdater *MSSAU,
                                       bool PreserveLCSSA, bool &HasLoopExit) {
   // Update dominator tree if available.
   if (DT) {
@@ -355,10 +328,6 @@ static void UpdateAnalysisInformation(BasicBlock *OldBB, BasicBlock *NewBB,
       DT->splitBlock(NewBB);
     }
   }
-
-  // Update MemoryPhis after split if MemorySSA is available
-  if (MSSAU)
-    MSSAU->wireOldPredecessorsToNewImmediatePredecessor(OldBB, NewBB, Preds);
 
   // The rest of the logic is only relevant for updating the loop structures.
   if (!LI)
@@ -500,8 +469,7 @@ static void UpdatePHINodes(BasicBlock *OrigBB, BasicBlock *NewBB,
 BasicBlock *llvm::SplitBlockPredecessors(BasicBlock *BB,
                                          ArrayRef<BasicBlock *> Preds,
                                          const char *Suffix, DominatorTree *DT,
-                                         LoopInfo *LI, MemorySSAUpdater *MSSAU,
-                                         bool PreserveLCSSA) {
+                                         LoopInfo *LI, bool PreserveLCSSA) {
   // Do not attempt to split that which cannot be split.
   if (!BB->canSplitPredecessors())
     return nullptr;
@@ -513,7 +481,7 @@ BasicBlock *llvm::SplitBlockPredecessors(BasicBlock *BB,
     std::string NewName = std::string(Suffix) + ".split-lp";
 
     SplitLandingPadPredecessors(BB, Preds, Suffix, NewName.c_str(), NewBBs, DT,
-                                LI, MSSAU, PreserveLCSSA);
+                                LI, PreserveLCSSA);
     return NewBBs[0];
   }
 
@@ -547,7 +515,7 @@ BasicBlock *llvm::SplitBlockPredecessors(BasicBlock *BB,
 
   // Update DominatorTree, LoopInfo, and LCCSA analysis information.
   bool HasLoopExit = false;
-  UpdateAnalysisInformation(BB, NewBB, Preds, DT, LI, MSSAU, PreserveLCSSA,
+  UpdateAnalysisInformation(BB, NewBB, Preds, DT, LI, PreserveLCSSA,
                             HasLoopExit);
 
   if (!Preds.empty()) {
@@ -563,7 +531,6 @@ void llvm::SplitLandingPadPredecessors(BasicBlock *OrigBB,
                                        const char *Suffix1, const char *Suffix2,
                                        SmallVectorImpl<BasicBlock *> &NewBBs,
                                        DominatorTree *DT, LoopInfo *LI,
-                                       MemorySSAUpdater *MSSAU,
                                        bool PreserveLCSSA) {
   assert(OrigBB->isLandingPad() && "Trying to split a non-landing pad!");
 
@@ -589,7 +556,7 @@ void llvm::SplitLandingPadPredecessors(BasicBlock *OrigBB,
   }
 
   bool HasLoopExit = false;
-  UpdateAnalysisInformation(OrigBB, NewBB1, Preds, DT, LI, MSSAU, PreserveLCSSA,
+  UpdateAnalysisInformation(OrigBB, NewBB1, Preds, DT, LI, PreserveLCSSA,
                             HasLoopExit);
 
   // Update the PHI nodes in OrigBB with the values coming from NewBB1.
@@ -625,7 +592,7 @@ void llvm::SplitLandingPadPredecessors(BasicBlock *OrigBB,
 
     // Update DominatorTree, LoopInfo, and LCCSA analysis information.
     HasLoopExit = false;
-    UpdateAnalysisInformation(OrigBB, NewBB2, NewBB2Preds, DT, LI, MSSAU,
+    UpdateAnalysisInformation(OrigBB, NewBB2, NewBB2Preds, DT, LI,
                               PreserveLCSSA, HasLoopExit);
 
     // Update the PHI nodes in OrigBB with the values coming from NewBB2.
@@ -663,8 +630,7 @@ void llvm::SplitLandingPadPredecessors(BasicBlock *OrigBB,
 }
 
 ReturnInst *llvm::FoldReturnIntoUncondBranch(ReturnInst *RI, BasicBlock *BB,
-                                             BasicBlock *Pred,
-                                             DomTreeUpdater *DTU) {
+                                             BasicBlock *Pred) {
   Instruction *UncondBranch = Pred->getTerminator();
   // Clone the return and add it to the end of the predecessor.
   Instruction *NewRet = RI->clone();
@@ -698,24 +664,19 @@ ReturnInst *llvm::FoldReturnIntoUncondBranch(ReturnInst *RI, BasicBlock *BB,
   // longer branch to them.
   BB->removePredecessor(Pred);
   UncondBranch->eraseFromParent();
-
-  if (DTU)
-    DTU->deleteEdge(Pred, BB);
-
   return cast<ReturnInst>(NewRet);
 }
 
-Instruction *llvm::SplitBlockAndInsertIfThen(Value *Cond,
-                                             Instruction *SplitBefore,
-                                             bool Unreachable,
-                                             MDNode *BranchWeights,
-                                             DominatorTree *DT, LoopInfo *LI) {
+TerminatorInst *
+llvm::SplitBlockAndInsertIfThen(Value *Cond, Instruction *SplitBefore,
+                                bool Unreachable, MDNode *BranchWeights,
+                                DominatorTree *DT, LoopInfo *LI) {
   BasicBlock *Head = SplitBefore->getParent();
   BasicBlock *Tail = Head->splitBasicBlock(SplitBefore->getIterator());
-  Instruction *HeadOldTerm = Head->getTerminator();
+  TerminatorInst *HeadOldTerm = Head->getTerminator();
   LLVMContext &C = Head->getContext();
   BasicBlock *ThenBlock = BasicBlock::Create(C, "", Head->getParent(), Tail);
-  Instruction *CheckTerm;
+  TerminatorInst *CheckTerm;
   if (Unreachable)
     CheckTerm = new UnreachableInst(C, ThenBlock);
   else
@@ -750,12 +711,12 @@ Instruction *llvm::SplitBlockAndInsertIfThen(Value *Cond,
 }
 
 void llvm::SplitBlockAndInsertIfThenElse(Value *Cond, Instruction *SplitBefore,
-                                         Instruction **ThenTerm,
-                                         Instruction **ElseTerm,
+                                         TerminatorInst **ThenTerm,
+                                         TerminatorInst **ElseTerm,
                                          MDNode *BranchWeights) {
   BasicBlock *Head = SplitBefore->getParent();
   BasicBlock *Tail = Head->splitBasicBlock(SplitBefore->getIterator());
-  Instruction *HeadOldTerm = Head->getTerminator();
+  TerminatorInst *HeadOldTerm = Head->getTerminator();
   LLVMContext &C = Head->getContext();
   BasicBlock *ThenBlock = BasicBlock::Create(C, "", Head->getParent(), Tail);
   BasicBlock *ElseBlock = BasicBlock::Create(C, "", Head->getParent(), Tail);

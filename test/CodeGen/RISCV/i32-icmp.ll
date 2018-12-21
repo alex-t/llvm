@@ -16,16 +16,6 @@ define i32 @icmp_eq(i32 %a, i32 %b) nounwind {
   ret i32 %2
 }
 
-define i32 @icmp_eqz(i32 %a) nounwind {
-; RV32I-LABEL: icmp_eqz:
-; RV32I:       # %bb.0:
-; RV32I-NEXT:    seqz a0, a0
-; RV32I-NEXT:    ret
-  %1 = icmp eq i32 %a, 0
-  %2 = zext i1 %1 to i32
-  ret i32 %2
-}
-
 define i32 @icmp_ne(i32 %a, i32 %b) nounwind {
 ; RV32I-LABEL: icmp_ne:
 ; RV32I:       # %bb.0:
@@ -33,16 +23,6 @@ define i32 @icmp_ne(i32 %a, i32 %b) nounwind {
 ; RV32I-NEXT:    snez a0, a0
 ; RV32I-NEXT:    ret
   %1 = icmp ne i32 %a, %b
-  %2 = zext i1 %1 to i32
-  ret i32 %2
-}
-
-define i32 @icmp_nez(i32 %a) nounwind {
-; RV32I-LABEL: icmp_nez:
-; RV32I:       # %bb.0:
-; RV32I-NEXT:    snez a0, a0
-; RV32I-NEXT:    ret
-  %1 = icmp ne i32 %a, 0
   %2 = zext i1 %1 to i32
   ret i32 %2
 }

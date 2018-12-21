@@ -180,18 +180,6 @@ static void ComputePTXValueVTs(const TargetLowering &TLI, const DataLayout &DL,
     return;
   }
 
-  // Given a struct type, recursively traverse the elements with custom ComputePTXValueVTs.
-  if (StructType *STy = dyn_cast<StructType>(Ty)) {
-    auto const *SL = DL.getStructLayout(STy);
-    auto ElementNum = 0;
-    for(auto *EI : STy->elements()) {
-      ComputePTXValueVTs(TLI, DL, EI, ValueVTs, Offsets,
-                         StartingOffset + SL->getElementOffset(ElementNum));
-      ++ElementNum;
-    }
-    return;
-  }
-
   ComputeValueVTs(TLI, DL, Ty, TempVTs, &TempOffsets, StartingOffset);
   for (unsigned i = 0, e = TempVTs.size(); i != e; ++i) {
     EVT VT = TempVTs[i];
@@ -387,7 +375,6 @@ NVPTXTargetLowering::NVPTXTargetLowering(const NVPTXTargetMachine &TM,
   setOperationAction(ISD::FP_TO_SINT, MVT::f16, Legal);
   setOperationAction(ISD::BUILD_VECTOR, MVT::v2f16, Custom);
   setOperationAction(ISD::EXTRACT_VECTOR_ELT, MVT::v2f16, Custom);
-  setOperationAction(ISD::INSERT_VECTOR_ELT, MVT::v2f16, Expand);
   setOperationAction(ISD::VECTOR_SHUFFLE, MVT::v2f16, Expand);
 
   setFP16OperationAction(ISD::SETCC, MVT::f16, Legal, Promote);
@@ -479,6 +466,9 @@ NVPTXTargetLowering::NVPTXTargetLowering(const NVPTXTargetMachine &TM,
 
   // TRAP can be lowered to PTX trap
   setOperationAction(ISD::TRAP, MVT::Other, Legal);
+
+  setOperationAction(ISD::ADDC, MVT::i64, Expand);
+  setOperationAction(ISD::ADDE, MVT::i64, Expand);
 
   // Register custom handling for vector loads/stores
   for (MVT VT : MVT::vector_valuetypes()) {
@@ -572,8 +562,8 @@ NVPTXTargetLowering::NVPTXTargetLowering(const NVPTXTargetMachine &TM,
   }
   setOperationAction(ISD::FMINNUM, MVT::f16, Promote);
   setOperationAction(ISD::FMAXNUM, MVT::f16, Promote);
-  setOperationAction(ISD::FMINIMUM, MVT::f16, Promote);
-  setOperationAction(ISD::FMAXIMUM, MVT::f16, Promote);
+  setOperationAction(ISD::FMINNAN, MVT::f16, Promote);
+  setOperationAction(ISD::FMAXNAN, MVT::f16, Promote);
 
   // No FEXP2, FLOG2.  The PTX ex2 and log2 functions are always approximate.
   // No FPOW or FREM in PTX.
@@ -1182,7 +1172,7 @@ const char *NVPTXTargetLowering::getTargetNodeName(unsigned Opcode) const {
 }
 
 TargetLoweringBase::LegalizeTypeAction
-NVPTXTargetLowering::getPreferredVectorAction(MVT VT) const {
+NVPTXTargetLowering::getPreferredVectorAction(EVT VT) const {
   if (VT.getVectorNumElements() != 1 && VT.getScalarType() == MVT::i1)
     return TypeSplitVector;
   if (VT == MVT::v2f16)
@@ -1242,9 +1232,9 @@ SDValue NVPTXTargetLowering::getSqrtEstimate(SDValue Operand, SelectionDAG &DAG,
 SDValue
 NVPTXTargetLowering::LowerGlobalAddress(SDValue Op, SelectionDAG &DAG) const {
   SDLoc dl(Op);
-  const GlobalAddressSDNode *GAN = cast<GlobalAddressSDNode>(Op);
-  auto PtrVT = getPointerTy(DAG.getDataLayout(), GAN->getAddressSpace());
-  Op = DAG.getTargetGlobalAddress(GAN->getGlobal(), dl, PtrVT);
+  const GlobalValue *GV = cast<GlobalAddressSDNode>(Op)->getGlobal();
+  auto PtrVT = getPointerTy(DAG.getDataLayout());
+  Op = DAG.getTargetGlobalAddress(GV, dl, PtrVT);
   return DAG.getNode(NVPTXISD::Wrapper, dl, PtrVT, Op);
 }
 
@@ -1661,12 +1651,7 @@ SDValue NVPTXTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
     }
   }
 
-  // Both indirect calls and libcalls have nullptr Func. In order to distinguish
-  // between them we must rely on the call site value which is valid for
-  // indirect calls but is always null for libcalls.
-  bool isIndirectCall = !Func && CS;
-
-  if (isIndirectCall) {
+  if (!Func) {
     // This is indirect function call case : PTX requires a prototype of the
     // form
     // proto_0 : .callprototype(.param .b32 _) _ (.param .b32 _);
@@ -1690,7 +1675,7 @@ SDValue NVPTXTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
     Chain, DAG.getConstant((Ins.size() == 0) ? 0 : 1, dl, MVT::i32), InFlag
   };
   // We model convergent calls as separate opcodes.
-  unsigned Opcode = isIndirectCall ? NVPTXISD::PrintCall : NVPTXISD::PrintCallUni;
+  unsigned Opcode = Func ? NVPTXISD::PrintCallUni : NVPTXISD::PrintCall;
   if (CLI.IsConvergent)
     Opcode = Opcode == NVPTXISD::PrintCallUni ? NVPTXISD::PrintConvergentCallUni
                                               : NVPTXISD::PrintConvergentCall;
@@ -1724,12 +1709,12 @@ SDValue NVPTXTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
   }
   SDVTList CallArgEndVTs = DAG.getVTList(MVT::Other, MVT::Glue);
   SDValue CallArgEndOps[] = { Chain,
-                              DAG.getConstant(isIndirectCall ? 0 : 1, dl, MVT::i32),
+                              DAG.getConstant(Func ? 1 : 0, dl, MVT::i32),
                               InFlag };
   Chain = DAG.getNode(NVPTXISD::CallArgEnd, dl, CallArgEndVTs, CallArgEndOps);
   InFlag = Chain.getValue(1);
 
-  if (isIndirectCall) {
+  if (!Func) {
     SDVTList PrototypeVTs = DAG.getVTList(MVT::Other, MVT::Glue);
     SDValue PrototypeOps[] = { Chain,
                                DAG.getConstant(uniqueCallSite, dl, MVT::i32),

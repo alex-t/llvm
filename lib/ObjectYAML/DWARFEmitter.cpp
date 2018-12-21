@@ -8,7 +8,7 @@
 //===----------------------------------------------------------------------===//
 ///
 /// \file
-/// The DWARF component of yaml2obj. Provided as library code for tests.
+/// \brief The DWARF component of yaml2obj. Provided as library code for tests.
 ///
 //===----------------------------------------------------------------------===//
 
@@ -132,7 +132,7 @@ void DWARFYAML::EmitPubSection(raw_ostream &OS,
 }
 
 namespace {
-/// An extension of the DWARFYAML::ConstVisitor which writes compile
+/// \brief An extension of the DWARFYAML::ConstVisitor which writes compile
 /// units and DIEs to a stream.
 class DumpVisitor : public DWARFYAML::ConstVisitor {
   raw_ostream &OS;
@@ -307,7 +307,6 @@ EmitDebugSectionImpl(const DWARFYAML::Data &DI, EmitFuncType EmitFunc,
     OutputBuffers[Sec] = MemoryBuffer::getMemBufferCopy(Data);
 }
 
-namespace {
 class DIEFixupVisitor : public DWARFYAML::Visitor {
   uint64_t Length;
 
@@ -346,7 +345,6 @@ private:
     Length += MBR.getBufferSize();
   }
 };
-} // namespace
 
 Expected<StringMap<std::unique_ptr<MemoryBuffer>>>
 DWARFYAML::EmitDebugSections(StringRef YAMLString, bool ApplyFixups,

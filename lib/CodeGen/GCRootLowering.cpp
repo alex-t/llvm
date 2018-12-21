@@ -38,7 +38,7 @@ namespace {
 /// directed by the GCStrategy. It also performs automatic root initialization
 /// and custom intrinsic lowering.
 class LowerIntrinsics : public FunctionPass {
-  bool DoLowering(Function &F, GCStrategy &S);
+  bool PerformDefaultLowering(Function &F, GCStrategy &Coll);
 
 public:
   static char ID;
@@ -61,7 +61,7 @@ class GCMachineCodeAnalysis : public MachineFunctionPass {
   const TargetInstrInfo *TII;
 
   void FindSafePoints(MachineFunction &MF);
-  void VisitCallPoint(MachineBasicBlock::iterator CI);
+  void VisitCallPoint(MachineBasicBlock::iterator MI);
   MCSymbol *InsertLabel(MachineBasicBlock &MBB, MachineBasicBlock::iterator MI,
                         const DebugLoc &DL) const;
 
@@ -100,6 +100,13 @@ void LowerIntrinsics::getAnalysisUsage(AnalysisUsage &AU) const {
   FunctionPass::getAnalysisUsage(AU);
   AU.addRequired<GCModuleInfo>();
   AU.addPreserved<DominatorTreeWrapperPass>();
+}
+
+static bool NeedsDefaultLoweringPass(const GCStrategy &C) {
+  // Default lowering is necessary only if read or write barriers have a default
+  // action. The default for roots is no action.
+  return !C.customWriteBarrier() || !C.customReadBarrier() ||
+         C.initializeRoots();
 }
 
 /// doInitialization - If this module uses the GC intrinsics, find them now.
@@ -141,7 +148,8 @@ static bool CouldBecomeSafePoint(Instruction *I) {
   return true;
 }
 
-static bool InsertRootInitializers(Function &F, ArrayRef<AllocaInst *> Roots) {
+static bool InsertRootInitializers(Function &F, AllocaInst **Roots,
+                                   unsigned Count) {
   // Scroll past alloca instructions.
   BasicBlock::iterator IP = F.getEntryBlock().begin();
   while (isa<AllocaInst>(IP))
@@ -158,12 +166,12 @@ static bool InsertRootInitializers(Function &F, ArrayRef<AllocaInst *> Roots) {
   // Add root initializers.
   bool MadeChange = false;
 
-  for (AllocaInst *Root : Roots)
-    if (!InitedRoots.count(Root)) {
+  for (AllocaInst **I = Roots, **E = Roots + Count; I != E; ++I)
+    if (!InitedRoots.count(*I)) {
       StoreInst *SI = new StoreInst(
-          ConstantPointerNull::get(cast<PointerType>(Root->getAllocatedType())),
-          Root);
-      SI->insertAfter(Root);
+          ConstantPointerNull::get(cast<PointerType>((*I)->getAllocatedType())),
+          *I);
+      SI->insertAfter(*I);
       MadeChange = true;
     }
 
@@ -180,59 +188,64 @@ bool LowerIntrinsics::runOnFunction(Function &F) {
   GCFunctionInfo &FI = getAnalysis<GCModuleInfo>().getFunctionInfo(F);
   GCStrategy &S = FI.getStrategy();
 
-  return DoLowering(F, S);
+  bool MadeChange = false;
+
+  if (NeedsDefaultLoweringPass(S))
+    MadeChange |= PerformDefaultLowering(F, S);
+
+  return MadeChange;
 }
 
-/// Lower barriers out of existance (if the associated GCStrategy hasn't
-/// already done so...), and insert initializing stores to roots as a defensive
-/// measure.  Given we're going to report all roots live at all safepoints, we
-/// need to be able to ensure each root has been initialized by the point the
-/// first safepoint is reached.  This really should have been done by the
-/// frontend, but the old API made this non-obvious, so we do a potentially
-/// redundant store just in case.  
-bool LowerIntrinsics::DoLowering(Function &F, GCStrategy &S) {
+bool LowerIntrinsics::PerformDefaultLowering(Function &F, GCStrategy &S) {
+  bool LowerWr = !S.customWriteBarrier();
+  bool LowerRd = !S.customReadBarrier();
+  bool InitRoots = S.initializeRoots();
+
   SmallVector<AllocaInst *, 32> Roots;
 
   bool MadeChange = false;
-  for (BasicBlock &BB : F) 
-    for (BasicBlock::iterator II = BB.begin(), E = BB.end(); II != E;) {
-      IntrinsicInst *CI = dyn_cast<IntrinsicInst>(II++);
-      if (!CI)
-        continue;
+  for (Function::iterator BB = F.begin(), E = F.end(); BB != E; ++BB) {
+    for (BasicBlock::iterator II = BB->begin(), E = BB->end(); II != E;) {
+      if (IntrinsicInst *CI = dyn_cast<IntrinsicInst>(II++)) {
+        Function *F = CI->getCalledFunction();
+        switch (F->getIntrinsicID()) {
+        case Intrinsic::gcwrite:
+          if (LowerWr) {
+            // Replace a write barrier with a simple store.
+            Value *St =
+                new StoreInst(CI->getArgOperand(0), CI->getArgOperand(2), CI);
+            CI->replaceAllUsesWith(St);
+            CI->eraseFromParent();
+          }
+          break;
+        case Intrinsic::gcread:
+          if (LowerRd) {
+            // Replace a read barrier with a simple load.
+            Value *Ld = new LoadInst(CI->getArgOperand(1), "", CI);
+            Ld->takeName(CI);
+            CI->replaceAllUsesWith(Ld);
+            CI->eraseFromParent();
+          }
+          break;
+        case Intrinsic::gcroot:
+          if (InitRoots) {
+            // Initialize the GC root, but do not delete the intrinsic. The
+            // backend needs the intrinsic to flag the stack slot.
+            Roots.push_back(
+                cast<AllocaInst>(CI->getArgOperand(0)->stripPointerCasts()));
+          }
+          break;
+        default:
+          continue;
+        }
 
-      Function *F = CI->getCalledFunction();
-      switch (F->getIntrinsicID()) {
-      default: break;
-      case Intrinsic::gcwrite: {
-        // Replace a write barrier with a simple store.
-        Value *St = new StoreInst(CI->getArgOperand(0),
-                                  CI->getArgOperand(2), CI);
-        CI->replaceAllUsesWith(St);
-        CI->eraseFromParent();
         MadeChange = true;
-        break;
-      }
-      case Intrinsic::gcread: {
-        // Replace a read barrier with a simple load.
-        Value *Ld = new LoadInst(CI->getArgOperand(1), "", CI);
-        Ld->takeName(CI);
-        CI->replaceAllUsesWith(Ld);
-        CI->eraseFromParent();
-        MadeChange = true;
-        break;
-      }
-      case Intrinsic::gcroot: {
-        // Initialize the GC root, but do not delete the intrinsic. The
-        // backend needs the intrinsic to flag the stack slot.
-        Roots.push_back(
-            cast<AllocaInst>(CI->getArgOperand(0)->stripPointerCasts()));
-        break;
-      }
       }
     }
+  }
 
   if (Roots.size())
-    MadeChange |= InsertRootInitializers(F, Roots);
+    MadeChange |= InsertRootInitializers(F, Roots.begin(), Roots.size());
 
   return MadeChange;
 }
@@ -263,18 +276,26 @@ MCSymbol *GCMachineCodeAnalysis::InsertLabel(MachineBasicBlock &MBB,
 }
 
 void GCMachineCodeAnalysis::VisitCallPoint(MachineBasicBlock::iterator CI) {
-  // Find the return address (next instruction), since that's what will be on
-  // the stack when the call is suspended and we need to inspect the stack.
+  // Find the return address (next instruction), too, so as to bracket the call
+  // instruction.
   MachineBasicBlock::iterator RAI = CI;
   ++RAI;
 
-  MCSymbol *Label = InsertLabel(*CI->getParent(), RAI, CI->getDebugLoc());
-  FI->addSafePoint(Label, CI->getDebugLoc());
+  if (FI->getStrategy().needsSafePoint(GC::PreCall)) {
+    MCSymbol *Label = InsertLabel(*CI->getParent(), CI, CI->getDebugLoc());
+    FI->addSafePoint(GC::PreCall, Label, CI->getDebugLoc());
+  }
+
+  if (FI->getStrategy().needsSafePoint(GC::PostCall)) {
+    MCSymbol *Label = InsertLabel(*CI->getParent(), RAI, CI->getDebugLoc());
+    FI->addSafePoint(GC::PostCall, Label, CI->getDebugLoc());
+  }
 }
 
 void GCMachineCodeAnalysis::FindSafePoints(MachineFunction &MF) {
-  for (MachineBasicBlock &MBB : MF)
-    for (MachineBasicBlock::iterator MI = MBB.begin(), ME = MBB.end();
+  for (MachineFunction::iterator BBI = MF.begin(), BBE = MF.end(); BBI != BBE;
+       ++BBI)
+    for (MachineBasicBlock::iterator MI = BBI->begin(), ME = BBI->end();
          MI != ME; ++MI)
       if (MI->isCall()) {
         // Do not treat tail or sibling call sites as safe points.  This is

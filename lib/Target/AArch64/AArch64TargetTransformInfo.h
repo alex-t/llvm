@@ -146,9 +146,7 @@ public:
 
   int getInterleavedMemoryOpCost(unsigned Opcode, Type *VecTy, unsigned Factor,
                                  ArrayRef<unsigned> Indices, unsigned Alignment,
-                                 unsigned AddressSpace,
-                                 bool UseMaskForCond = false,
-                                 bool UseMaskForGaps = false);
+                                 unsigned AddressSpace);
 
   bool
   shouldConsiderAddressTypePromotion(const Instruction &I,

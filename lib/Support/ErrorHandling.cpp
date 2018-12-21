@@ -243,7 +243,7 @@ void LLVMResetFatalErrorHandler() {
   remove_fatal_error_handler();
 }
 
-#ifdef _WIN32
+#ifdef LLVM_ON_WIN32
 
 #include <winerror.h>
 

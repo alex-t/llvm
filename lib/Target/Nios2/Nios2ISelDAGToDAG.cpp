@@ -61,7 +61,7 @@ void Nios2DAGToDAGISel::Select(SDNode *Node) {
 
   // If we have a custom node, we already have selected!
   if (Node->isMachineOpcode()) {
-    LLVM_DEBUG(errs() << "== "; Node->dump(CurDAG); errs() << "\n");
+    DEBUG(errs() << "== "; Node->dump(CurDAG); errs() << "\n");
     Node->setNodeId(-1);
     return;
   }

@@ -7,19 +7,17 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// This program is a utility that aims to be a dropin replacement for Darwin's
-// dsymutil.
+// This program is a utility that aims to be a dropin replacement for
+// Darwin's dsymutil.
+//
 //===----------------------------------------------------------------------===//
 
 #include "dsymutil.h"
-#include "BinaryHolder.h"
 #include "CFBundle.h"
 #include "DebugMap.h"
-#include "LinkUtils.h"
 #include "MachOUtils.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/SmallVector.h"
-#include "llvm/ADT/StringExtras.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/Triple.h"
 #include "llvm/DebugInfo/DIContext.h"
@@ -65,11 +63,6 @@ static opt<std::string> OsoPrependPath(
     desc("Specify a directory to prepend to the paths of object files."),
     value_desc("path"), cat(DsymCategory));
 
-static opt<bool> Assembly(
-    "S",
-    desc("Output textual assembly instead of a binary dSYM companion file."),
-    init(false), cat(DsymCategory), cl::Hidden);
-
 static opt<bool> DumpStab(
     "symtab",
     desc("Dumps the symbol table found in executable or object file(s) and\n"
@@ -84,10 +77,10 @@ static alias FlatOutA("f", desc("Alias for --flat"), aliasopt(FlatOut));
 
 static opt<bool> Minimize(
     "minimize",
-    desc("When used when creating a dSYM file with Apple accelerator tables,\n"
-         "this option will suppress the emission of the .debug_inlines, \n"
-         ".debug_pubnames, and .debug_pubtypes sections since dsymutil \n"
-         "has better equivalents: .apple_names and .apple_types. When used in\n"
+    desc("When used when creating a dSYM file, this option will suppress\n"
+         "the emission of the .debug_inlines, .debug_pubnames, and\n"
+         ".debug_pubtypes sections since dsymutil currently has better\n"
+         "equivalents: .apple_names and .apple_types. When used in\n"
          "conjunction with --update option, this option will cause redundant\n"
          "accelerator tables to be removed."),
     init(false), cat(DsymCategory));
@@ -96,17 +89,11 @@ static alias MinimizeA("z", desc("Alias for --minimize"), aliasopt(Minimize));
 static opt<bool> Update(
     "update",
     desc("Updates existing dSYM files to contain the latest accelerator\n"
-         "tables and other DWARF optimizations."),
+         "tables and other DWARF optimizations. This option will currently\n"
+         "add the new .apple_names and .apple_types hashed accelerator\n"
+         "tables."),
     init(false), cat(DsymCategory));
 static alias UpdateA("u", desc("Alias for --update"), aliasopt(Update));
-
-static cl::opt<AccelTableKind> AcceleratorTable(
-    "accelerator", cl::desc("Output accelerator tables."),
-    cl::values(clEnumValN(AccelTableKind::Default, "Default",
-                          "Default for input."),
-               clEnumValN(AccelTableKind::Apple, "Apple", "Apple"),
-               clEnumValN(AccelTableKind::Dwarf, "Dwarf", "DWARF")),
-    cl::init(AccelTableKind::Default), cat(DsymCategory));
 
 static opt<unsigned> NumThreads(
     "num-threads",
@@ -164,18 +151,20 @@ static opt<bool>
                        desc("Embed warnings in the linked DWARF debug info."),
                        cat(DsymCategory));
 
-static Error createPlistFile(llvm::StringRef Bin, llvm::StringRef BundleRoot) {
+static bool createPlistFile(llvm::StringRef Bin, llvm::StringRef BundleRoot) {
   if (NoOutput)
-    return Error::success();
+    return true;
 
   // Create plist file to write to.
   llvm::SmallString<128> InfoPlist(BundleRoot);
   llvm::sys::path::append(InfoPlist, "Contents/Info.plist");
   std::error_code EC;
   llvm::raw_fd_ostream PL(InfoPlist, EC, llvm::sys::fs::F_Text);
-  if (EC)
-    return make_error<StringError>(
-        "cannot create Plist: " + toString(errorCodeToError(EC)), EC);
+  if (EC) {
+    WithColor::error() << "cannot create plist file " << InfoPlist << ": "
+                       << EC.message() << '\n';
+    return false;
+  }
 
   CFBundleInfo BI = getBundleInfo(Bin);
 
@@ -204,44 +193,37 @@ static Error createPlistFile(llvm::StringRef Bin, llvm::StringRef BundleRoot) {
      << "\t\t<key>CFBundleSignature</key>\n"
      << "\t\t<string>\?\?\?\?</string>\n";
 
-  if (!BI.OmitShortVersion()) {
-    PL << "\t\t<key>CFBundleShortVersionString</key>\n";
-    PL << "\t\t<string>";
-    printHTMLEscaped(BI.ShortVersionStr, PL);
-    PL << "</string>\n";
-  }
+  if (!BI.OmitShortVersion())
+    PL << "\t\t<key>CFBundleShortVersionString</key>\n"
+       << "\t\t<string>" << BI.ShortVersionStr << "</string>\n";
 
-  PL << "\t\t<key>CFBundleVersion</key>\n";
-  PL << "\t\t<string>";
-  printHTMLEscaped(BI.VersionStr, PL);
-  PL << "</string>\n";
+  PL << "\t\t<key>CFBundleVersion</key>\n"
+     << "\t\t<string>" << BI.VersionStr << "</string>\n";
 
-  if (!Toolchain.empty()) {
-    PL << "\t\t<key>Toolchain</key>\n";
-    PL << "\t\t<string>";
-    printHTMLEscaped(Toolchain, PL);
-    PL << "</string>\n";
-  }
+  if (!Toolchain.empty())
+    PL << "\t\t<key>Toolchain</key>\n"
+       << "\t\t<string>" << Toolchain << "</string>\n";
 
   PL << "\t</dict>\n"
      << "</plist>\n";
 
   PL.close();
-  return Error::success();
+  return true;
 }
 
-static Error createBundleDir(llvm::StringRef BundleBase) {
+static bool createBundleDir(llvm::StringRef BundleBase) {
   if (NoOutput)
-    return Error::success();
+    return true;
 
   llvm::SmallString<128> Bundle(BundleBase);
   llvm::sys::path::append(Bundle, "Contents", "Resources", "DWARF");
-  if (std::error_code EC =
-          create_directories(Bundle.str(), true, llvm::sys::fs::perms::all_all))
-    return make_error<StringError>(
-        "cannot create bundle: " + toString(errorCodeToError(EC)), EC);
-
-  return Error::success();
+  if (std::error_code EC = create_directories(Bundle.str(), true,
+                                              llvm::sys::fs::perms::all_all)) {
+    WithColor::error() << "cannot create directory " << Bundle << ": "
+                       << EC.message() << "\n";
+    return false;
+  }
+  return true;
 }
 
 static bool verify(llvm::StringRef OutputFile, llvm::StringRef Arch) {
@@ -253,7 +235,7 @@ static bool verify(llvm::StringRef OutputFile, llvm::StringRef Arch) {
 
   Expected<OwningBinary<Binary>> BinOrErr = createBinary(OutputFile);
   if (!BinOrErr) {
-    WithColor::error() << OutputFile << ": " << toString(BinOrErr.takeError());
+    errs() << OutputFile << ": " << toString(BinOrErr.takeError());
     return false;
   }
 
@@ -272,7 +254,7 @@ static bool verify(llvm::StringRef OutputFile, llvm::StringRef Arch) {
   return false;
 }
 
-static Expected<std::string> getOutputFileName(llvm::StringRef InputFile) {
+static std::string getOutputFileName(llvm::StringRef InputFile) {
   // When updating, do in place replacement.
   if (OutputFileOpt.empty() && Update)
     return InputFile;
@@ -301,14 +283,19 @@ static Expected<std::string> getOutputFileName(llvm::StringRef InputFile) {
   llvm::SmallString<128> BundleDir(OutputFileOpt);
   if (BundleDir.empty())
     BundleDir = DwarfFile + ".dSYM";
-  if (auto E = createBundleDir(BundleDir))
-    return std::move(E);
-  if (auto E = createPlistFile(DwarfFile, BundleDir))
-    return std::move(E);
+  if (!createBundleDir(BundleDir) || !createPlistFile(DwarfFile, BundleDir))
+    return "";
 
   llvm::sys::path::append(BundleDir, "Contents", "Resources", "DWARF",
                           llvm::sys::path::filename(DwarfFile));
   return BundleDir.str();
+}
+
+static Expected<sys::fs::TempFile> createTempFile() {
+  llvm::SmallString<128> TmpModel;
+  llvm::sys::path::system_temp_directory(true, TmpModel);
+  llvm::sys::path::append(TmpModel, "dsym.tmp%%%%%.dwarf");
+  return sys::fs::TempFile::create(TmpModel);
 }
 
 /// Parses the command line options into the LinkOptions struct and performs
@@ -323,10 +310,6 @@ static Expected<LinkOptions> getOptions() {
   Options.Update = Update;
   Options.NoTimestamp = NoTimestamp;
   Options.PrependPath = OsoPrependPath;
-  Options.TheAccelTableKind = AcceleratorTable;
-
-  if (Assembly)
-    Options.FileType = OutputFileType::Assembly;
 
   if (Options.Update && std::find(InputFiles.begin(), InputFiles.end(), "-") !=
                             InputFiles.end()) {
@@ -391,6 +374,18 @@ static Expected<std::vector<std::string>> getInputs(bool DsymAsInput) {
   return Inputs;
 }
 
+namespace {
+struct TempFileVector {
+  std::vector<sys::fs::TempFile> Files;
+  ~TempFileVector() {
+    for (sys::fs::TempFile &Tmp : Files) {
+      if (Error E = Tmp.discard())
+        errs() << toString(std::move(E));
+    }
+  }
+};
+} // namespace
+
 int main(int argc, char **argv) {
   InitLLVM X(argc, argv);
 
@@ -398,7 +393,7 @@ int main(int argc, char **argv) {
   std::string SDKPath = llvm::sys::fs::getMainExecutable(argv[0], P);
   SDKPath = llvm::sys::path::parent_path(SDKPath);
 
-  HideUnrelatedOptions({&DsymCategory, &ColorCategory});
+  HideUnrelatedOptions(DsymCategory);
   llvm::cl::ParseCommandLineOptions(
       argc, argv,
       "manipulate archived DWARF debug symbol files.\n\n"
@@ -489,9 +484,6 @@ int main(int argc, char **argv) {
       return 1;
     }
 
-    // Shared a single binary holder for all the link steps.
-    BinaryHolder BinHolder;
-
     NumThreads =
         std::min<unsigned>(OptionsOrErr->Threads, DebugMapPtrsOrErr->size());
     llvm::ThreadPool Threads(NumThreads);
@@ -502,7 +494,8 @@ int main(int argc, char **argv) {
         !DumpDebugMap && (OutputFileOpt != "-") &&
         (DebugMapPtrsOrErr->size() != 1 || OptionsOrErr->Update);
 
-    llvm::SmallVector<MachOUtils::ArchAndFile, 4> TempFiles;
+    llvm::SmallVector<MachOUtils::ArchAndFilename, 4> TempFiles;
+    TempFileVector TempFileStore;
     std::atomic_char AllOK(1);
     for (auto &Map : *DebugMapPtrsOrErr) {
       if (Verbose || DumpDebugMap)
@@ -519,40 +512,31 @@ int main(int argc, char **argv) {
       // Using a std::shared_ptr rather than std::unique_ptr because move-only
       // types don't work with std::bind in the ThreadPool implementation.
       std::shared_ptr<raw_fd_ostream> OS;
-
-      Expected<std::string> OutputFileOrErr = getOutputFileName(InputFile);
-      if (!OutputFileOrErr) {
-        WithColor::error() << toString(OutputFileOrErr.takeError());
-        return 1;
-      }
-
-      std::string OutputFile = *OutputFileOrErr;
+      std::string OutputFile = getOutputFileName(InputFile);
       if (NeedsTempFiles) {
-        TempFiles.emplace_back(Map->getTriple().getArchName().str());
-
-        auto E = TempFiles.back().createTempFile();
-        if (E) {
-          WithColor::error() << toString(std::move(E));
+        Expected<sys::fs::TempFile> T = createTempFile();
+        if (!T) {
+          errs() << toString(T.takeError());
           return 1;
         }
-
-        auto &TempFile = *(TempFiles.back().File);
-        OS = std::make_shared<raw_fd_ostream>(TempFile.FD,
-                                              /*shouldClose*/ false);
-        OutputFile = TempFile.TmpName;
+        OS = std::make_shared<raw_fd_ostream>(T->FD, /*shouldClose*/ false);
+        OutputFile = T->TmpName;
+        TempFileStore.Files.push_back(std::move(*T));
+        TempFiles.emplace_back(Map->getTriple().getArchName().str(),
+                               OutputFile);
       } else {
         std::error_code EC;
         OS = std::make_shared<raw_fd_ostream>(NoOutput ? "-" : OutputFile, EC,
                                               sys::fs::F_None);
         if (EC) {
-          WithColor::error() << OutputFile << ": " << EC.message();
+          errs() << OutputFile << ": " << EC.message();
           return 1;
         }
       }
 
       auto LinkLambda = [&,
                          OutputFile](std::shared_ptr<raw_fd_ostream> Stream) {
-        AllOK.fetch_and(linkDwarf(*Stream, BinHolder, *Map, *OptionsOrErr));
+        AllOK.fetch_and(linkDwarf(*Stream, *Map, *OptionsOrErr));
         Stream->flush();
         if (Verify && !NoOutput)
           AllOK.fetch_and(verify(OutputFile, Map->getTriple().getArchName()));
@@ -572,16 +556,10 @@ int main(int argc, char **argv) {
     if (!AllOK)
       return 1;
 
-    if (NeedsTempFiles) {
-      Expected<std::string> OutputFileOrErr = getOutputFileName(InputFile);
-      if (!OutputFileOrErr) {
-        WithColor::error() << toString(OutputFileOrErr.takeError());
-        return 1;
-      }
-      if (!MachOUtils::generateUniversalBinary(TempFiles, *OutputFileOrErr,
-                                               *OptionsOrErr, SDKPath))
-        return 1;
-    }
+    if (NeedsTempFiles &&
+        !MachOUtils::generateUniversalBinary(
+            TempFiles, getOutputFileName(InputFile), *OptionsOrErr, SDKPath))
+      return 1;
   }
 
   return 0;

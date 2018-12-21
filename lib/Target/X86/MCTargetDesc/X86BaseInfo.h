@@ -231,11 +231,6 @@ namespace X86II {
     /// to be an absolute symbol in range [0,128), so we can use the @ABS8
     /// symbol modifier.
     MO_ABS8,
-
-    /// MO_COFFSTUB - On a symbol operand "FOO", this indicates that the
-    /// reference is actually to the ".refptr.FOO" symbol.  This is used for
-    /// stub symbols on windows.
-    MO_COFFSTUB,
   };
 
   enum : uint64_t {
@@ -266,12 +261,12 @@ namespace X86II {
     RawFrmSrc      = 4,
 
     /// RawFrmDst - This form is for instructions that use the destination index
-    /// register DI/EDI/RDI.
+    /// register DI/EDI/ESI.
     RawFrmDst      = 5,
 
-    /// RawFrmDstSrc - This form is for instructions that use the source index
-    /// register SI/ESI/RSI with a possible segment override, and also the
-    /// destination index register DI/EDI/RDI.
+    /// RawFrmSrc - This form is for instructions that use the source index
+    /// register SI/ESI/ERI with a possible segment override, and also the
+    /// destination index register DI/ESI/RDI.
     RawFrmDstSrc   = 6,
 
     /// RawFrmImm8 - This is used for the ENTER instruction, which has two
@@ -585,7 +580,7 @@ namespace X86II {
   // getBaseOpcodeFor - This function returns the "base" X86 opcode for the
   // specified machine instruction.
   //
-  inline uint8_t getBaseOpcodeFor(uint64_t TSFlags) {
+  inline unsigned char getBaseOpcodeFor(uint64_t TSFlags) {
     return TSFlags >> X86II::OpcodeShift;
   }
 

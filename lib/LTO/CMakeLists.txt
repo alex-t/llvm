@@ -4,7 +4,6 @@ add_llvm_library(LLVMLTO
   LTOBackend.cpp
   LTOModule.cpp
   LTOCodeGenerator.cpp
-  SummaryBasedOptimizations.cpp
   UpdateCompilerUsed.cpp
   ThinLTOCodeGenerator.cpp
 

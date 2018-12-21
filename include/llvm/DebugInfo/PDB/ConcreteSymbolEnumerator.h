@@ -43,6 +43,11 @@ public:
 
   void reset() override { Enumerator->reset(); }
 
+  ConcreteSymbolEnumerator<ChildType> *clone() const override {
+    std::unique_ptr<IPDBEnumSymbols> WrappedClone(Enumerator->clone());
+    return new ConcreteSymbolEnumerator<ChildType>(std::move(WrappedClone));
+  }
+
 private:
 
   std::unique_ptr<IPDBEnumSymbols> Enumerator;

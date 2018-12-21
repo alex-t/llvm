@@ -23,7 +23,6 @@
 #include "llvm/Analysis/AliasAnalysis.h"
 #include "llvm/Analysis/BlockFrequencyInfo.h"
 #include "llvm/Analysis/BranchProbabilityInfo.h"
-#include "llvm/IR/DomTreeUpdater.h"
 #include "llvm/IR/ValueHandle.h"
 #include <memory>
 #include <utility>
@@ -35,7 +34,7 @@ class BinaryOperator;
 class BranchInst;
 class CmpInst;
 class Constant;
-class DomTreeUpdater;
+class DeferredDominance;
 class Function;
 class Instruction;
 class IntrinsicInst;
@@ -79,7 +78,7 @@ class JumpThreadingPass : public PassInfoMixin<JumpThreadingPass> {
   TargetLibraryInfo *TLI;
   LazyValueInfo *LVI;
   AliasAnalysis *AA;
-  DomTreeUpdater *DTU;
+  DeferredDominance *DDT;
   std::unique_ptr<BlockFrequencyInfo> BFI;
   std::unique_ptr<BranchProbabilityInfo> BPI;
   bool HasProfileData = false;
@@ -89,16 +88,29 @@ class JumpThreadingPass : public PassInfoMixin<JumpThreadingPass> {
 #else
   SmallSet<AssertingVH<const BasicBlock>, 16> LoopHeaders;
 #endif
+  DenseSet<std::pair<Value *, BasicBlock *>> RecursionSet;
 
   unsigned BBDupThreshold;
+
+  // RAII helper for updating the recursion stack.
+  struct RecursionSetRemover {
+    DenseSet<std::pair<Value *, BasicBlock *>> &TheSet;
+    std::pair<Value *, BasicBlock *> ThePair;
+
+    RecursionSetRemover(DenseSet<std::pair<Value *, BasicBlock *>> &S,
+                        std::pair<Value *, BasicBlock *> P)
+        : TheSet(S), ThePair(P) {}
+
+    ~RecursionSetRemover() { TheSet.erase(ThePair); }
+  };
 
 public:
   JumpThreadingPass(int T = -1);
 
   // Glue for old PM.
   bool runImpl(Function &F, TargetLibraryInfo *TLI_, LazyValueInfo *LVI_,
-               AliasAnalysis *AA_, DomTreeUpdater *DTU_, bool HasProfileData_,
-               std::unique_ptr<BlockFrequencyInfo> BFI_,
+               AliasAnalysis *AA_, DeferredDominance *DDT_,
+               bool HasProfileData_, std::unique_ptr<BlockFrequencyInfo> BFI_,
                std::unique_ptr<BranchProbabilityInfo> BPI_);
 
   PreservedAnalyses run(Function &F, FunctionAnalysisManager &AM);
@@ -115,21 +127,11 @@ public:
   bool DuplicateCondBranchOnPHIIntoPred(
       BasicBlock *BB, const SmallVectorImpl<BasicBlock *> &PredBBs);
 
-  bool ComputeValueKnownInPredecessorsImpl(
-      Value *V, BasicBlock *BB, jumpthreading::PredValueInfo &Result,
-      jumpthreading::ConstantPreference Preference,
-      DenseSet<std::pair<Value *, BasicBlock *>> &RecursionSet,
-      Instruction *CxtI = nullptr);
   bool
   ComputeValueKnownInPredecessors(Value *V, BasicBlock *BB,
                                   jumpthreading::PredValueInfo &Result,
                                   jumpthreading::ConstantPreference Preference,
-                                  Instruction *CxtI = nullptr) {
-    DenseSet<std::pair<Value *, BasicBlock *>> RecursionSet;
-    return ComputeValueKnownInPredecessorsImpl(V, BB, Result, Preference,
-                                               RecursionSet, CxtI);
-  }
-
+                                  Instruction *CxtI = nullptr);
   bool ProcessThreadableEdges(Value *Cond, BasicBlock *BB,
                               jumpthreading::ConstantPreference Preference,
                               Instruction *CxtI = nullptr);

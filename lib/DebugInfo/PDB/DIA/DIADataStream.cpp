@@ -8,7 +8,8 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/DebugInfo/PDB/DIA/DIADataStream.h"
-#include "llvm/DebugInfo/PDB/DIA/DIAUtils.h"
+#include "llvm/ADT/ArrayRef.h"
+#include "llvm/Support/ConvertUTF.h"
 
 using namespace llvm;
 using namespace llvm::pdb;
@@ -22,7 +23,16 @@ uint32_t DIADataStream::getRecordCount() const {
 }
 
 std::string DIADataStream::getName() const {
-  return invokeBstrMethod(*StreamData, &IDiaEnumDebugStreamData::get_name);
+  CComBSTR Name16;
+  if (S_OK != StreamData->get_name(&Name16))
+    return std::string();
+
+  std::string Name8;
+  llvm::ArrayRef<char> Name16Bytes(reinterpret_cast<char *>(Name16.m_str),
+                                   Name16.ByteLength());
+  if (!llvm::convertUTF16ToUTF8String(Name16Bytes, Name8))
+    return std::string();
+  return Name8;
 }
 
 llvm::Optional<DIADataStream::RecordType>
@@ -55,3 +65,11 @@ bool DIADataStream::getNext(RecordType &Record) {
 }
 
 void DIADataStream::reset() { StreamData->Reset(); }
+
+DIADataStream *DIADataStream::clone() const {
+  CComPtr<IDiaEnumDebugStreamData> EnumeratorClone;
+  if (S_OK != StreamData->Clone(&EnumeratorClone))
+    return nullptr;
+
+  return new DIADataStream(EnumeratorClone);
+}

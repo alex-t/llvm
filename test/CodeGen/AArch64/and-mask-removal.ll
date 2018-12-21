@@ -179,9 +179,7 @@ ret_false:
 ret_true:
   ret i1 true
 ; CHECK-LABEL: test16_2
-; CHECK: mov	[[CST:w[0-9]+]], #16882
-; CHECK: add	[[ADD:w[0-9]+]], w0, [[CST]]
-; CHECK: cmp	{{.*}}, [[ADD]], uxth
+; CHECK: and
 ; CHECK: ret
 }
 
@@ -209,9 +207,7 @@ ret_false:
 ret_true:
   ret i1 true
 ; CHECK-LABEL: test16_4
-; CHECK: mov	[[CST:w[0-9]+]], #29985
-; CHECK: add	[[ADD:w[0-9]+]], w0, [[CST]]
-; CHECK: cmp	{{.*}}, [[ADD]], uxth
+; CHECK: and
 ; CHECK: ret
 }
 
@@ -253,9 +249,7 @@ ret_false:
 ret_true:
   ret i1 true
 ; CHECK-LABEL: test16_7
-; CHECK: mov	[[CST:w[0-9]+]], #9272
-; CHECK: add	[[ADD:w[0-9]+]], w0, [[CST]]
-; CHECK: cmp	{{.*}}, [[ADD]], uxth
+; CHECK: and
 ; CHECK: ret
 }
 

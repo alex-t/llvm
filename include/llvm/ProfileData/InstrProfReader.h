@@ -349,16 +349,11 @@ using OnDiskHashTableImplV3 =
     OnDiskIterableChainedHashTable<InstrProfLookupTrait>;
 
 template <typename HashTableImpl>
-class InstrProfReaderItaniumRemapper;
-
-template <typename HashTableImpl>
 class InstrProfReaderIndex : public InstrProfReaderIndexBase {
 private:
   std::unique_ptr<HashTableImpl> HashTable;
   typename HashTableImpl::data_iterator RecordIterator;
   uint64_t FormatVersion;
-
-  friend class InstrProfReaderItaniumRemapper<HashTableImpl>;
 
 public:
   InstrProfReaderIndex(const unsigned char *Buckets,
@@ -391,26 +386,13 @@ public:
   }
 };
 
-/// Name matcher supporting fuzzy matching of symbol names to names in profiles.
-class InstrProfReaderRemapper {
-public:
-  virtual ~InstrProfReaderRemapper() {}
-  virtual Error populateRemappings() { return Error::success(); }
-  virtual Error getRecords(StringRef FuncName,
-                           ArrayRef<NamedInstrProfRecord> &Data) = 0;
-};
-
 /// Reader for the indexed binary instrprof format.
 class IndexedInstrProfReader : public InstrProfReader {
 private:
   /// The profile data file contents.
   std::unique_ptr<MemoryBuffer> DataBuffer;
-  /// The profile remapping file contents.
-  std::unique_ptr<MemoryBuffer> RemappingBuffer;
   /// The index into the profile data.
   std::unique_ptr<InstrProfReaderIndexBase> Index;
-  /// The profile remapping file contents.
-  std::unique_ptr<InstrProfReaderRemapper> Remapper;
   /// Profile summary data.
   std::unique_ptr<ProfileSummary> Summary;
   // Index to the current record in the record array.
@@ -422,11 +404,8 @@ private:
                                    const unsigned char *Cur);
 
 public:
-  IndexedInstrProfReader(
-      std::unique_ptr<MemoryBuffer> DataBuffer,
-      std::unique_ptr<MemoryBuffer> RemappingBuffer = nullptr)
-      : DataBuffer(std::move(DataBuffer)),
-        RemappingBuffer(std::move(RemappingBuffer)), RecordIndex(0) {}
+  IndexedInstrProfReader(std::unique_ptr<MemoryBuffer> DataBuffer)
+      : DataBuffer(std::move(DataBuffer)), RecordIndex(0) {}
   IndexedInstrProfReader(const IndexedInstrProfReader &) = delete;
   IndexedInstrProfReader &operator=(const IndexedInstrProfReader &) = delete;
 
@@ -455,11 +434,10 @@ public:
 
   /// Factory method to create an indexed reader.
   static Expected<std::unique_ptr<IndexedInstrProfReader>>
-  create(const Twine &Path, const Twine &RemappingPath = "");
+  create(const Twine &Path);
 
   static Expected<std::unique_ptr<IndexedInstrProfReader>>
-  create(std::unique_ptr<MemoryBuffer> Buffer,
-         std::unique_ptr<MemoryBuffer> RemappingBuffer = nullptr);
+  create(std::unique_ptr<MemoryBuffer> Buffer);
 
   // Used for testing purpose only.
   void setValueProfDataEndianness(support::endianness Endianness) {

@@ -15,6 +15,7 @@
 
 def isEG : Predicate<
   "Subtarget->getGeneration() >= AMDGPUSubtarget::EVERGREEN && "
+  "Subtarget->getGeneration() <= AMDGPUSubtarget::NORTHERN_ISLANDS && "
   "!Subtarget->hasCaymanISA()"
 >;
 

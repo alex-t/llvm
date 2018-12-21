@@ -154,7 +154,11 @@ if.end3:
 ; NEW-NOT: call
 ; NEW: call void @_Z1fILb1ELi2EEvPbS0_(
 ; NEW-NOT: call
-; NEW: call void @_Z1fILb1ELi3EEvPbS0_(
+; NEW: call void @_Z1gi(
+; NEW-NOT: call
+; NEW: call void @_Z1fILb1ELi0EEvPbS0_(
+; NEW-NOT: call
+; NEW: call void @_Z1fILb0ELi0EEvPbS0_(
 ; NEW-NOT: call
 ; NEW: call void @_Z1fILb0ELi3EEvPbS0_(
 ; NEW-NOT: call
@@ -194,11 +198,19 @@ if.end3:
 ; NEW-NOT: call
 ; NEW: call void @_Z1gi(
 ; NEW-NOT: call
-; NEW: call void @_Z1fILb1ELi3EEvPbS0_(
+; NEW: call void @_Z1gi(
+; NEW-NOT: call
+; NEW: call void @_Z1fILb1ELi0EEvPbS0_(
+; NEW-NOT: call
+; NEW: call void @_Z1fILb0ELi0EEvPbS0_(
 ; NEW-NOT: call
 ; NEW: call void @_Z1fILb0ELi3EEvPbS0_(
 ; NEW-NOT: call
-; NEW: call void @_Z1fILb1ELi3EEvPbS0_(
+; NEW: call void @_Z1gi(
+; NEW-NOT: call
+; NEW: call void @_Z1fILb1ELi0EEvPbS0_(
+; NEW-NOT: call
+; NEW: call void @_Z1fILb0ELi0EEvPbS0_(
 ; NEW-NOT: call
 ; NEW: call void @_Z1fILb0ELi3EEvPbS0_(
 ; NEW-NOT: call
@@ -248,7 +260,7 @@ if.end3:
 ; NEW-NOT: call
 ; NEW: call void @_Z1fILb1ELi4EEvPbS0_(
 ; NEW-NOT: call
-; NEW: call void @_Z1fILb0ELi4EEvPbS0_(
+; NEW: call void @_Z1fILb0ELi0EEvPbS0_(
 ; NEW-NOT: call
 define void @_Z1fILb0ELi2EEvPbS0_(i8* %B, i8* %E) {
 entry:
@@ -292,13 +304,21 @@ if.end3:
 ; NEW-NOT: call
 ; NEW: call void @_Z1gi(
 ; NEW-NOT: call
-; NEW: call void @_Z1fILb1ELi4EEvPbS0_(
+; NEW: call void @_Z1gi(
 ; NEW-NOT: call
-; NEW: call void @_Z1fILb0ELi4EEvPbS0_(
+; NEW: call void @_Z1fILb1ELi1EEvPbS0_(
 ; NEW-NOT: call
-; NEW: call void @_Z1fILb1ELi4EEvPbS0_(
+; NEW: call void @_Z1fILb0ELi1EEvPbS0_(
 ; NEW-NOT: call
-; NEW: call void @_Z1fILb0ELi4EEvPbS0_(
+; NEW: call void @_Z1fILb0ELi0EEvPbS0_(
+; NEW-NOT: call
+; NEW: call void @_Z1gi(
+; NEW-NOT: call
+; NEW: call void @_Z1fILb1ELi1EEvPbS0_(
+; NEW-NOT: call
+; NEW: call void @_Z1fILb0ELi1EEvPbS0_(
+; NEW-NOT: call
+; NEW: call void @_Z1fILb0ELi0EEvPbS0_(
 ; NEW-NOT: call
 define void @_Z1fILb1ELi2EEvPbS0_(i8* %B, i8* %E) {
 entry:
@@ -413,7 +433,15 @@ entry:
 ; NEW-NOT: call
 ; NEW: call void @_Z1fILb1ELi1EEvPbS0_(
 ; NEW-NOT: call
-; NEW: call void @_Z1fILb0ELi1EEvPbS0_(
+; NEW: call void @_Z1fILb1ELi2EEvPbS0_(
+; NEW-NOT: call
+; NEW: call void @_Z1gi(
+; NEW-NOT: call
+; NEW: call void @_Z1fILb1ELi0EEvPbS0_(
+; NEW-NOT: call
+; NEW: call void @_Z1fILb0ELi0EEvPbS0_(
+; NEW-NOT: call
+; NEW: call void @_Z1fILb0ELi3EEvPbS0_(
 ; NEW-NOT: call
 define void @_Z1fILb1ELi4EEvPbS0_(i8* %B, i8* %E) {
 entry:

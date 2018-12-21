@@ -238,8 +238,7 @@ bool HexagonEarlyIfConversion::isPreheader(const MachineBasicBlock *B) const {
 
 bool HexagonEarlyIfConversion::matchFlowPattern(MachineBasicBlock *B,
     MachineLoop *L, FlowPattern &FP) {
-  LLVM_DEBUG(dbgs() << "Checking flow pattern at " << printMBBReference(*B)
-                    << "\n");
+  DEBUG(dbgs() << "Checking flow pattern at " << printMBBReference(*B) << "\n");
 
   // Interested only in conditional branches, no .new, no new-value, etc.
   // Check the terminators directly, it's easier than handling all responses
@@ -326,13 +325,13 @@ bool HexagonEarlyIfConversion::matchFlowPattern(MachineBasicBlock *B,
   }
   // Don't try to predicate loop preheaders.
   if ((TB && isPreheader(TB)) || (FB && isPreheader(FB))) {
-    LLVM_DEBUG(dbgs() << "One of blocks " << PrintMB(TB) << ", " << PrintMB(FB)
-                      << " is a loop preheader. Skipping.\n");
+    DEBUG(dbgs() << "One of blocks " << PrintMB(TB) << ", " << PrintMB(FB)
+                 << " is a loop preheader. Skipping.\n");
     return false;
   }
 
   FP = FlowPattern(B, PredR, TB, FB, JB);
-  LLVM_DEBUG(dbgs() << "Detected " << PrintFP(FP, *TRI) << "\n");
+  DEBUG(dbgs() << "Detected " << PrintFP(FP, *TRI) << "\n");
   return true;
 }
 
@@ -368,7 +367,7 @@ bool HexagonEarlyIfConversion::isValidCandidate(const MachineBasicBlock *B)
     return false;
 
   for (auto &MI : *B) {
-    if (MI.isDebugInstr())
+    if (MI.isDebugValue())
       continue;
     if (MI.isConditionalBranch())
       return false;
@@ -552,9 +551,8 @@ bool HexagonEarlyIfConversion::isProfitable(const FlowPattern &FP) const {
   };
   unsigned Spare = 0;
   unsigned TotalIn = TotalCount(FP.TrueB, Spare) + TotalCount(FP.FalseB, Spare);
-  LLVM_DEBUG(
-      dbgs() << "Total number of instructions to be predicated/speculated: "
-             << TotalIn << ", spare room: " << Spare << "\n");
+  DEBUG(dbgs() << "Total number of instructions to be predicated/speculated: "
+               << TotalIn << ", spare room: " << Spare << "\n");
   if (TotalIn >= SizeLimit+Spare)
     return false;
 
@@ -581,13 +579,12 @@ bool HexagonEarlyIfConversion::isProfitable(const FlowPattern &FP) const {
       PredDefs += countPredicateDefs(SB);
     }
   }
-  LLVM_DEBUG(dbgs() << "Total number of extra muxes from converted phis: "
-                    << TotalPh << "\n");
+  DEBUG(dbgs() << "Total number of extra muxes from converted phis: "
+               << TotalPh << "\n");
   if (TotalIn+TotalPh >= SizeLimit+Spare)
     return false;
 
-  LLVM_DEBUG(dbgs() << "Total number of predicate registers: " << PredDefs
-                    << "\n");
+  DEBUG(dbgs() << "Total number of predicate registers: " << PredDefs << "\n");
   if (PredDefs > 4)
     return false;
 
@@ -628,11 +625,11 @@ bool HexagonEarlyIfConversion::visitBlock(MachineBasicBlock *B,
     return Changed;
 
   if (!isValid(FP)) {
-    LLVM_DEBUG(dbgs() << "Conversion is not valid\n");
+    DEBUG(dbgs() << "Conversion is not valid\n");
     return Changed;
   }
   if (!isProfitable(FP)) {
-    LLVM_DEBUG(dbgs() << "Conversion is not profitable\n");
+    DEBUG(dbgs() << "Conversion is not profitable\n");
     return Changed;
   }
 
@@ -643,9 +640,8 @@ bool HexagonEarlyIfConversion::visitBlock(MachineBasicBlock *B,
 
 bool HexagonEarlyIfConversion::visitLoop(MachineLoop *L) {
   MachineBasicBlock *HB = L ? L->getHeader() : nullptr;
-  LLVM_DEBUG((L ? dbgs() << "Visiting loop H:" << PrintMB(HB)
-                : dbgs() << "Visiting function")
-             << "\n");
+  DEBUG((L ? dbgs() << "Visiting loop H:" << PrintMB(HB)
+           : dbgs() << "Visiting function") << "\n");
   bool Changed = false;
   if (L) {
     for (MachineLoop::iterator I = L->begin(), E = L->end(); I != E; ++I)
@@ -731,7 +727,9 @@ void HexagonEarlyIfConversion::predicateInstr(MachineBasicBlock *ToB,
       MIB.add(MO);
 
     // Set memory references.
-    MIB.cloneMemRefs(*MI);
+    MachineInstr::mmo_iterator MMOBegin = MI->memoperands_begin();
+    MachineInstr::mmo_iterator MMOEnd = MI->memoperands_end();
+    MIB.setMemRefs(MMOBegin, MMOEnd);
 
     MI->eraseFromParent();
     return;
@@ -760,7 +758,7 @@ void HexagonEarlyIfConversion::predicateInstr(MachineBasicBlock *ToB,
 void HexagonEarlyIfConversion::predicateBlockNB(MachineBasicBlock *ToB,
       MachineBasicBlock::iterator At, MachineBasicBlock *FromB,
       unsigned PredR, bool IfTrue) {
-  LLVM_DEBUG(dbgs() << "Predicating block " << PrintMB(FromB) << "\n");
+  DEBUG(dbgs() << "Predicating block " << PrintMB(FromB) << "\n");
   MachineBasicBlock::iterator End = FromB->getFirstTerminator();
   MachineBasicBlock::iterator I, NextI;
 
@@ -952,7 +950,7 @@ void HexagonEarlyIfConversion::convert(const FlowPattern &FP) {
 }
 
 void HexagonEarlyIfConversion::removeBlock(MachineBasicBlock *B) {
-  LLVM_DEBUG(dbgs() << "Removing block " << PrintMB(B) << "\n");
+  DEBUG(dbgs() << "Removing block " << PrintMB(B) << "\n");
 
   // Transfer the immediate dominator information from B to its descendants.
   MachineDomTreeNode *N = MDT->getNode(B);
@@ -982,7 +980,7 @@ void HexagonEarlyIfConversion::removeBlock(MachineBasicBlock *B) {
 }
 
 void HexagonEarlyIfConversion::eliminatePhis(MachineBasicBlock *B) {
-  LLVM_DEBUG(dbgs() << "Removing phi nodes from block " << PrintMB(B) << "\n");
+  DEBUG(dbgs() << "Removing phi nodes from block " << PrintMB(B) << "\n");
   MachineBasicBlock::iterator I, NextI, NonPHI = B->getFirstNonPHI();
   for (I = B->begin(); I != NonPHI; I = NextI) {
     NextI = std::next(I);
@@ -1009,8 +1007,8 @@ void HexagonEarlyIfConversion::eliminatePhis(MachineBasicBlock *B) {
 
 void HexagonEarlyIfConversion::mergeBlocks(MachineBasicBlock *PredB,
       MachineBasicBlock *SuccB) {
-  LLVM_DEBUG(dbgs() << "Merging blocks " << PrintMB(PredB) << " and "
-                    << PrintMB(SuccB) << "\n");
+  DEBUG(dbgs() << "Merging blocks " << PrintMB(PredB) << " and "
+               << PrintMB(SuccB) << "\n");
   bool TermOk = hasUncondBranch(SuccB);
   eliminatePhis(SuccB);
   HII->removeBranch(*PredB);

@@ -343,6 +343,7 @@ struct SrcHeaderBlockEntry {
   char Reserved[8];
 };
 
+constexpr int I = sizeof(SrcHeaderBlockEntry);
 static_assert(sizeof(SrcHeaderBlockEntry) == 40, "Incorrect struct size!");
 
 } // namespace pdb

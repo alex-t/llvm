@@ -84,10 +84,11 @@ protected: // Can only create subclasses.
   CodeGenOpt::Level OptLevel = CodeGenOpt::Default;
 
   /// Contains target specific asm information.
-  std::unique_ptr<const MCAsmInfo> AsmInfo;
-  std::unique_ptr<const MCRegisterInfo> MRI;
-  std::unique_ptr<const MCInstrInfo> MII;
-  std::unique_ptr<const MCSubtargetInfo> STI;
+  const MCAsmInfo *AsmInfo;
+
+  const MCRegisterInfo *MRI;
+  const MCInstrInfo *MII;
+  const MCSubtargetInfo *STI;
 
   unsigned RequireStructuredCFG : 1;
   unsigned O0WantsFastISel : 1;
@@ -153,17 +154,17 @@ public:
     return DL.getPointerSize(DL.getAllocaAddrSpace());
   }
 
-  /// Reset the target options based on the function's attributes.
+  /// \brief Reset the target options based on the function's attributes.
   // FIXME: Remove TargetOptions that affect per-function code generation
   // from TargetMachine.
   void resetTargetOptions(const Function &F) const;
 
   /// Return target specific asm information.
-  const MCAsmInfo *getMCAsmInfo() const { return AsmInfo.get(); }
+  const MCAsmInfo *getMCAsmInfo() const { return AsmInfo; }
 
-  const MCRegisterInfo *getMCRegisterInfo() const { return MRI.get(); }
-  const MCInstrInfo *getMCInstrInfo() const { return MII.get(); }
-  const MCSubtargetInfo *getMCSubtargetInfo() const { return STI.get(); }
+  const MCRegisterInfo *getMCRegisterInfo() const { return MRI; }
+  const MCInstrInfo *getMCInstrInfo() const { return MII; }
+  const MCSubtargetInfo *getMCSubtargetInfo() const { return STI; }
 
   /// If intrinsic information is available, return it.  If not, return null.
   virtual const TargetIntrinsicInfo *getIntrinsicInfo() const {
@@ -194,22 +195,13 @@ public:
   /// Returns the optimization level: None, Less, Default, or Aggressive.
   CodeGenOpt::Level getOptLevel() const;
 
-  /// Overrides the optimization level.
+  /// \brief Overrides the optimization level.
   void setOptLevel(CodeGenOpt::Level Level);
 
   void setFastISel(bool Enable) { Options.EnableFastISel = Enable; }
   bool getO0WantsFastISel() { return O0WantsFastISel; }
   void setO0WantsFastISel(bool Enable) { O0WantsFastISel = Enable; }
   void setGlobalISel(bool Enable) { Options.EnableGlobalISel = Enable; }
-  void setGlobalISelAbort(GlobalISelAbortMode Mode) {
-    Options.GlobalISelAbort = Mode;
-  }
-  void setMachineOutliner(bool Enable) {
-    Options.EnableMachineOutliner = Enable;
-  }
-  void setSupportsDefaultOutlining(bool Enable) {
-    Options.SupportsDefaultOutlining = Enable;
-  }
 
   bool shouldPrintMachineCode() const { return Options.PrintMachineCode; }
 
@@ -227,14 +219,14 @@ public:
     return Options.FunctionSections;
   }
 
-  /// Get a \c TargetIRAnalysis appropriate for the target.
+  /// \brief Get a \c TargetIRAnalysis appropriate for the target.
   ///
   /// This is used to construct the new pass manager's target IR analysis pass,
   /// set up appropriately for this target machine. Even the old pass manager
   /// uses this to answer queries about the IR.
   TargetIRAnalysis getTargetIRAnalysis();
 
-  /// Return a TargetTransformInfo for a given function.
+  /// \brief Return a TargetTransformInfo for a given function.
   ///
   /// The returned TargetTransformInfo is specialized to the subtarget
   /// corresponding to \p F.
@@ -260,7 +252,7 @@ public:
   /// \p MMI is an optional parameter that, if set to non-nullptr,
   /// will be used to set the MachineModuloInfo for this PM.
   virtual bool addPassesToEmitFile(PassManagerBase &, raw_pwrite_stream &,
-                                   raw_pwrite_stream *, CodeGenFileType,
+                                   CodeGenFileType,
                                    bool /*DisableVerify*/ = true,
                                    MachineModuleInfo *MMI = nullptr) {
     return true;
@@ -287,59 +279,6 @@ public:
   void getNameWithPrefix(SmallVectorImpl<char> &Name, const GlobalValue *GV,
                          Mangler &Mang, bool MayAlwaysUsePrivate = false) const;
   MCSymbol *getSymbol(const GlobalValue *GV) const;
-};
-
-/// This class describes a target machine that is implemented with the LLVM
-/// target-independent code generator.
-///
-class LLVMTargetMachine : public TargetMachine {
-protected: // Can only create subclasses.
-  LLVMTargetMachine(const Target &T, StringRef DataLayoutString,
-                    const Triple &TT, StringRef CPU, StringRef FS,
-                    const TargetOptions &Options, Reloc::Model RM,
-                    CodeModel::Model CM, CodeGenOpt::Level OL);
-
-  void initAsmInfo();
-
-public:
-  /// Get a TargetTransformInfo implementation for the target.
-  ///
-  /// The TTI returned uses the common code generator to answer queries about
-  /// the IR.
-  TargetTransformInfo getTargetTransformInfo(const Function &F) override;
-
-  /// Create a pass configuration object to be used by addPassToEmitX methods
-  /// for generating a pipeline of CodeGen passes.
-  virtual TargetPassConfig *createPassConfig(PassManagerBase &PM);
-
-  /// Add passes to the specified pass manager to get the specified file
-  /// emitted.  Typically this will involve several steps of code generation.
-  /// \p MMI is an optional parameter that, if set to non-nullptr,
-  /// will be used to set the MachineModuloInfofor this PM.
-  bool addPassesToEmitFile(PassManagerBase &PM, raw_pwrite_stream &Out,
-                           raw_pwrite_stream *DwoOut, CodeGenFileType FileType,
-                           bool DisableVerify = true,
-                           MachineModuleInfo *MMI = nullptr) override;
-
-  /// Add passes to the specified pass manager to get machine code emitted with
-  /// the MCJIT. This method returns true if machine code is not supported. It
-  /// fills the MCContext Ctx pointer which can be used to build custom
-  /// MCStreamer.
-  bool addPassesToEmitMC(PassManagerBase &PM, MCContext *&Ctx,
-                         raw_pwrite_stream &Out,
-                         bool DisableVerify = true) override;
-
-  /// Returns true if the target is expected to pass all machine verifier
-  /// checks. This is a stopgap measure to fix targets one by one. We will
-  /// remove this at some point and always enable the verifier when
-  /// EXPENSIVE_CHECKS is enabled.
-  virtual bool isMachineVerifierClean() const { return true; }
-
-  /// Adds an AsmPrinter pass to the pipeline that prints assembly or
-  /// machine code from the MI representation.
-  bool addAsmPrinter(PassManagerBase &PM, raw_pwrite_stream &Out,
-                     raw_pwrite_stream *DwoOut, CodeGenFileType FileTYpe,
-                     MCContext &Context);
 
   /// True if the target uses physical regs at Prolog/Epilog insertion
   /// time. If true (most machines), all vregs must be allocated before
@@ -354,22 +293,56 @@ public:
   }
 };
 
-/// Helper method for getting the code model, returning Default if
-/// CM does not have a value. The tiny and kernel models will produce
-/// an error, so targets that support them or require more complex codemodel
-/// selection logic should implement and call their own getEffectiveCodeModel.
-inline CodeModel::Model getEffectiveCodeModel(Optional<CodeModel::Model> CM,
-                                              CodeModel::Model Default) {
-  if (CM) {
-    // By default, targets do not support the tiny and kernel models.
-    if (*CM == CodeModel::Tiny)
-      report_fatal_error("Target does not support the tiny CodeModel");
-    if (*CM == CodeModel::Kernel)
-      report_fatal_error("Target does not support the kernel CodeModel");
-    return *CM;
-  }
-  return Default;
-}
+/// This class describes a target machine that is implemented with the LLVM
+/// target-independent code generator.
+///
+class LLVMTargetMachine : public TargetMachine {
+protected: // Can only create subclasses.
+  LLVMTargetMachine(const Target &T, StringRef DataLayoutString,
+                    const Triple &TargetTriple, StringRef CPU, StringRef FS,
+                    const TargetOptions &Options, Reloc::Model RM,
+                    CodeModel::Model CM, CodeGenOpt::Level OL);
+
+  void initAsmInfo();
+
+public:
+  /// \brief Get a TargetTransformInfo implementation for the target.
+  ///
+  /// The TTI returned uses the common code generator to answer queries about
+  /// the IR.
+  TargetTransformInfo getTargetTransformInfo(const Function &F) override;
+
+  /// Create a pass configuration object to be used by addPassToEmitX methods
+  /// for generating a pipeline of CodeGen passes.
+  virtual TargetPassConfig *createPassConfig(PassManagerBase &PM);
+
+  /// Add passes to the specified pass manager to get the specified file
+  /// emitted.  Typically this will involve several steps of code generation.
+  /// \p MMI is an optional parameter that, if set to non-nullptr,
+  /// will be used to set the MachineModuloInfofor this PM.
+  bool addPassesToEmitFile(PassManagerBase &PM, raw_pwrite_stream &Out,
+                           CodeGenFileType FileType, bool DisableVerify = true,
+                           MachineModuleInfo *MMI = nullptr) override;
+
+  /// Add passes to the specified pass manager to get machine code emitted with
+  /// the MCJIT. This method returns true if machine code is not supported. It
+  /// fills the MCContext Ctx pointer which can be used to build custom
+  /// MCStreamer.
+  bool addPassesToEmitMC(PassManagerBase &PM, MCContext *&Ctx,
+                         raw_pwrite_stream &OS,
+                         bool DisableVerify = true) override;
+
+  /// Returns true if the target is expected to pass all machine verifier
+  /// checks. This is a stopgap measure to fix targets one by one. We will
+  /// remove this at some point and always enable the verifier when
+  /// EXPENSIVE_CHECKS is enabled.
+  virtual bool isMachineVerifierClean() const { return true; }
+
+  /// \brief Adds an AsmPrinter pass to the pipeline that prints assembly or
+  /// machine code from the MI representation.
+  bool addAsmPrinter(PassManagerBase &PM, raw_pwrite_stream &Out,
+                     CodeGenFileType FileTYpe, MCContext &Context);
+};
 
 } // end namespace llvm
 

@@ -32,8 +32,6 @@ public:
 
   void printOperand(const MCInst *MI, unsigned OpNo, const MCSubtargetInfo &STI,
                     raw_ostream &O, const char *Modifier = nullptr);
-  void printCSRSystemRegister(const MCInst *MI, unsigned OpNo,
-                              const MCSubtargetInfo &STI, raw_ostream &O);
   void printFenceArg(const MCInst *MI, unsigned OpNo,
                      const MCSubtargetInfo &STI, raw_ostream &O);
   void printFRMArg(const MCInst *MI, unsigned OpNo, const MCSubtargetInfo &STI,
@@ -50,6 +48,6 @@ public:
   static const char *getRegisterName(unsigned RegNo,
                                      unsigned AltIdx = RISCV::ABIRegAltName);
 };
-} // namespace llvm
+}
 
 #endif

@@ -24,6 +24,7 @@ public:
   llvm::Optional<RecordType> getItemAtIndex(uint32_t Index) const override;
   bool getNext(RecordType &Record) override;
   void reset() override;
+  DIADataStream *clone() const override;
 
 private:
   CComPtr<IDiaEnumDebugStreamData> StreamData;

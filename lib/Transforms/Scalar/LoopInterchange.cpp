@@ -17,9 +17,9 @@
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/Statistic.h"
 #include "llvm/ADT/StringRef.h"
+#include "llvm/Analysis/AliasAnalysis.h"
 #include "llvm/Analysis/DependenceAnalysis.h"
 #include "llvm/Analysis/LoopInfo.h"
-#include "llvm/Analysis/LoopPass.h"
 #include "llvm/Analysis/OptimizationRemarkEmitter.h"
 #include "llvm/Analysis/ScalarEvolution.h"
 #include "llvm/Analysis/ScalarEvolutionExpressions.h"
@@ -77,8 +77,8 @@ static const unsigned MaxLoopNestDepth = 10;
 static void printDepMatrix(CharMatrix &DepMatrix) {
   for (auto &Row : DepMatrix) {
     for (auto D : Row)
-      LLVM_DEBUG(dbgs() << D << " ");
-    LLVM_DEBUG(dbgs() << "\n");
+      DEBUG(dbgs() << D << " ");
+    DEBUG(dbgs() << "\n");
   }
 }
 #endif
@@ -107,8 +107,8 @@ static bool populateDependencyMatrix(CharMatrix &DepMatrix, unsigned Level,
     }
   }
 
-  LLVM_DEBUG(dbgs() << "Found " << MemInstr.size()
-                    << " Loads and Stores to analyze\n");
+  DEBUG(dbgs() << "Found " << MemInstr.size()
+               << " Loads and Stores to analyze\n");
 
   ValueVector::iterator I, IE, J, JE;
 
@@ -125,11 +125,11 @@ static bool populateDependencyMatrix(CharMatrix &DepMatrix, unsigned Level,
       // Track Output, Flow, and Anti dependencies.
       if (auto D = DI->depends(Src, Dst, true)) {
         assert(D->isOrdered() && "Expected an output, flow or anti dep.");
-        LLVM_DEBUG(StringRef DepType =
-                       D->isFlow() ? "flow" : D->isAnti() ? "anti" : "output";
-                   dbgs() << "Found " << DepType
-                          << " dependency between Src and Dst\n"
-                          << " Src:" << *Src << "\n Dst:" << *Dst << '\n');
+        DEBUG(StringRef DepType =
+                  D->isFlow() ? "flow" : D->isAnti() ? "anti" : "output";
+              dbgs() << "Found " << DepType
+                     << " dependency between Src and Dst\n"
+                     << " Src:" << *Src << "\n Dst:" << *Dst << '\n');
         unsigned Levels = D->getLevels();
         char Direction;
         for (unsigned II = 1; II <= Levels; ++II) {
@@ -169,8 +169,8 @@ static bool populateDependencyMatrix(CharMatrix &DepMatrix, unsigned Level,
 
         DepMatrix.push_back(Dep);
         if (DepMatrix.size() > MaxMemInstrCount) {
-          LLVM_DEBUG(dbgs() << "Cannot handle more than " << MaxMemInstrCount
-                            << " dependencies inside loop\n");
+          DEBUG(dbgs() << "Cannot handle more than " << MaxMemInstrCount
+                       << " dependencies inside loop\n");
           return false;
         }
       }
@@ -271,10 +271,10 @@ static bool isLegalToInterChangeLoops(CharMatrix &DepMatrix,
   return true;
 }
 
-static LoopVector populateWorklist(Loop &L) {
-  LLVM_DEBUG(dbgs() << "Calling populateWorklist on Func: "
-                    << L.getHeader()->getParent()->getName() << " Loop: %"
-                    << L.getHeader()->getName() << '\n');
+static void populateWorklist(Loop &L, SmallVector<LoopVector, 8> &V) {
+  DEBUG(dbgs() << "Calling populateWorklist on Func: "
+               << L.getHeader()->getParent()->getName() << " Loop: %"
+               << L.getHeader()->getName() << '\n');
   LoopVector LoopList;
   Loop *CurrentLoop = &L;
   const std::vector<Loop *> *Vec = &CurrentLoop->getSubLoops();
@@ -282,15 +282,16 @@ static LoopVector populateWorklist(Loop &L) {
     // The current loop has multiple subloops in it hence it is not tightly
     // nested.
     // Discard all loops above it added into Worklist.
-    if (Vec->size() != 1)
-      return {};
-
+    if (Vec->size() != 1) {
+      LoopList.clear();
+      return;
+    }
     LoopList.push_back(CurrentLoop);
     CurrentLoop = Vec->front();
     Vec = &CurrentLoop->getSubLoops();
   }
   LoopList.push_back(CurrentLoop);
-  return LoopList;
+  V.push_back(std::move(LoopList));
 }
 
 static PHINode *getInductionVariable(Loop *L, ScalarEvolution *SE) {
@@ -326,8 +327,10 @@ namespace {
 class LoopInterchangeLegality {
 public:
   LoopInterchangeLegality(Loop *Outer, Loop *Inner, ScalarEvolution *SE,
+                          LoopInfo *LI, DominatorTree *DT, bool PreserveLCSSA,
                           OptimizationRemarkEmitter *ORE)
-      : OuterLoop(Outer), InnerLoop(Inner), SE(SE), ORE(ORE) {}
+      : OuterLoop(Outer), InnerLoop(Inner), SE(SE), LI(LI), DT(DT),
+        PreserveLCSSA(PreserveLCSSA), ORE(ORE) {}
 
   /// Check if the loops can be interchanged.
   bool canInterchangeLoops(unsigned InnerLoopId, unsigned OuterLoopId,
@@ -339,33 +342,29 @@ public:
 
   bool currentLimitations();
 
-  const SmallPtrSetImpl<PHINode *> &getOuterInnerReductions() const {
-    return OuterInnerReductions;
-  }
+  bool hasInnerLoopReduction() { return InnerLoopHasReduction; }
 
 private:
   bool tightlyNested(Loop *Outer, Loop *Inner);
-  bool containsUnsafeInstructions(BasicBlock *BB);
-
-  /// Discover induction and reduction PHIs in the header of \p L. Induction
-  /// PHIs are added to \p Inductions, reductions are added to
-  /// OuterInnerReductions. When the outer loop is passed, the inner loop needs
-  /// to be passed as \p InnerLoop.
+  bool containsUnsafeInstructionsInHeader(BasicBlock *BB);
+  bool areAllUsesReductions(Instruction *Ins, Loop *L);
+  bool containsUnsafeInstructionsInLatch(BasicBlock *BB);
   bool findInductionAndReductions(Loop *L,
                                   SmallVector<PHINode *, 8> &Inductions,
-                                  Loop *InnerLoop);
+                                  SmallVector<PHINode *, 8> &Reductions);
 
   Loop *OuterLoop;
   Loop *InnerLoop;
 
   ScalarEvolution *SE;
+  LoopInfo *LI;
+  DominatorTree *DT;
+  bool PreserveLCSSA;
 
   /// Interface to emit optimization remarks.
   OptimizationRemarkEmitter *ORE;
 
-  /// Set of reduction PHIs taking part of a reduction across the inner and
-  /// outer loop.
-  SmallPtrSet<PHINode *, 4> OuterInnerReductions;
+  bool InnerLoopHasReduction = false;
 };
 
 /// LoopInterchangeProfitability checks if it is profitable to interchange the
@@ -399,9 +398,10 @@ public:
   LoopInterchangeTransform(Loop *Outer, Loop *Inner, ScalarEvolution *SE,
                            LoopInfo *LI, DominatorTree *DT,
                            BasicBlock *LoopNestExit,
-                           const LoopInterchangeLegality &LIL)
+                           bool InnerLoopContainsReductions)
       : OuterLoop(Outer), InnerLoop(Inner), SE(SE), LI(LI), DT(DT),
-        LoopExit(LoopNestExit), LIL(LIL) {}
+        LoopExit(LoopNestExit),
+        InnerLoopHasReduction(InnerLoopContainsReductions) {}
 
   /// Interchange OuterLoop and InnerLoop.
   bool transform();
@@ -416,6 +416,8 @@ private:
   bool adjustLoopLinks();
   void adjustLoopPreheaders();
   bool adjustLoopBranches();
+  void updateIncomingBlock(BasicBlock *CurrBlock, BasicBlock *OldPred,
+                           BasicBlock *NewPred);
 
   Loop *OuterLoop;
   Loop *InnerLoop;
@@ -426,34 +428,41 @@ private:
   LoopInfo *LI;
   DominatorTree *DT;
   BasicBlock *LoopExit;
-
-  const LoopInterchangeLegality &LIL;
+  bool InnerLoopHasReduction;
 };
 
 // Main LoopInterchange Pass.
-struct LoopInterchange : public LoopPass {
+struct LoopInterchange : public FunctionPass {
   static char ID;
   ScalarEvolution *SE = nullptr;
   LoopInfo *LI = nullptr;
   DependenceInfo *DI = nullptr;
   DominatorTree *DT = nullptr;
+  bool PreserveLCSSA;
 
   /// Interface to emit optimization remarks.
   OptimizationRemarkEmitter *ORE;
 
-  LoopInterchange() : LoopPass(ID) {
+  LoopInterchange() : FunctionPass(ID) {
     initializeLoopInterchangePass(*PassRegistry::getPassRegistry());
   }
 
   void getAnalysisUsage(AnalysisUsage &AU) const override {
+    AU.addRequired<ScalarEvolutionWrapperPass>();
+    AU.addRequired<AAResultsWrapperPass>();
+    AU.addRequired<DominatorTreeWrapperPass>();
+    AU.addRequired<LoopInfoWrapperPass>();
     AU.addRequired<DependenceAnalysisWrapperPass>();
+    AU.addRequiredID(LoopSimplifyID);
+    AU.addRequiredID(LCSSAID);
     AU.addRequired<OptimizationRemarkEmitterWrapperPass>();
 
-    getLoopAnalysisUsage(AU);
+    AU.addPreserved<DominatorTreeWrapperPass>();
+    AU.addPreserved<LoopInfoWrapperPass>();
   }
 
-  bool runOnLoop(Loop *L, LPPassManager &LPM) override {
-    if (skipLoop(L) || L->getParentLoop())
+  bool runOnFunction(Function &F) override {
+    if (skipFunction(F))
       return false;
 
     SE = &getAnalysis<ScalarEvolutionWrapperPass>().getSE();
@@ -461,23 +470,36 @@ struct LoopInterchange : public LoopPass {
     DI = &getAnalysis<DependenceAnalysisWrapperPass>().getDI();
     DT = &getAnalysis<DominatorTreeWrapperPass>().getDomTree();
     ORE = &getAnalysis<OptimizationRemarkEmitterWrapperPass>().getORE();
+    PreserveLCSSA = mustPreserveAnalysisID(LCSSAID);
 
-    return processLoopList(populateWorklist(*L));
+    // Build up a worklist of loop pairs to analyze.
+    SmallVector<LoopVector, 8> Worklist;
+
+    for (Loop *L : *LI)
+      populateWorklist(*L, Worklist);
+
+    DEBUG(dbgs() << "Worklist size = " << Worklist.size() << "\n");
+    bool Changed = true;
+    while (!Worklist.empty()) {
+      LoopVector LoopList = Worklist.pop_back_val();
+      Changed = processLoopList(LoopList, F);
+    }
+    return Changed;
   }
 
   bool isComputableLoopNest(LoopVector LoopList) {
     for (Loop *L : LoopList) {
       const SCEV *ExitCountOuter = SE->getBackedgeTakenCount(L);
       if (ExitCountOuter == SE->getCouldNotCompute()) {
-        LLVM_DEBUG(dbgs() << "Couldn't compute backedge count\n");
+        DEBUG(dbgs() << "Couldn't compute backedge count\n");
         return false;
       }
       if (L->getNumBackEdges() != 1) {
-        LLVM_DEBUG(dbgs() << "NumBackEdges is not equal to 1\n");
+        DEBUG(dbgs() << "NumBackEdges is not equal to 1\n");
         return false;
       }
       if (!L->getExitingBlock()) {
-        LLVM_DEBUG(dbgs() << "Loop doesn't have unique exit block\n");
+        DEBUG(dbgs() << "Loop doesn't have unique exit block\n");
         return false;
       }
     }
@@ -490,42 +512,51 @@ struct LoopInterchange : public LoopPass {
     return LoopList.size() - 1;
   }
 
-  bool processLoopList(LoopVector LoopList) {
+  bool processLoopList(LoopVector LoopList, Function &F) {
     bool Changed = false;
     unsigned LoopNestDepth = LoopList.size();
     if (LoopNestDepth < 2) {
-      LLVM_DEBUG(dbgs() << "Loop doesn't contain minimum nesting level.\n");
+      DEBUG(dbgs() << "Loop doesn't contain minimum nesting level.\n");
       return false;
     }
     if (LoopNestDepth > MaxLoopNestDepth) {
-      LLVM_DEBUG(dbgs() << "Cannot handle loops of depth greater than "
-                        << MaxLoopNestDepth << "\n");
+      DEBUG(dbgs() << "Cannot handle loops of depth greater than "
+                   << MaxLoopNestDepth << "\n");
       return false;
     }
     if (!isComputableLoopNest(LoopList)) {
-      LLVM_DEBUG(dbgs() << "Not valid loop candidate for interchange\n");
+      DEBUG(dbgs() << "Not valid loop candidate for interchange\n");
       return false;
     }
 
-    LLVM_DEBUG(dbgs() << "Processing LoopList of size = " << LoopNestDepth
-                      << "\n");
+    DEBUG(dbgs() << "Processing LoopList of size = " << LoopNestDepth << "\n");
 
     CharMatrix DependencyMatrix;
     Loop *OuterMostLoop = *(LoopList.begin());
     if (!populateDependencyMatrix(DependencyMatrix, LoopNestDepth,
                                   OuterMostLoop, DI)) {
-      LLVM_DEBUG(dbgs() << "Populating dependency matrix failed\n");
+      DEBUG(dbgs() << "Populating dependency matrix failed\n");
       return false;
     }
 #ifdef DUMP_DEP_MATRICIES
-    LLVM_DEBUG(dbgs() << "Dependence before interchange\n");
+    DEBUG(dbgs() << "Dependence before interchange\n");
     printDepMatrix(DependencyMatrix);
 #endif
+
+    // Since we currently do not handle LCSSA PHI's any failure in loop
+    // condition will now branch to LoopNestExit.
+    // TODO: This should be removed once we handle LCSSA PHI nodes.
 
     // Get the Outermost loop exit.
     BasicBlock *LoopNestExit = OuterMostLoop->getExitBlock();
     if (!LoopNestExit) {
-      LLVM_DEBUG(dbgs() << "OuterMostLoop needs an unique exit block");
+      DEBUG(dbgs() << "OuterMostLoop needs an unique exit block");
+      return false;
+    }
+
+    if (isa<PHINode>(LoopNestExit->begin())) {
+      DEBUG(dbgs() << "PHI Nodes in loop nest exit is not handled for now "
+                      "since on failure all loops branch to loop nest exit.\n");
       return false;
     }
 
@@ -542,7 +573,7 @@ struct LoopInterchange : public LoopPass {
       // Update the DependencyMatrix
       interChangeDependencies(DependencyMatrix, i, i - 1);
 #ifdef DUMP_DEP_MATRICIES
-      LLVM_DEBUG(dbgs() << "Dependence after interchange\n");
+      DEBUG(dbgs() << "Dependence after interchange\n");
       printDepMatrix(DependencyMatrix);
 #endif
       Changed |= Interchanged;
@@ -553,20 +584,21 @@ struct LoopInterchange : public LoopPass {
   bool processLoop(LoopVector LoopList, unsigned InnerLoopId,
                    unsigned OuterLoopId, BasicBlock *LoopNestExit,
                    std::vector<std::vector<char>> &DependencyMatrix) {
-    LLVM_DEBUG(dbgs() << "Processing Inner Loop Id = " << InnerLoopId
-                      << " and OuterLoopId = " << OuterLoopId << "\n");
+    DEBUG(dbgs() << "Processing Inner Loop Id = " << InnerLoopId
+                 << " and OuterLoopId = " << OuterLoopId << "\n");
     Loop *InnerLoop = LoopList[InnerLoopId];
     Loop *OuterLoop = LoopList[OuterLoopId];
 
-    LoopInterchangeLegality LIL(OuterLoop, InnerLoop, SE, ORE);
+    LoopInterchangeLegality LIL(OuterLoop, InnerLoop, SE, LI, DT,
+                                PreserveLCSSA, ORE);
     if (!LIL.canInterchangeLoops(InnerLoopId, OuterLoopId, DependencyMatrix)) {
-      LLVM_DEBUG(dbgs() << "Not interchanging loops. Cannot prove legality.\n");
+      DEBUG(dbgs() << "Not interchanging loops. Cannot prove legality.\n");
       return false;
     }
-    LLVM_DEBUG(dbgs() << "Loops are legal to interchange\n");
+    DEBUG(dbgs() << "Loops are legal to interchange\n");
     LoopInterchangeProfitability LIP(OuterLoop, InnerLoop, SE, ORE);
     if (!LIP.isProfitable(InnerLoopId, OuterLoopId, DependencyMatrix)) {
-      LLVM_DEBUG(dbgs() << "Interchanging loops not profitable.\n");
+      DEBUG(dbgs() << "Interchanging loops not profitable.\n");
       return false;
     }
 
@@ -577,10 +609,10 @@ struct LoopInterchange : public LoopPass {
              << "Loop interchanged with enclosing loop.";
     });
 
-    LoopInterchangeTransform LIT(OuterLoop, InnerLoop, SE, LI, DT, LoopNestExit,
-                                 LIL);
+    LoopInterchangeTransform LIT(OuterLoop, InnerLoop, SE, LI, DT,
+                                 LoopNestExit, LIL.hasInnerLoopReduction());
     LIT.transform();
-    LLVM_DEBUG(dbgs() << "Loops interchanged.\n");
+    DEBUG(dbgs() << "Loops interchanged.\n");
     LoopsInterchanged++;
     return true;
   }
@@ -588,10 +620,40 @@ struct LoopInterchange : public LoopPass {
 
 } // end anonymous namespace
 
-bool LoopInterchangeLegality::containsUnsafeInstructions(BasicBlock *BB) {
-  return any_of(*BB, [](const Instruction &I) {
-    return I.mayHaveSideEffects() || I.mayReadFromMemory();
+bool LoopInterchangeLegality::areAllUsesReductions(Instruction *Ins, Loop *L) {
+  return llvm::none_of(Ins->users(), [=](User *U) -> bool {
+    auto *UserIns = dyn_cast<PHINode>(U);
+    RecurrenceDescriptor RD;
+    return !UserIns || !RecurrenceDescriptor::isReductionPHI(UserIns, L, RD);
   });
+}
+
+bool LoopInterchangeLegality::containsUnsafeInstructionsInHeader(
+    BasicBlock *BB) {
+  for (auto I = BB->begin(), E = BB->end(); I != E; ++I) {
+    // Load corresponding to reduction PHI's are safe while concluding if
+    // tightly nested.
+    if (LoadInst *L = dyn_cast<LoadInst>(I)) {
+      if (!areAllUsesReductions(L, InnerLoop))
+        return true;
+    } else if (I->mayHaveSideEffects() || I->mayReadFromMemory())
+      return true;
+  }
+  return false;
+}
+
+bool LoopInterchangeLegality::containsUnsafeInstructionsInLatch(
+    BasicBlock *BB) {
+  for (auto I = BB->begin(), E = BB->end(); I != E; ++I) {
+    // Stores corresponding to reductions are safe while concluding if tightly
+    // nested.
+    if (StoreInst *L = dyn_cast<StoreInst>(I)) {
+      if (!isa<PHINode>(L->getOperand(0)))
+        return true;
+    } else if (I->mayHaveSideEffects() || I->mayReadFromMemory())
+      return true;
+  }
+  return false;
 }
 
 bool LoopInterchangeLegality::tightlyNested(Loop *OuterLoop, Loop *InnerLoop) {
@@ -599,7 +661,7 @@ bool LoopInterchangeLegality::tightlyNested(Loop *OuterLoop, Loop *InnerLoop) {
   BasicBlock *InnerLoopPreHeader = InnerLoop->getLoopPreheader();
   BasicBlock *OuterLoopLatch = OuterLoop->getLoopLatch();
 
-  LLVM_DEBUG(dbgs() << "Checking if loops are tightly nested\n");
+  DEBUG(dbgs() << "Checking if loops are tightly nested\n");
 
   // A perfectly nested loop will not have any branch in between the outer and
   // inner block i.e. outer header will branch to either inner preheader and
@@ -609,19 +671,18 @@ bool LoopInterchangeLegality::tightlyNested(Loop *OuterLoop, Loop *InnerLoop) {
   if (!OuterLoopHeaderBI)
     return false;
 
-  for (BasicBlock *Succ : successors(OuterLoopHeaderBI))
-    if (Succ != InnerLoopPreHeader && Succ != InnerLoop->getHeader() &&
-        Succ != OuterLoopLatch)
+  for (BasicBlock *Succ : OuterLoopHeaderBI->successors())
+    if (Succ != InnerLoopPreHeader && Succ != OuterLoopLatch)
       return false;
 
-  LLVM_DEBUG(dbgs() << "Checking instructions in Loop header and Loop latch\n");
+  DEBUG(dbgs() << "Checking instructions in Loop header and Loop latch\n");
   // We do not have any basic block in between now make sure the outer header
   // and outer loop latch doesn't contain any unsafe instructions.
-  if (containsUnsafeInstructions(OuterLoopHeader) ||
-      containsUnsafeInstructions(OuterLoopLatch))
+  if (containsUnsafeInstructionsInHeader(OuterLoopHeader) ||
+      containsUnsafeInstructionsInLatch(OuterLoopLatch))
     return false;
 
-  LLVM_DEBUG(dbgs() << "Loops are perfectly nested\n");
+  DEBUG(dbgs() << "Loops are perfectly nested\n");
   // We have a perfect loop nest.
   return true;
 }
@@ -650,81 +711,35 @@ bool LoopInterchangeLegality::isLoopStructureUnderstood(
   return true;
 }
 
-// If SV is a LCSSA PHI node with a single incoming value, return the incoming
-// value.
-static Value *followLCSSA(Value *SV) {
-  PHINode *PHI = dyn_cast<PHINode>(SV);
-  if (!PHI)
-    return SV;
-
-  if (PHI->getNumIncomingValues() != 1)
-    return SV;
-  return followLCSSA(PHI->getIncomingValue(0));
-}
-
-// Check V's users to see if it is involved in a reduction in L.
-static PHINode *findInnerReductionPhi(Loop *L, Value *V) {
-  for (Value *User : V->users()) {
-    if (PHINode *PHI = dyn_cast<PHINode>(User)) {
-      if (PHI->getNumIncomingValues() == 1)
-        continue;
-      RecurrenceDescriptor RD;
-      if (RecurrenceDescriptor::isReductionPHI(PHI, L, RD))
-        return PHI;
-      return nullptr;
-    }
-  }
-
-  return nullptr;
-}
-
 bool LoopInterchangeLegality::findInductionAndReductions(
-    Loop *L, SmallVector<PHINode *, 8> &Inductions, Loop *InnerLoop) {
+    Loop *L, SmallVector<PHINode *, 8> &Inductions,
+    SmallVector<PHINode *, 8> &Reductions) {
   if (!L->getLoopLatch() || !L->getLoopPredecessor())
     return false;
-  for (PHINode &PHI : L->getHeader()->phis()) {
+  for (BasicBlock::iterator I = L->getHeader()->begin(); isa<PHINode>(I); ++I) {
     RecurrenceDescriptor RD;
     InductionDescriptor ID;
-    if (InductionDescriptor::isInductionPHI(&PHI, L, SE, ID))
-      Inductions.push_back(&PHI);
+    PHINode *PHI = cast<PHINode>(I);
+    if (InductionDescriptor::isInductionPHI(PHI, L, SE, ID))
+      Inductions.push_back(PHI);
+    else if (RecurrenceDescriptor::isReductionPHI(PHI, L, RD))
+      Reductions.push_back(PHI);
     else {
-      // PHIs in inner loops need to be part of a reduction in the outer loop,
-      // discovered when checking the PHIs of the outer loop earlier.
-      if (!InnerLoop) {
-        if (OuterInnerReductions.find(&PHI) == OuterInnerReductions.end()) {
-          LLVM_DEBUG(dbgs() << "Inner loop PHI is not part of reductions "
-                               "across the outer loop.\n");
-          return false;
-        }
-      } else {
-        assert(PHI.getNumIncomingValues() == 2 &&
-               "Phis in loop header should have exactly 2 incoming values");
-        // Check if we have a PHI node in the outer loop that has a reduction
-        // result from the inner loop as an incoming value.
-        Value *V = followLCSSA(PHI.getIncomingValueForBlock(L->getLoopLatch()));
-        PHINode *InnerRedPhi = findInnerReductionPhi(InnerLoop, V);
-        if (!InnerRedPhi ||
-            !llvm::any_of(InnerRedPhi->incoming_values(),
-                          [&PHI](Value *V) { return V == &PHI; })) {
-          LLVM_DEBUG(
-              dbgs()
-              << "Failed to recognize PHI as an induction or reduction.\n");
-          return false;
-        }
-        OuterInnerReductions.insert(&PHI);
-        OuterInnerReductions.insert(InnerRedPhi);
-      }
+      DEBUG(
+          dbgs() << "Failed to recognize PHI as an induction or reduction.\n");
+      return false;
     }
   }
   return true;
 }
 
 static bool containsSafePHI(BasicBlock *Block, bool isOuterLoopExitBlock) {
-  for (PHINode &PHI : Block->phis()) {
+  for (auto I = Block->begin(); isa<PHINode>(I); ++I) {
+    PHINode *PHI = cast<PHINode>(I);
     // Reduction lcssa phi will have only 1 incoming block that from loop latch.
-    if (PHI.getNumIncomingValues() > 1)
+    if (PHI->getNumIncomingValues() > 1)
       return false;
-    Instruction *Ins = dyn_cast<Instruction>(PHI.getIncomingValue(0));
+    Instruction *Ins = dyn_cast<Instruction>(PHI->getIncomingValue(0));
     if (!Ins)
       return false;
     // Incoming value for lcssa phi's in outer loop exit can only be inner loop
@@ -747,9 +762,8 @@ bool LoopInterchangeLegality::currentLimitations() {
       OuterLoop->getExitingBlock() != OuterLoop->getLoopLatch() ||
       !isa<BranchInst>(InnerLoopLatch->getTerminator()) ||
       !isa<BranchInst>(OuterLoop->getLoopLatch()->getTerminator())) {
-    LLVM_DEBUG(
-        dbgs() << "Loops where the latch is not the exiting block are not"
-               << " supported currently.\n");
+    DEBUG(dbgs() << "Loops where the latch is not the exiting block are not"
+                 << " supported currently.\n");
     ORE->emit([&]() {
       return OptimizationRemarkMissed(DEBUG_TYPE, "ExitingNotLatch",
                                       OuterLoop->getStartLoc(),
@@ -762,39 +776,10 @@ bool LoopInterchangeLegality::currentLimitations() {
 
   PHINode *InnerInductionVar;
   SmallVector<PHINode *, 8> Inductions;
-  if (!findInductionAndReductions(OuterLoop, Inductions, InnerLoop)) {
-    LLVM_DEBUG(
-        dbgs() << "Only outer loops with induction or reduction PHI nodes "
-               << "are supported currently.\n");
-    ORE->emit([&]() {
-      return OptimizationRemarkMissed(DEBUG_TYPE, "UnsupportedPHIOuter",
-                                      OuterLoop->getStartLoc(),
-                                      OuterLoop->getHeader())
-             << "Only outer loops with induction or reduction PHI nodes can be"
-                " interchanged currently.";
-    });
-    return true;
-  }
-
-  // TODO: Currently we handle only loops with 1 induction variable.
-  if (Inductions.size() != 1) {
-    LLVM_DEBUG(dbgs() << "Loops with more than 1 induction variables are not "
-                      << "supported currently.\n");
-    ORE->emit([&]() {
-      return OptimizationRemarkMissed(DEBUG_TYPE, "MultiIndutionOuter",
-                                      OuterLoop->getStartLoc(),
-                                      OuterLoop->getHeader())
-             << "Only outer loops with 1 induction variable can be "
-                "interchanged currently.";
-    });
-    return true;
-  }
-
-  Inductions.clear();
-  if (!findInductionAndReductions(InnerLoop, Inductions, nullptr)) {
-    LLVM_DEBUG(
-        dbgs() << "Only inner loops with induction or reduction PHI nodes "
-               << "are supported currently.\n");
+  SmallVector<PHINode *, 8> Reductions;
+  if (!findInductionAndReductions(InnerLoop, Inductions, Reductions)) {
+    DEBUG(dbgs() << "Only inner loops with induction or reduction PHI nodes "
+                 << "are supported currently.\n");
     ORE->emit([&]() {
       return OptimizationRemarkMissed(DEBUG_TYPE, "UnsupportedPHIInner",
                                       InnerLoop->getStartLoc(),
@@ -807,9 +792,8 @@ bool LoopInterchangeLegality::currentLimitations() {
 
   // TODO: Currently we handle only loops with 1 induction variable.
   if (Inductions.size() != 1) {
-    LLVM_DEBUG(
-        dbgs() << "We currently only support loops with 1 induction variable."
-               << "Failed to interchange due to current limitation\n");
+    DEBUG(dbgs() << "We currently only support loops with 1 induction variable."
+                 << "Failed to interchange due to current limitation\n");
     ORE->emit([&]() {
       return OptimizationRemarkMissed(DEBUG_TYPE, "MultiInductionInner",
                                       InnerLoop->getStartLoc(),
@@ -819,11 +803,55 @@ bool LoopInterchangeLegality::currentLimitations() {
     });
     return true;
   }
+  if (Reductions.size() > 0)
+    InnerLoopHasReduction = true;
+
   InnerInductionVar = Inductions.pop_back_val();
+  Reductions.clear();
+  if (!findInductionAndReductions(OuterLoop, Inductions, Reductions)) {
+    DEBUG(dbgs() << "Only outer loops with induction or reduction PHI nodes "
+                 << "are supported currently.\n");
+    ORE->emit([&]() {
+      return OptimizationRemarkMissed(DEBUG_TYPE, "UnsupportedPHIOuter",
+                                      OuterLoop->getStartLoc(),
+                                      OuterLoop->getHeader())
+             << "Only outer loops with induction or reduction PHI nodes can be"
+                " interchanged currently.";
+    });
+    return true;
+  }
+
+  // Outer loop cannot have reduction because then loops will not be tightly
+  // nested.
+  if (!Reductions.empty()) {
+    DEBUG(dbgs() << "Outer loops with reductions are not supported "
+                 << "currently.\n");
+    ORE->emit([&]() {
+      return OptimizationRemarkMissed(DEBUG_TYPE, "ReductionsOuter",
+                                      OuterLoop->getStartLoc(),
+                                      OuterLoop->getHeader())
+             << "Outer loops with reductions cannot be interchangeed "
+                "currently.";
+    });
+    return true;
+  }
+  // TODO: Currently we handle only loops with 1 induction variable.
+  if (Inductions.size() != 1) {
+    DEBUG(dbgs() << "Loops with more than 1 induction variables are not "
+                 << "supported currently.\n");
+    ORE->emit([&]() {
+      return OptimizationRemarkMissed(DEBUG_TYPE, "MultiIndutionOuter",
+                                      OuterLoop->getStartLoc(),
+                                      OuterLoop->getHeader())
+             << "Only outer loops with 1 induction variable can be "
+                "interchanged currently.";
+    });
+    return true;
+  }
 
   // TODO: Triangular loops are not handled for now.
   if (!isLoopStructureUnderstood(InnerInductionVar)) {
-    LLVM_DEBUG(dbgs() << "Loop structure not understood by pass\n");
+    DEBUG(dbgs() << "Loop structure not understood by pass\n");
     ORE->emit([&]() {
       return OptimizationRemarkMissed(DEBUG_TYPE, "UnsupportedStructureInner",
                                       InnerLoop->getStartLoc(),
@@ -834,10 +862,22 @@ bool LoopInterchangeLegality::currentLimitations() {
   }
 
   // TODO: We only handle LCSSA PHI's corresponding to reduction for now.
+  BasicBlock *OuterExit = OuterLoop->getExitBlock();
+  if (!containsSafePHI(OuterExit, true)) {
+    DEBUG(dbgs() << "Can only handle LCSSA PHIs in outer loops currently.\n");
+    ORE->emit([&]() {
+      return OptimizationRemarkMissed(DEBUG_TYPE, "NoLCSSAPHIOuter",
+                                      OuterLoop->getStartLoc(),
+                                      OuterLoop->getHeader())
+             << "Only outer loops with LCSSA PHIs can be interchange "
+                "currently.";
+    });
+    return true;
+  }
+
   BasicBlock *InnerExit = InnerLoop->getExitBlock();
   if (!containsSafePHI(InnerExit, false)) {
-    LLVM_DEBUG(
-        dbgs() << "Can only handle LCSSA PHIs in inner loops currently.\n");
+    DEBUG(dbgs() << "Can only handle LCSSA PHIs in inner loops currently.\n");
     ORE->emit([&]() {
       return OptimizationRemarkMissed(DEBUG_TYPE, "NoLCSSAPHIOuterInner",
                                       InnerLoop->getStartLoc(),
@@ -867,9 +907,8 @@ bool LoopInterchangeLegality::currentLimitations() {
         dyn_cast<Instruction>(InnerInductionVar->getIncomingValue(0));
 
   if (!InnerIndexVarInc) {
-    LLVM_DEBUG(
-        dbgs() << "Did not find an instruction to increment the induction "
-               << "variable.\n");
+    DEBUG(dbgs() << "Did not find an instruction to increment the induction "
+                 << "variable.\n");
     ORE->emit([&]() {
       return OptimizationRemarkMissed(DEBUG_TYPE, "NoIncrementInInner",
                                       InnerLoop->getStartLoc(),
@@ -893,8 +932,8 @@ bool LoopInterchangeLegality::currentLimitations() {
     // We found an instruction. If this is not induction variable then it is not
     // safe to split this loop latch.
     if (!I.isIdenticalTo(InnerIndexVarInc)) {
-      LLVM_DEBUG(dbgs() << "Found unsupported instructions between induction "
-                        << "variable increment and branch.\n");
+      DEBUG(dbgs() << "Found unsupported instructions between induction "
+                   << "variable increment and branch.\n");
       ORE->emit([&]() {
         return OptimizationRemarkMissed(
                    DEBUG_TYPE, "UnsupportedInsBetweenInduction",
@@ -911,7 +950,7 @@ bool LoopInterchangeLegality::currentLimitations() {
   // The loop latch ended and we didn't find the induction variable return as
   // current limitation.
   if (!FoundInduction) {
-    LLVM_DEBUG(dbgs() << "Did not find the induction variable.\n");
+    DEBUG(dbgs() << "Did not find the induction variable.\n");
     ORE->emit([&]() {
       return OptimizationRemarkMissed(DEBUG_TYPE, "NoIndutionVariable",
                                       InnerLoop->getStartLoc(),
@@ -923,50 +962,13 @@ bool LoopInterchangeLegality::currentLimitations() {
   return false;
 }
 
-// We currently support LCSSA PHI nodes in the outer loop exit, if their
-// incoming values do not come from the outer loop latch or if the
-// outer loop latch has a single predecessor. In that case, the value will
-// be available if both the inner and outer loop conditions are true, which
-// will still be true after interchanging. If we have multiple predecessor,
-// that may not be the case, e.g. because the outer loop latch may be executed
-// if the inner loop is not executed.
-static bool areLoopExitPHIsSupported(Loop *OuterLoop, Loop *InnerLoop) {
-  BasicBlock *LoopNestExit = OuterLoop->getUniqueExitBlock();
-  for (PHINode &PHI : LoopNestExit->phis()) {
-    //  FIXME: We currently are not able to detect floating point reductions
-    //         and have to use floating point PHIs as a proxy to prevent
-    //         interchanging in the presence of floating point reductions.
-    if (PHI.getType()->isFloatingPointTy())
-      return false;
-    for (unsigned i = 0; i < PHI.getNumIncomingValues(); i++) {
-     Instruction *IncomingI = dyn_cast<Instruction>(PHI.getIncomingValue(i));
-     if (!IncomingI || IncomingI->getParent() != OuterLoop->getLoopLatch())
-       continue;
-
-     // The incoming value is defined in the outer loop latch. Currently we
-     // only support that in case the outer loop latch has a single predecessor.
-     // This guarantees that the outer loop latch is executed if and only if
-     // the inner loop is executed (because tightlyNested() guarantees that the
-     // outer loop header only branches to the inner loop or the outer loop
-     // latch).
-     // FIXME: We could weaken this logic and allow multiple predecessors,
-     //        if the values are produced outside the loop latch. We would need
-     //        additional logic to update the PHI nodes in the exit block as
-     //        well.
-     if (OuterLoop->getLoopLatch()->getUniquePredecessor() == nullptr)
-       return false;
-    }
-  }
-  return true;
-}
-
 bool LoopInterchangeLegality::canInterchangeLoops(unsigned InnerLoopId,
                                                   unsigned OuterLoopId,
                                                   CharMatrix &DepMatrix) {
   if (!isLegalToInterChangeLoops(DepMatrix, InnerLoopId, OuterLoopId)) {
-    LLVM_DEBUG(dbgs() << "Failed interchange InnerLoopId = " << InnerLoopId
-                      << " and OuterLoopId = " << OuterLoopId
-                      << " due to dependence\n");
+    DEBUG(dbgs() << "Failed interchange InnerLoopId = " << InnerLoopId
+                 << " and OuterLoopId = " << OuterLoopId
+                 << " due to dependence\n");
     ORE->emit([&]() {
       return OptimizationRemarkMissed(DEBUG_TYPE, "Dependence",
                                       InnerLoop->getStartLoc(),
@@ -982,9 +984,8 @@ bool LoopInterchangeLegality::canInterchangeLoops(unsigned InnerLoopId,
         // readnone functions do not prevent interchanging.
         if (CI->doesNotReadMemory())
           continue;
-        LLVM_DEBUG(
-            dbgs() << "Loops with call instructions cannot be interchanged "
-                   << "safely.");
+        DEBUG(dbgs() << "Loops with call instructions cannot be interchanged "
+                     << "safely.");
         ORE->emit([&]() {
           return OptimizationRemarkMissed(DEBUG_TYPE, "CallInst",
                                           CI->getDebugLoc(),
@@ -995,33 +996,44 @@ bool LoopInterchangeLegality::canInterchangeLoops(unsigned InnerLoopId,
         return false;
       }
 
+  // Create unique Preheaders if we already do not have one.
+  BasicBlock *OuterLoopPreHeader = OuterLoop->getLoopPreheader();
+  BasicBlock *InnerLoopPreHeader = InnerLoop->getLoopPreheader();
+
+  // Create  a unique outer preheader -
+  // 1) If OuterLoop preheader is not present.
+  // 2) If OuterLoop Preheader is same as OuterLoop Header
+  // 3) If OuterLoop Preheader is same as Header of the previous loop.
+  // 4) If OuterLoop Preheader is Entry node.
+  if (!OuterLoopPreHeader || OuterLoopPreHeader == OuterLoop->getHeader() ||
+      isa<PHINode>(OuterLoopPreHeader->begin()) ||
+      !OuterLoopPreHeader->getUniquePredecessor()) {
+    OuterLoopPreHeader =
+        InsertPreheaderForLoop(OuterLoop, DT, LI, PreserveLCSSA);
+  }
+
+  if (!InnerLoopPreHeader || InnerLoopPreHeader == InnerLoop->getHeader() ||
+      InnerLoopPreHeader == OuterLoop->getHeader()) {
+    InnerLoopPreHeader =
+        InsertPreheaderForLoop(InnerLoop, DT, LI, PreserveLCSSA);
+  }
+
   // TODO: The loops could not be interchanged due to current limitations in the
   // transform module.
   if (currentLimitations()) {
-    LLVM_DEBUG(dbgs() << "Not legal because of current transform limitation\n");
+    DEBUG(dbgs() << "Not legal because of current transform limitation\n");
     return false;
   }
 
   // Check if the loops are tightly nested.
   if (!tightlyNested(OuterLoop, InnerLoop)) {
-    LLVM_DEBUG(dbgs() << "Loops not tightly nested\n");
+    DEBUG(dbgs() << "Loops not tightly nested\n");
     ORE->emit([&]() {
       return OptimizationRemarkMissed(DEBUG_TYPE, "NotTightlyNested",
                                       InnerLoop->getStartLoc(),
                                       InnerLoop->getHeader())
              << "Cannot interchange loops because they are not tightly "
                 "nested.";
-    });
-    return false;
-  }
-
-  if (!areLoopExitPHIsSupported(OuterLoop, InnerLoop)) {
-    LLVM_DEBUG(dbgs() << "Found unsupported PHI nodes in outer loop exit.\n");
-    ORE->emit([&]() {
-      return OptimizationRemarkMissed(DEBUG_TYPE, "UnsupportedExitPHI",
-                                      OuterLoop->getStartLoc(),
-                                      OuterLoop->getHeader())
-             << "Found unsupported PHI node in loop exit.";
     });
     return false;
   }
@@ -1110,7 +1122,7 @@ bool LoopInterchangeProfitability::isProfitable(unsigned InnerLoopId,
   // of induction variables in the instruction and allows reordering if number
   // of bad orders is more than good.
   int Cost = getInstrOrderCost();
-  LLVM_DEBUG(dbgs() << "Cost = " << Cost << "\n");
+  DEBUG(dbgs() << "Cost = " << Cost << "\n");
   if (Cost < -LoopInterchangeCostThreshold)
     return true;
 
@@ -1133,11 +1145,13 @@ bool LoopInterchangeProfitability::isProfitable(unsigned InnerLoopId,
 
 void LoopInterchangeTransform::removeChildLoop(Loop *OuterLoop,
                                                Loop *InnerLoop) {
-  for (Loop *L : *OuterLoop)
-    if (L == InnerLoop) {
-      OuterLoop->removeChildLoop(L);
+  for (Loop::iterator I = OuterLoop->begin(), E = OuterLoop->end(); I != E;
+       ++I) {
+    if (*I == InnerLoop) {
+      OuterLoop->removeChildLoop(I);
       return;
     }
+  }
   llvm_unreachable("Couldn't find loop");
 }
 
@@ -1215,10 +1229,6 @@ void LoopInterchangeTransform::restructureLoops(
   // outer loop.
   NewOuter->addBlockEntry(OrigOuterPreHeader);
   LI->changeLoopFor(OrigOuterPreHeader, NewOuter);
-
-  // Tell SE that we move the loops around.
-  SE->forgetLoop(NewOuter);
-  SE->forgetLoop(NewInner);
 }
 
 bool LoopInterchangeTransform::transform() {
@@ -1227,10 +1237,10 @@ bool LoopInterchangeTransform::transform() {
 
   if (InnerLoop->getSubLoops().empty()) {
     BasicBlock *InnerLoopPreHeader = InnerLoop->getLoopPreheader();
-    LLVM_DEBUG(dbgs() << "Calling Split Inner Loop\n");
+    DEBUG(dbgs() << "Calling Split Inner Loop\n");
     PHINode *InductionPHI = getInductionVariable(InnerLoop, SE);
     if (!InductionPHI) {
-      LLVM_DEBUG(dbgs() << "Failed to find the point to split loop latch \n");
+      DEBUG(dbgs() << "Failed to find the point to split loop latch \n");
       return false;
     }
 
@@ -1239,7 +1249,8 @@ bool LoopInterchangeTransform::transform() {
     else
       InnerIndexVar = dyn_cast<Instruction>(InductionPHI->getIncomingValue(0));
 
-    // Ensure that InductionPHI is the first Phi node.
+    // Ensure that InductionPHI is the first Phi node as required by
+    // splitInnerLoopHeader
     if (&InductionPHI->getParent()->front() != InductionPHI)
       InductionPHI->moveBefore(&InductionPHI->getParent()->front());
 
@@ -1247,17 +1258,16 @@ bool LoopInterchangeTransform::transform() {
     // incremented/decremented.
     // TODO: This splitting logic may not work always. Fix this.
     splitInnerLoopLatch(InnerIndexVar);
-    LLVM_DEBUG(dbgs() << "splitInnerLoopLatch done\n");
+    DEBUG(dbgs() << "splitInnerLoopLatch done\n");
 
     // Splits the inner loops phi nodes out into a separate basic block.
-    BasicBlock *InnerLoopHeader = InnerLoop->getHeader();
-    SplitBlock(InnerLoopHeader, InnerLoopHeader->getFirstNonPHI(), DT, LI);
-    LLVM_DEBUG(dbgs() << "splitting InnerLoopHeader done\n");
+    splitInnerLoopHeader();
+    DEBUG(dbgs() << "splitInnerLoopHeader done\n");
   }
 
   Transformed |= adjustLoopLinks();
   if (!Transformed) {
-    LLVM_DEBUG(dbgs() << "adjustLoopLinks failed\n");
+    DEBUG(dbgs() << "adjustLoopLinks failed\n");
     return false;
   }
 
@@ -1270,6 +1280,31 @@ void LoopInterchangeTransform::splitInnerLoopLatch(Instruction *Inc) {
   InnerLoopLatch = SplitBlock(InnerLoopLatchPred, Inc, DT, LI);
 }
 
+void LoopInterchangeTransform::splitInnerLoopHeader() {
+  // Split the inner loop header out. Here make sure that the reduction PHI's
+  // stay in the innerloop body.
+  BasicBlock *InnerLoopHeader = InnerLoop->getHeader();
+  BasicBlock *InnerLoopPreHeader = InnerLoop->getLoopPreheader();
+  SplitBlock(InnerLoopHeader, InnerLoopHeader->getFirstNonPHI(), DT, LI);
+  if (InnerLoopHasReduction) {
+    // Adjust Reduction PHI's in the block. The induction PHI must be the first
+    // PHI in InnerLoopHeader for this to work.
+    SmallVector<PHINode *, 8> PHIVec;
+    for (auto I = std::next(InnerLoopHeader->begin()); isa<PHINode>(I); ++I) {
+      PHINode *PHI = dyn_cast<PHINode>(I);
+      Value *V = PHI->getIncomingValueForBlock(InnerLoopPreHeader);
+      PHI->replaceAllUsesWith(V);
+      PHIVec.push_back((PHI));
+    }
+    for (PHINode *P : PHIVec) {
+      P->eraseFromParent();
+    }
+  }
+
+  DEBUG(dbgs() << "Output of splitInnerLoopHeader InnerLoopHeaderSucc & "
+                  "InnerLoopHeader\n");
+}
+
 /// \brief Move all instructions except the terminator from FromBB right before
 /// InsertBefore
 static void moveBBContents(BasicBlock *FromBB, Instruction *InsertBefore) {
@@ -1280,23 +1315,25 @@ static void moveBBContents(BasicBlock *FromBB, Instruction *InsertBefore) {
                 FromBB->getTerminator()->getIterator());
 }
 
-static void updateIncomingBlock(BasicBlock *CurrBlock, BasicBlock *OldPred,
-                                BasicBlock *NewPred) {
-  for (PHINode &PHI : CurrBlock->phis()) {
-    unsigned Num = PHI.getNumIncomingValues();
+void LoopInterchangeTransform::updateIncomingBlock(BasicBlock *CurrBlock,
+                                                   BasicBlock *OldPred,
+                                                   BasicBlock *NewPred) {
+  for (auto I = CurrBlock->begin(); isa<PHINode>(I); ++I) {
+    PHINode *PHI = cast<PHINode>(I);
+    unsigned Num = PHI->getNumIncomingValues();
     for (unsigned i = 0; i < Num; ++i) {
-      if (PHI.getIncomingBlock(i) == OldPred)
-        PHI.setIncomingBlock(i, NewPred);
+      if (PHI->getIncomingBlock(i) == OldPred)
+        PHI->setIncomingBlock(i, NewPred);
     }
   }
 }
 
-/// Update BI to jump to NewBB instead of OldBB. Records updates to
+/// \brief Update BI to jump to NewBB instead of OldBB. Records updates to
 /// the dominator tree in DTUpdates, if DT should be preserved.
 static void updateSuccessor(BranchInst *BI, BasicBlock *OldBB,
                             BasicBlock *NewBB,
                             std::vector<DominatorTree::UpdateType> &DTUpdates) {
-  assert(llvm::count_if(successors(BI),
+  assert(llvm::count_if(BI->successors(),
                         [OldBB](BasicBlock *BB) { return BB == OldBB; }) < 2 &&
          "BI must jump to OldBB at most once.");
   for (unsigned i = 0, e = BI->getNumSuccessors(); i < e; ++i) {
@@ -1312,77 +1349,17 @@ static void updateSuccessor(BranchInst *BI, BasicBlock *OldBB,
   }
 }
 
-// Move Lcssa PHIs to the right place.
-static void moveLCSSAPhis(BasicBlock *InnerExit, BasicBlock *InnerLatch,
-                          BasicBlock *OuterLatch) {
-  SmallVector<PHINode *, 8> LcssaInnerExit;
-  for (PHINode &P : InnerExit->phis())
-    LcssaInnerExit.push_back(&P);
-
-  SmallVector<PHINode *, 8> LcssaInnerLatch;
-  for (PHINode &P : InnerLatch->phis())
-    LcssaInnerLatch.push_back(&P);
-
-  // Lcssa PHIs for values used outside the inner loop are in InnerExit.
-  // If a PHI node has users outside of InnerExit, it has a use outside the
-  // interchanged loop and we have to preserve it. We move these to
-  // InnerLatch, which will become the new exit block for the innermost
-  // loop after interchanging. For PHIs only used in InnerExit, we can just
-  // replace them with the incoming value.
-  for (PHINode *P : LcssaInnerExit) {
-    bool hasUsersOutside = false;
-    for (auto UI = P->use_begin(), E = P->use_end(); UI != E;) {
-      Use &U = *UI;
-      ++UI;
-      auto *Usr = cast<Instruction>(U.getUser());
-      if (Usr->getParent() != InnerExit) {
-        hasUsersOutside = true;
-        continue;
-      }
-      U.set(P->getIncomingValueForBlock(InnerLatch));
-    }
-    if (hasUsersOutside)
-      P->moveBefore(InnerLatch->getFirstNonPHI());
-    else
-      P->eraseFromParent();
-  }
-
-  // If the inner loop latch contains LCSSA PHIs, those come from a child loop
-  // and we have to move them to the new inner latch.
-  for (PHINode *P : LcssaInnerLatch)
-    P->moveBefore(InnerExit->getFirstNonPHI());
-
-  // Now adjust the incoming blocks for the LCSSA PHIs.
-  // For PHIs moved from Inner's exit block, we need to replace Inner's latch
-  // with the new latch.
-  updateIncomingBlock(InnerLatch, InnerLatch, OuterLatch);
-}
-
 bool LoopInterchangeTransform::adjustLoopBranches() {
-  LLVM_DEBUG(dbgs() << "adjustLoopBranches called\n");
+  DEBUG(dbgs() << "adjustLoopBranches called\n");
   std::vector<DominatorTree::UpdateType> DTUpdates;
-
-  BasicBlock *OuterLoopPreHeader = OuterLoop->getLoopPreheader();
-  BasicBlock *InnerLoopPreHeader = InnerLoop->getLoopPreheader();
-
-  assert(OuterLoopPreHeader != OuterLoop->getHeader() &&
-         InnerLoopPreHeader != InnerLoop->getHeader() && OuterLoopPreHeader &&
-         InnerLoopPreHeader && "Guaranteed by loop-simplify form");
-  // Ensure that both preheaders do not contain PHI nodes and have single
-  // predecessors. This allows us to move them easily. We use
-  // InsertPreHeaderForLoop to create an 'extra' preheader, if the existing
-  // preheaders do not satisfy those conditions.
-  if (isa<PHINode>(OuterLoopPreHeader->begin()) ||
-      !OuterLoopPreHeader->getUniquePredecessor())
-    OuterLoopPreHeader = InsertPreheaderForLoop(OuterLoop, DT, LI, true);
-  if (InnerLoopPreHeader == OuterLoop->getHeader())
-    InnerLoopPreHeader = InsertPreheaderForLoop(InnerLoop, DT, LI, true);
 
   // Adjust the loop preheader
   BasicBlock *InnerLoopHeader = InnerLoop->getHeader();
   BasicBlock *OuterLoopHeader = OuterLoop->getHeader();
   BasicBlock *InnerLoopLatch = InnerLoop->getLoopLatch();
   BasicBlock *OuterLoopLatch = OuterLoop->getLoopLatch();
+  BasicBlock *OuterLoopPreHeader = OuterLoop->getLoopPreheader();
+  BasicBlock *InnerLoopPreHeader = InnerLoop->getLoopPreheader();
   BasicBlock *OuterLoopPredecessor = OuterLoopPreHeader->getUniquePredecessor();
   BasicBlock *InnerLoopLatchPredecessor =
       InnerLoopLatch->getUniquePredecessor();
@@ -1437,6 +1414,18 @@ bool LoopInterchangeTransform::adjustLoopBranches() {
   updateSuccessor(InnerLoopLatchPredecessorBI, InnerLoopLatch,
                   InnerLoopLatchSuccessor, DTUpdates);
 
+  // Adjust PHI nodes in InnerLoopLatchSuccessor. Update all uses of PHI with
+  // the value and remove this PHI node from inner loop.
+  SmallVector<PHINode *, 8> LcssaVec;
+  for (auto I = InnerLoopLatchSuccessor->begin(); isa<PHINode>(I); ++I) {
+    PHINode *LcssaPhi = cast<PHINode>(I);
+    LcssaVec.push_back(LcssaPhi);
+  }
+  for (PHINode *P : LcssaVec) {
+    Value *Incoming = P->getIncomingValueForBlock(InnerLoopLatch);
+    P->replaceAllUsesWith(Incoming);
+    P->eraseFromParent();
+  }
 
   if (OuterLoopLatchBI->getSuccessor(0) == OuterLoopHeader)
     OuterLoopLatchSuccessor = OuterLoopLatchBI->getSuccessor(1);
@@ -1448,44 +1437,11 @@ bool LoopInterchangeTransform::adjustLoopBranches() {
   updateSuccessor(OuterLoopLatchBI, OuterLoopLatchSuccessor, InnerLoopLatch,
                   DTUpdates);
 
+  updateIncomingBlock(OuterLoopLatchSuccessor, OuterLoopLatch, InnerLoopLatch);
+
   DT->applyUpdates(DTUpdates);
   restructureLoops(OuterLoop, InnerLoop, InnerLoopPreHeader,
                    OuterLoopPreHeader);
-
-  moveLCSSAPhis(InnerLoopLatchSuccessor, InnerLoopLatch, OuterLoopLatch);
-  // For PHIs in the exit block of the outer loop, outer's latch has been
-  // replaced by Inners'.
-  updateIncomingBlock(OuterLoopLatchSuccessor, OuterLoopLatch, InnerLoopLatch);
-
-  // Now update the reduction PHIs in the inner and outer loop headers.
-  SmallVector<PHINode *, 4> InnerLoopPHIs, OuterLoopPHIs;
-  for (PHINode &PHI : drop_begin(InnerLoopHeader->phis(), 1))
-    InnerLoopPHIs.push_back(cast<PHINode>(&PHI));
-  for (PHINode &PHI : drop_begin(OuterLoopHeader->phis(), 1))
-    OuterLoopPHIs.push_back(cast<PHINode>(&PHI));
-
-  auto &OuterInnerReductions = LIL.getOuterInnerReductions();
-  (void)OuterInnerReductions;
-
-  // Now move the remaining reduction PHIs from outer to inner loop header and
-  // vice versa. The PHI nodes must be part of a reduction across the inner and
-  // outer loop and all the remains to do is and updating the incoming blocks.
-  for (PHINode *PHI : OuterLoopPHIs) {
-    PHI->moveBefore(InnerLoopHeader->getFirstNonPHI());
-    assert(OuterInnerReductions.find(PHI) != OuterInnerReductions.end() &&
-           "Expected a reduction PHI node");
-  }
-  for (PHINode *PHI : InnerLoopPHIs) {
-    PHI->moveBefore(OuterLoopHeader->getFirstNonPHI());
-    assert(OuterInnerReductions.find(PHI) != OuterInnerReductions.end() &&
-           "Expected a reduction PHI node");
-  }
-
-  // Update the incoming blocks for moved PHI nodes.
-  updateIncomingBlock(OuterLoopHeader, InnerLoopPreHeader, OuterLoopPreHeader);
-  updateIncomingBlock(OuterLoopHeader, InnerLoopLatch, OuterLoopLatch);
-  updateIncomingBlock(InnerLoopHeader, OuterLoopPreHeader, InnerLoopPreHeader);
-  updateIncomingBlock(InnerLoopHeader, OuterLoopLatch, InnerLoopLatch);
 
   return true;
 }
@@ -1521,8 +1477,13 @@ char LoopInterchange::ID = 0;
 
 INITIALIZE_PASS_BEGIN(LoopInterchange, "loop-interchange",
                       "Interchanges loops for cache reuse", false, false)
-INITIALIZE_PASS_DEPENDENCY(LoopPass)
+INITIALIZE_PASS_DEPENDENCY(AAResultsWrapperPass)
 INITIALIZE_PASS_DEPENDENCY(DependenceAnalysisWrapperPass)
+INITIALIZE_PASS_DEPENDENCY(DominatorTreeWrapperPass)
+INITIALIZE_PASS_DEPENDENCY(ScalarEvolutionWrapperPass)
+INITIALIZE_PASS_DEPENDENCY(LoopSimplify)
+INITIALIZE_PASS_DEPENDENCY(LCSSAWrapperPass)
+INITIALIZE_PASS_DEPENDENCY(LoopInfoWrapperPass)
 INITIALIZE_PASS_DEPENDENCY(OptimizationRemarkEmitterWrapperPass)
 
 INITIALIZE_PASS_END(LoopInterchange, "loop-interchange",

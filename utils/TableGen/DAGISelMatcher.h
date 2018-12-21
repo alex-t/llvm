@@ -414,14 +414,10 @@ private:
 /// see if the node is acceptable.
 class CheckPredicateMatcher : public Matcher {
   TreePattern *Pred;
-  const SmallVector<unsigned, 4> Operands;
 public:
-  CheckPredicateMatcher(const TreePredicateFn &pred,
-                        const SmallVectorImpl<unsigned> &Operands);
+  CheckPredicateMatcher(const TreePredicateFn &pred);
 
   TreePredicateFn getPredicate() const;
-  unsigned getNumOperands() const;
-  unsigned getOperandNo(unsigned i) const;
 
   static bool classof(const Matcher *N) {
     return N->getKind() == CheckPredicate;

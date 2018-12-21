@@ -68,7 +68,7 @@ macro(llvm_config executable)
   cmake_parse_arguments(ARG "USE_SHARED" "" "" ${ARGN})
   set(link_components ${ARG_UNPARSED_ARGUMENTS})
 
-  if(ARG_USE_SHARED)
+  if(USE_SHARED)
     # If USE_SHARED is specified, then we link against libLLVM,
     # but also against the component libraries below. This is
     # done in case libLLVM does not contain all of the components
@@ -302,9 +302,7 @@ function(llvm_expand_dependencies out_libs)
     expand_topologically(${lib} "${required_libs}" "${visited_libs}")
   endforeach()
 
-  if(required_libs)
-    list(REVERSE required_libs)
-  endif()
+  list(REVERSE required_libs)
   set(${out_libs} ${required_libs} PARENT_SCOPE)
 endfunction()
 

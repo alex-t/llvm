@@ -20,8 +20,12 @@ class raw_ostream;
 namespace pdb {
 
 class PDBSymbolCompiland : public PDBSymbol {
-  DECLARE_PDB_SYMBOL_CONCRETE_TYPE(PDB_SymType::Compiland)
 public:
+  PDBSymbolCompiland(const IPDBSession &PDBSession,
+                     std::unique_ptr<IPDBRawSymbol> CompilandSymbol);
+
+  DECLARE_PDB_SYMBOL_CONCRETE_TYPE(PDB_SymType::Compiland)
+
   void dump(PDBSymDumper &Dumper) const override;
 
   FORWARD_SYMBOL_METHOD(isEditAndContinueEnabled)

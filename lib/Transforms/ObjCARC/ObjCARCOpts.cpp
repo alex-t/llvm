@@ -77,7 +77,7 @@ using namespace llvm::objcarc;
 /// \defgroup ARCUtilities Utility declarations/definitions specific to ARC.
 /// @{
 
-/// This is similar to GetRCIdentityRoot but it stops as soon
+/// \brief This is similar to GetRCIdentityRoot but it stops as soon
 /// as it finds a value with multiple uses.
 static const Value *FindSingleUseIdentifiedObject(const Value *Arg) {
   // ConstantData (like ConstantPointerNull and UndefValue) is used across
@@ -175,7 +175,7 @@ STATISTIC(NumReleasesAfterOpt,
 
 namespace {
 
-  /// Per-BasicBlock state.
+  /// \brief Per-BasicBlock state.
   class BBState {
     /// The number of unique control paths from the entry which can reach this
     /// block.
@@ -423,7 +423,7 @@ raw_ostream &llvm::operator<<(raw_ostream &OS, BBState &BBInfo) {
   // Dump the pointers we are tracking.
   OS << "    TopDown State:\n";
   if (!BBInfo.hasTopDownPtrs()) {
-    LLVM_DEBUG(dbgs() << "        NONE!\n");
+    DEBUG(dbgs() << "        NONE!\n");
   } else {
     for (auto I = BBInfo.top_down_ptr_begin(), E = BBInfo.top_down_ptr_end();
          I != E; ++I) {
@@ -443,7 +443,7 @@ raw_ostream &llvm::operator<<(raw_ostream &OS, BBState &BBInfo) {
 
   OS << "    BottomUp State:\n";
   if (!BBInfo.hasBottomUpPtrs()) {
-    LLVM_DEBUG(dbgs() << "        NONE!\n");
+    DEBUG(dbgs() << "        NONE!\n");
   } else {
     for (auto I = BBInfo.bottom_up_ptr_begin(), E = BBInfo.bottom_up_ptr_end();
          I != E; ++I) {
@@ -466,7 +466,7 @@ raw_ostream &llvm::operator<<(raw_ostream &OS, BBState &BBInfo) {
 
 namespace {
 
-  /// The main ARC optimization pass.
+  /// \brief The main ARC optimization pass.
   class ObjCARCOpt : public FunctionPass {
     bool Changed;
     ProvenanceAnalysis PA;
@@ -613,8 +613,8 @@ ObjCARCOpt::OptimizeRetainRVCall(Function &F, Instruction *RetainRV) {
       Changed = true;
       ++NumPeeps;
 
-      LLVM_DEBUG(dbgs() << "Erasing autoreleaseRV,retainRV pair: " << *I << "\n"
-                        << "Erasing " << *RetainRV << "\n");
+      DEBUG(dbgs() << "Erasing autoreleaseRV,retainRV pair: " << *I << "\n"
+                   << "Erasing " << *RetainRV << "\n");
 
       EraseInstruction(&*I);
       EraseInstruction(RetainRV);
@@ -626,15 +626,14 @@ ObjCARCOpt::OptimizeRetainRVCall(Function &F, Instruction *RetainRV) {
   Changed = true;
   ++NumPeeps;
 
-  LLVM_DEBUG(dbgs() << "Transforming objc_retainAutoreleasedReturnValue => "
-                       "objc_retain since the operand is not a return value.\n"
-                       "Old = "
-                    << *RetainRV << "\n");
+  DEBUG(dbgs() << "Transforming objc_retainAutoreleasedReturnValue => "
+                  "objc_retain since the operand is not a return value.\n"
+                  "Old = " << *RetainRV << "\n");
 
   Constant *NewDecl = EP.get(ARCRuntimeEntryPointKind::Retain);
   cast<CallInst>(RetainRV)->setCalledFunction(NewDecl);
 
-  LLVM_DEBUG(dbgs() << "New = " << *RetainRV << "\n");
+  DEBUG(dbgs() << "New = " << *RetainRV << "\n");
 
   return false;
 }
@@ -672,12 +671,10 @@ void ObjCARCOpt::OptimizeAutoreleaseRVCall(Function &F,
   Changed = true;
   ++NumPeeps;
 
-  LLVM_DEBUG(
-      dbgs() << "Transforming objc_autoreleaseReturnValue => "
-                "objc_autorelease since its operand is not used as a return "
-                "value.\n"
-                "Old = "
-             << *AutoreleaseRV << "\n");
+  DEBUG(dbgs() << "Transforming objc_autoreleaseReturnValue => "
+                  "objc_autorelease since its operand is not used as a return "
+                  "value.\n"
+                  "Old = " << *AutoreleaseRV << "\n");
 
   CallInst *AutoreleaseRVCI = cast<CallInst>(AutoreleaseRV);
   Constant *NewDecl = EP.get(ARCRuntimeEntryPointKind::Autorelease);
@@ -685,7 +682,7 @@ void ObjCARCOpt::OptimizeAutoreleaseRVCall(Function &F,
   AutoreleaseRVCI->setTailCall(false); // Never tail call objc_autorelease.
   Class = ARCInstKind::Autorelease;
 
-  LLVM_DEBUG(dbgs() << "New: " << *AutoreleaseRV << "\n");
+  DEBUG(dbgs() << "New: " << *AutoreleaseRV << "\n");
 }
 
 namespace {
@@ -716,13 +713,13 @@ CloneCallInstForBB(CallInst &CI, BasicBlock &BB,
 /// Visit each call, one at a time, and make simplifications without doing any
 /// additional analysis.
 void ObjCARCOpt::OptimizeIndividualCalls(Function &F) {
-  LLVM_DEBUG(dbgs() << "\n== ObjCARCOpt::OptimizeIndividualCalls ==\n");
+  DEBUG(dbgs() << "\n== ObjCARCOpt::OptimizeIndividualCalls ==\n");
   // Reset all the flags in preparation for recomputing them.
   UsedInThisFunction = 0;
 
   DenseMap<BasicBlock *, ColorVector> BlockColors;
   if (F.hasPersonalityFn() &&
-      isScopedEHPersonality(classifyEHPersonality(F.getPersonalityFn())))
+      isFuncletEHPersonality(classifyEHPersonality(F.getPersonalityFn())))
     BlockColors = colorEHFunclets(F);
 
   // Visit all objc_* calls in F.
@@ -731,7 +728,7 @@ void ObjCARCOpt::OptimizeIndividualCalls(Function &F) {
 
     ARCInstKind Class = GetBasicARCInstKind(Inst);
 
-    LLVM_DEBUG(dbgs() << "Visiting: Class: " << Class << "; " << *Inst << "\n");
+    DEBUG(dbgs() << "Visiting: Class: " << Class << "; " << *Inst << "\n");
 
     switch (Class) {
     default: break;
@@ -747,7 +744,7 @@ void ObjCARCOpt::OptimizeIndividualCalls(Function &F) {
     case ARCInstKind::NoopCast:
       Changed = true;
       ++NumNoops;
-      LLVM_DEBUG(dbgs() << "Erasing no-op cast: " << *Inst << "\n");
+      DEBUG(dbgs() << "Erasing no-op cast: " << *Inst << "\n");
       EraseInstruction(Inst);
       continue;
 
@@ -765,10 +762,8 @@ void ObjCARCOpt::OptimizeIndividualCalls(Function &F) {
                       Constant::getNullValue(Ty),
                       CI);
         Value *NewValue = UndefValue::get(CI->getType());
-        LLVM_DEBUG(
-            dbgs() << "A null pointer-to-weak-pointer is undefined behavior."
-                      "\nOld = "
-                   << *CI << "\nNew = " << *NewValue << "\n");
+        DEBUG(dbgs() << "A null pointer-to-weak-pointer is undefined behavior."
+                       "\nOld = " << *CI << "\nNew = " << *NewValue << "\n");
         CI->replaceAllUsesWith(NewValue);
         CI->eraseFromParent();
         continue;
@@ -787,10 +782,8 @@ void ObjCARCOpt::OptimizeIndividualCalls(Function &F) {
                       CI);
 
         Value *NewValue = UndefValue::get(CI->getType());
-        LLVM_DEBUG(
-            dbgs() << "A null pointer-to-weak-pointer is undefined behavior."
-                      "\nOld = "
-                   << *CI << "\nNew = " << *NewValue << "\n");
+        DEBUG(dbgs() << "A null pointer-to-weak-pointer is undefined behavior."
+                        "\nOld = " << *CI << "\nNew = " << *NewValue << "\n");
 
         CI->replaceAllUsesWith(NewValue);
         CI->eraseFromParent();
@@ -825,10 +818,9 @@ void ObjCARCOpt::OptimizeIndividualCalls(Function &F) {
         NewCall->setMetadata(MDKindCache.get(ARCMDKindID::ImpreciseRelease),
                              MDNode::get(C, None));
 
-        LLVM_DEBUG(
-            dbgs() << "Replacing autorelease{,RV}(x) with objc_release(x) "
-                      "since x is otherwise unused.\nOld: "
-                   << *Call << "\nNew: " << *NewCall << "\n");
+        DEBUG(dbgs() << "Replacing autorelease{,RV}(x) with objc_release(x) "
+              "since x is otherwise unused.\nOld: " << *Call << "\nNew: "
+              << *NewCall << "\n");
 
         EraseInstruction(Call);
         Inst = NewCall;
@@ -840,10 +832,8 @@ void ObjCARCOpt::OptimizeIndividualCalls(Function &F) {
     // a tail keyword.
     if (IsAlwaysTail(Class)) {
       Changed = true;
-      LLVM_DEBUG(
-          dbgs() << "Adding tail keyword to function since it can never be "
-                    "passed stack args: "
-                 << *Inst << "\n");
+      DEBUG(dbgs() << "Adding tail keyword to function since it can never be "
+                      "passed stack args: " << *Inst << "\n");
       cast<CallInst>(Inst)->setTailCall();
     }
 
@@ -851,16 +841,16 @@ void ObjCARCOpt::OptimizeIndividualCalls(Function &F) {
     // semantics of ARC truly do not do so.
     if (IsNeverTail(Class)) {
       Changed = true;
-      LLVM_DEBUG(dbgs() << "Removing tail keyword from function: " << *Inst
-                        << "\n");
+      DEBUG(dbgs() << "Removing tail keyword from function: " << *Inst <<
+            "\n");
       cast<CallInst>(Inst)->setTailCall(false);
     }
 
     // Set nounwind as needed.
     if (IsNoThrow(Class)) {
       Changed = true;
-      LLVM_DEBUG(dbgs() << "Found no throw class. Setting nounwind on: "
-                        << *Inst << "\n");
+      DEBUG(dbgs() << "Found no throw class. Setting nounwind on: " << *Inst
+                   << "\n");
       cast<CallInst>(Inst)->setDoesNotThrow();
     }
 
@@ -875,8 +865,8 @@ void ObjCARCOpt::OptimizeIndividualCalls(Function &F) {
     if (IsNullOrUndef(Arg)) {
       Changed = true;
       ++NumNoops;
-      LLVM_DEBUG(dbgs() << "ARC calls with  null are no-ops. Erasing: " << *Inst
-                        << "\n");
+      DEBUG(dbgs() << "ARC calls with  null are no-ops. Erasing: " << *Inst
+            << "\n");
       EraseInstruction(Inst);
       continue;
     }
@@ -914,8 +904,8 @@ void ObjCARCOpt::OptimizeIndividualCalls(Function &F) {
           GetRCIdentityRoot(PN->getIncomingValue(i));
         if (IsNullOrUndef(Incoming))
           HasNull = true;
-        else if (PN->getIncomingBlock(i)->getTerminator()->getNumSuccessors() !=
-                 1) {
+        else if (cast<TerminatorInst>(PN->getIncomingBlock(i)->back())
+                   .getNumSuccessors() != 1) {
           HasCriticalEdges = true;
           break;
         }
@@ -977,15 +967,14 @@ void ObjCARCOpt::OptimizeIndividualCalls(Function &F) {
               Clone->setArgOperand(0, Op);
               Clone->insertBefore(InsertPos);
 
-              LLVM_DEBUG(dbgs() << "Cloning " << *CInst
-                                << "\n"
-                                   "And inserting clone at "
-                                << *InsertPos << "\n");
+              DEBUG(dbgs() << "Cloning "
+                           << *CInst << "\n"
+                           "And inserting clone at " << *InsertPos << "\n");
               Worklist.push_back(std::make_pair(Clone, Incoming));
             }
           }
           // Erase the original call.
-          LLVM_DEBUG(dbgs() << "Erasing: " << *CInst << "\n");
+          DEBUG(dbgs() << "Erasing: " << *CInst << "\n");
           EraseInstruction(CInst);
           continue;
         }
@@ -1084,15 +1073,18 @@ ObjCARCOpt::CheckForCFGHazards(const BasicBlock *BB,
            "Unknown top down sequence state.");
 
     const Value *Arg = I->first;
+    const TerminatorInst *TI = cast<TerminatorInst>(&BB->back());
     bool SomeSuccHasSame = false;
     bool AllSuccsHaveSame = true;
     bool NotAllSeqEqualButKnownSafe = false;
 
-    for (const BasicBlock *Succ : successors(BB)) {
+    succ_const_iterator SI(TI), SE(TI, false);
+
+    for (; SI != SE; ++SI) {
       // If VisitBottomUp has pointer information for this successor, take
       // what we know about it.
       const DenseMap<const BasicBlock *, BBState>::iterator BBI =
-          BBStates.find(Succ);
+        BBStates.find(*SI);
       assert(BBI != BBStates.end());
       const BottomUpPtrState &SuccS = BBI->second.getPtrBottomUpState(Arg);
       const Sequence SuccSSeq = SuccS.GetSeq();
@@ -1159,7 +1151,7 @@ bool ObjCARCOpt::VisitInstructionBottomUp(
   ARCInstKind Class = GetARCInstKind(Inst);
   const Value *Arg = nullptr;
 
-  LLVM_DEBUG(dbgs() << "        Class: " << Class << "\n");
+  DEBUG(dbgs() << "        Class: " << Class << "\n");
 
   switch (Class) {
   case ARCInstKind::Release: {
@@ -1182,7 +1174,7 @@ bool ObjCARCOpt::VisitInstructionBottomUp(
       // Don't do retain+release tracking for ARCInstKind::RetainRV, because
       // it's better to let it remain as the first instruction after a call.
       if (Class != ARCInstKind::RetainRV) {
-        LLVM_DEBUG(dbgs() << "        Matching with: " << *Inst << "\n");
+        DEBUG(dbgs() << "        Matching with: " << *Inst << "\n");
         Retains[Inst] = S.GetRRInfo();
       }
       S.ClearSequenceProgress();
@@ -1224,7 +1216,7 @@ bool ObjCARCOpt::VisitInstructionBottomUp(
 bool ObjCARCOpt::VisitBottomUp(BasicBlock *BB,
                                DenseMap<const BasicBlock *, BBState> &BBStates,
                                BlotMapVector<Value *, RRInfo> &Retains) {
-  LLVM_DEBUG(dbgs() << "\n== ObjCARCOpt::VisitBottomUp ==\n");
+  DEBUG(dbgs() << "\n== ObjCARCOpt::VisitBottomUp ==\n");
 
   bool NestingDetected = false;
   BBState &MyStates = BBStates[BB];
@@ -1247,9 +1239,8 @@ bool ObjCARCOpt::VisitBottomUp(BasicBlock *BB,
     }
   }
 
-  LLVM_DEBUG(dbgs() << "Before:\n"
-                    << BBStates[BB] << "\n"
-                    << "Performing Dataflow:\n");
+  DEBUG(dbgs() << "Before:\n" << BBStates[BB] << "\n"
+               << "Performing Dataflow:\n");
 
   // Visit all the instructions, bottom-up.
   for (BasicBlock::iterator I = BB->end(), E = BB->begin(); I != E; --I) {
@@ -1259,7 +1250,7 @@ bool ObjCARCOpt::VisitBottomUp(BasicBlock *BB,
     if (isa<InvokeInst>(Inst))
       continue;
 
-    LLVM_DEBUG(dbgs() << "    Visiting " << *Inst << "\n");
+    DEBUG(dbgs() << "    Visiting " << *Inst << "\n");
 
     NestingDetected |= VisitInstructionBottomUp(Inst, BB, Retains, MyStates);
   }
@@ -1274,7 +1265,7 @@ bool ObjCARCOpt::VisitBottomUp(BasicBlock *BB,
       NestingDetected |= VisitInstructionBottomUp(II, BB, Retains, MyStates);
   }
 
-  LLVM_DEBUG(dbgs() << "\nFinal State:\n" << BBStates[BB] << "\n");
+  DEBUG(dbgs() << "\nFinal State:\n" << BBStates[BB] << "\n");
 
   return NestingDetected;
 }
@@ -1287,7 +1278,7 @@ ObjCARCOpt::VisitInstructionTopDown(Instruction *Inst,
   ARCInstKind Class = GetARCInstKind(Inst);
   const Value *Arg = nullptr;
 
-  LLVM_DEBUG(dbgs() << "        Class: " << Class << "\n");
+  DEBUG(dbgs() << "        Class: " << Class << "\n");
 
   switch (Class) {
   case ARCInstKind::RetainBlock:
@@ -1313,7 +1304,7 @@ ObjCARCOpt::VisitInstructionTopDown(Instruction *Inst,
     if (S.MatchWithRelease(MDKindCache, Inst)) {
       // If we succeed, copy S's RRInfo into the Release -> {Retain Set
       // Map}. Then we clear S.
-      LLVM_DEBUG(dbgs() << "        Matching with: " << *Inst << "\n");
+      DEBUG(dbgs() << "        Matching with: " << *Inst << "\n");
       Releases[Inst] = S.GetRRInfo();
       S.ClearSequenceProgress();
     }
@@ -1353,7 +1344,7 @@ bool
 ObjCARCOpt::VisitTopDown(BasicBlock *BB,
                          DenseMap<const BasicBlock *, BBState> &BBStates,
                          DenseMap<Value *, RRInfo> &Releases) {
-  LLVM_DEBUG(dbgs() << "\n== ObjCARCOpt::VisitTopDown ==\n");
+  DEBUG(dbgs() << "\n== ObjCARCOpt::VisitTopDown ==\n");
   bool NestingDetected = false;
   BBState &MyStates = BBStates[BB];
 
@@ -1375,21 +1366,20 @@ ObjCARCOpt::VisitTopDown(BasicBlock *BB,
     }
   }
 
-  LLVM_DEBUG(dbgs() << "Before:\n"
-                    << BBStates[BB] << "\n"
-                    << "Performing Dataflow:\n");
+  DEBUG(dbgs() << "Before:\n" << BBStates[BB]  << "\n"
+               << "Performing Dataflow:\n");
 
   // Visit all the instructions, top-down.
   for (Instruction &Inst : *BB) {
-    LLVM_DEBUG(dbgs() << "    Visiting " << Inst << "\n");
+    DEBUG(dbgs() << "    Visiting " << Inst << "\n");
 
     NestingDetected |= VisitInstructionTopDown(&Inst, Releases, MyStates);
   }
 
-  LLVM_DEBUG(dbgs() << "\nState Before Checking for CFG Hazards:\n"
-                    << BBStates[BB] << "\n\n");
+  DEBUG(dbgs() << "\nState Before Checking for CFG Hazards:\n"
+               << BBStates[BB] << "\n\n");
   CheckForCFGHazards(BB, BBStates, MyStates);
-  LLVM_DEBUG(dbgs() << "Final State:\n" << BBStates[BB] << "\n");
+  DEBUG(dbgs() << "Final State:\n" << BBStates[BB] << "\n");
   return NestingDetected;
 }
 
@@ -1411,20 +1401,21 @@ ComputePostOrders(Function &F,
   BasicBlock *EntryBB = &F.getEntryBlock();
   BBState &MyStates = BBStates[EntryBB];
   MyStates.SetAsEntry();
-  Instruction *EntryTI = EntryBB->getTerminator();
+  TerminatorInst *EntryTI = cast<TerminatorInst>(&EntryBB->back());
   SuccStack.push_back(std::make_pair(EntryBB, succ_iterator(EntryTI)));
   Visited.insert(EntryBB);
   OnStack.insert(EntryBB);
   do {
   dfs_next_succ:
     BasicBlock *CurrBB = SuccStack.back().first;
-    succ_iterator SE(CurrBB->getTerminator(), false);
+    TerminatorInst *TI = cast<TerminatorInst>(&CurrBB->back());
+    succ_iterator SE(TI, false);
 
     while (SuccStack.back().second != SE) {
       BasicBlock *SuccBB = *SuccStack.back().second++;
       if (Visited.insert(SuccBB).second) {
-        SuccStack.push_back(
-            std::make_pair(SuccBB, succ_iterator(SuccBB->getTerminator())));
+        TerminatorInst *TI = cast<TerminatorInst>(&SuccBB->back());
+        SuccStack.push_back(std::make_pair(SuccBB, succ_iterator(TI)));
         BBStates[CurrBB].addSucc(SuccBB);
         BBState &SuccStates = BBStates[SuccBB];
         SuccStates.addPred(CurrBB);
@@ -1511,7 +1502,7 @@ void ObjCARCOpt::MoveCalls(Value *Arg, RRInfo &RetainsToMove,
   Type *ArgTy = Arg->getType();
   Type *ParamTy = PointerType::getUnqual(Type::getInt8Ty(ArgTy->getContext()));
 
-  LLVM_DEBUG(dbgs() << "== ObjCARCOpt::MoveCalls ==\n");
+  DEBUG(dbgs() << "== ObjCARCOpt::MoveCalls ==\n");
 
   // Insert the new retain and release calls.
   for (Instruction *InsertPt : ReleasesToMove.ReverseInsertPts) {
@@ -1522,10 +1513,8 @@ void ObjCARCOpt::MoveCalls(Value *Arg, RRInfo &RetainsToMove,
     Call->setDoesNotThrow();
     Call->setTailCall();
 
-    LLVM_DEBUG(dbgs() << "Inserting new Retain: " << *Call
-                      << "\n"
-                         "At insertion point: "
-                      << *InsertPt << "\n");
+    DEBUG(dbgs() << "Inserting new Retain: " << *Call << "\n"
+                    "At insertion point: " << *InsertPt << "\n");
   }
   for (Instruction *InsertPt : RetainsToMove.ReverseInsertPts) {
     Value *MyArg = ArgTy == ParamTy ? Arg :
@@ -1539,22 +1528,20 @@ void ObjCARCOpt::MoveCalls(Value *Arg, RRInfo &RetainsToMove,
     if (ReleasesToMove.IsTailCallRelease)
       Call->setTailCall();
 
-    LLVM_DEBUG(dbgs() << "Inserting new Release: " << *Call
-                      << "\n"
-                         "At insertion point: "
-                      << *InsertPt << "\n");
+    DEBUG(dbgs() << "Inserting new Release: " << *Call << "\n"
+                    "At insertion point: " << *InsertPt << "\n");
   }
 
   // Delete the original retain and release calls.
   for (Instruction *OrigRetain : RetainsToMove.Calls) {
     Retains.blot(OrigRetain);
     DeadInsts.push_back(OrigRetain);
-    LLVM_DEBUG(dbgs() << "Deleting retain: " << *OrigRetain << "\n");
+    DEBUG(dbgs() << "Deleting retain: " << *OrigRetain << "\n");
   }
   for (Instruction *OrigRelease : ReleasesToMove.Calls) {
     Releases.erase(OrigRelease);
     DeadInsts.push_back(OrigRelease);
-    LLVM_DEBUG(dbgs() << "Deleting release: " << *OrigRelease << "\n");
+    DEBUG(dbgs() << "Deleting release: " << *OrigRelease << "\n");
   }
 }
 
@@ -1588,7 +1575,6 @@ bool ObjCARCOpt::PairUpRetainsAndReleases(
       assert(It != Retains.end());
       const RRInfo &NewRetainRRI = It->second;
       KnownSafeTD &= NewRetainRRI.KnownSafe;
-      CFGHazardAfflicted |= NewRetainRRI.CFGHazardAfflicted;
       for (Instruction *NewRetainRelease : NewRetainRRI.Calls) {
         auto Jt = Releases.find(NewRetainRelease);
         if (Jt == Releases.end())
@@ -1761,7 +1747,7 @@ bool ObjCARCOpt::PerformCodePlacement(
     DenseMap<const BasicBlock *, BBState> &BBStates,
     BlotMapVector<Value *, RRInfo> &Retains,
     DenseMap<Value *, RRInfo> &Releases, Module *M) {
-  LLVM_DEBUG(dbgs() << "\n== ObjCARCOpt::PerformCodePlacement ==\n");
+  DEBUG(dbgs() << "\n== ObjCARCOpt::PerformCodePlacement ==\n");
 
   bool AnyPairsCompletelyEliminated = false;
   SmallVector<Instruction *, 8> DeadInsts;
@@ -1775,7 +1761,7 @@ bool ObjCARCOpt::PerformCodePlacement(
 
     Instruction *Retain = cast<Instruction>(V);
 
-    LLVM_DEBUG(dbgs() << "Visiting: " << *Retain << "\n");
+    DEBUG(dbgs() << "Visiting: " << *Retain << "\n");
 
     Value *Arg = GetArgRCIdentityRoot(Retain);
 
@@ -1820,7 +1806,7 @@ bool ObjCARCOpt::PerformCodePlacement(
 
 /// Weak pointer optimizations.
 void ObjCARCOpt::OptimizeWeakCalls(Function &F) {
-  LLVM_DEBUG(dbgs() << "\n== ObjCARCOpt::OptimizeWeakCalls ==\n");
+  DEBUG(dbgs() << "\n== ObjCARCOpt::OptimizeWeakCalls ==\n");
 
   // First, do memdep-style RLE and S2L optimizations. We can't use memdep
   // itself because it uses AliasAnalysis and we need to do provenance
@@ -1828,7 +1814,7 @@ void ObjCARCOpt::OptimizeWeakCalls(Function &F) {
   for (inst_iterator I = inst_begin(&F), E = inst_end(&F); I != E; ) {
     Instruction *Inst = &*I++;
 
-    LLVM_DEBUG(dbgs() << "Visiting: " << *Inst << "\n");
+    DEBUG(dbgs() << "Visiting: " << *Inst << "\n");
 
     ARCInstKind Class = GetBasicARCInstKind(Inst);
     if (Class != ARCInstKind::LoadWeak &&
@@ -2087,7 +2073,7 @@ void ObjCARCOpt::OptimizeReturns(Function &F) {
   if (!F.getReturnType()->isPointerTy())
     return;
 
-  LLVM_DEBUG(dbgs() << "\n== ObjCARCOpt::OptimizeReturns ==\n");
+  DEBUG(dbgs() << "\n== ObjCARCOpt::OptimizeReturns ==\n");
 
   SmallPtrSet<Instruction *, 4> DependingInstructions;
   SmallPtrSet<const BasicBlock *, 4> Visited;
@@ -2096,7 +2082,7 @@ void ObjCARCOpt::OptimizeReturns(Function &F) {
     if (!Ret)
       continue;
 
-    LLVM_DEBUG(dbgs() << "Visiting: " << *Ret << "\n");
+    DEBUG(dbgs() << "Visiting: " << *Ret << "\n");
 
     const Value *Arg = GetRCIdentityRoot(Ret->getOperand(0));
 
@@ -2134,8 +2120,8 @@ void ObjCARCOpt::OptimizeReturns(Function &F) {
     // If so, we can zap the retain and autorelease.
     Changed = true;
     ++NumRets;
-    LLVM_DEBUG(dbgs() << "Erasing: " << *Retain << "\nErasing: " << *Autorelease
-                      << "\n");
+    DEBUG(dbgs() << "Erasing: " << *Retain << "\nErasing: "
+          << *Autorelease << "\n");
     EraseInstruction(Retain);
     EraseInstruction(Autorelease);
   }
@@ -2195,9 +2181,8 @@ bool ObjCARCOpt::runOnFunction(Function &F) {
 
   Changed = false;
 
-  LLVM_DEBUG(dbgs() << "<<< ObjCARCOpt: Visiting Function: " << F.getName()
-                    << " >>>"
-                       "\n");
+  DEBUG(dbgs() << "<<< ObjCARCOpt: Visiting Function: " << F.getName() << " >>>"
+        "\n");
 
   PA.setAA(&getAnalysis<AAResultsWrapperPass>().getAAResults());
 
@@ -2245,7 +2230,7 @@ bool ObjCARCOpt::runOnFunction(Function &F) {
   }
 #endif
 
-  LLVM_DEBUG(dbgs() << "\n");
+  DEBUG(dbgs() << "\n");
 
   return Changed;
 }

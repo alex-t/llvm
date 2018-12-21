@@ -54,11 +54,6 @@ PassManager<LazyCallGraph::SCC, CGSCCAnalysisManager, LazyCallGraph &,
             CGSCCUpdateResult &>::run(LazyCallGraph::SCC &InitialC,
                                       CGSCCAnalysisManager &AM,
                                       LazyCallGraph &G, CGSCCUpdateResult &UR) {
-  // Request PassInstrumentation from analysis manager, will use it to run
-  // instrumenting callbacks for the passes later.
-  PassInstrumentation PI =
-      AM.getResult<PassInstrumentationAnalysis>(InitialC, G);
-
   PreservedAnalyses PA = PreservedAnalyses::all();
 
   if (DebugLogging)
@@ -72,17 +67,7 @@ PassManager<LazyCallGraph::SCC, CGSCCAnalysisManager, LazyCallGraph &,
     if (DebugLogging)
       dbgs() << "Running pass: " << Pass->name() << " on " << *C << "\n";
 
-    // Check the PassInstrumentation's BeforePass callbacks before running the
-    // pass, skip its execution completely if asked to (callback returns false).
-    if (!PI.runBeforePass(*Pass, *C))
-      continue;
-
     PreservedAnalyses PassPA = Pass->run(*C, AM, G, UR);
-
-    if (UR.InvalidatedSCCs.count(C))
-      PI.runAfterPassInvalidated<LazyCallGraph::SCC>(*Pass);
-    else
-      PI.runAfterPass<LazyCallGraph::SCC>(*Pass, *C);
 
     // Update the SCC if necessary.
     C = UR.UpdatedC ? UR.UpdatedC : C;
@@ -90,7 +75,7 @@ PassManager<LazyCallGraph::SCC, CGSCCAnalysisManager, LazyCallGraph &,
     // If the CGSCC pass wasn't able to provide a valid updated SCC, the
     // current SCC may simply need to be skipped if invalid.
     if (UR.InvalidatedSCCs.count(C)) {
-      LLVM_DEBUG(dbgs() << "Skipping invalidated root or island SCC!\n");
+      DEBUG(dbgs() << "Skipping invalidated root or island SCC!\n");
       break;
     }
     // Check that we didn't miss any update scenario.
@@ -368,8 +353,7 @@ incorporateNewSCCRange(const SCCRangeT &NewSCCRange, LazyCallGraph &G,
 
   // Add the current SCC to the worklist as its shape has changed.
   UR.CWorklist.insert(C);
-  LLVM_DEBUG(dbgs() << "Enqueuing the existing SCC in the worklist:" << *C
-                    << "\n");
+  DEBUG(dbgs() << "Enqueuing the existing SCC in the worklist:" << *C << "\n");
 
   SCC *OldC = C;
 
@@ -405,7 +389,7 @@ incorporateNewSCCRange(const SCCRangeT &NewSCCRange, LazyCallGraph &G,
     assert(C != &NewC && "No need to re-visit the current SCC!");
     assert(OldC != &NewC && "Already handled the original SCC!");
     UR.CWorklist.insert(&NewC);
-    LLVM_DEBUG(dbgs() << "Enqueuing a newly formed SCC:" << NewC << "\n");
+    DEBUG(dbgs() << "Enqueuing a newly formed SCC:" << NewC << "\n");
 
     // Ensure new SCCs' function analyses are updated.
     if (NeedFAMProxy)
@@ -530,8 +514,8 @@ LazyCallGraph::SCC &llvm::updateCGAndAnalysisManagerForFunctionPass(
                           return false;
 
                         RC->removeOutgoingEdge(N, *TargetN);
-                        LLVM_DEBUG(dbgs() << "Deleting outgoing edge from '"
-                                          << N << "' to '" << TargetN << "'\n");
+                        DEBUG(dbgs() << "Deleting outgoing edge from '" << N
+                                     << "' to '" << TargetN << "'\n");
                         return true;
                       }),
       DeadTargets.end());
@@ -562,8 +546,8 @@ LazyCallGraph::SCC &llvm::updateCGAndAnalysisManagerForFunctionPass(
       assert(NewRC != RC && "Should not encounter the current RefSCC further "
                             "in the postorder list of new RefSCCs.");
       UR.RCWorklist.insert(NewRC);
-      LLVM_DEBUG(dbgs() << "Enqueuing a new RefSCC in the update worklist: "
-                        << *NewRC << "\n");
+      DEBUG(dbgs() << "Enqueuing a new RefSCC in the update worklist: "
+                   << *NewRC << "\n");
     }
   }
 
@@ -580,8 +564,8 @@ LazyCallGraph::SCC &llvm::updateCGAndAnalysisManagerForFunctionPass(
       assert(RC->isAncestorOf(TargetRC) &&
              "Cannot potentially form RefSCC cycles here!");
       RC->switchOutgoingEdgeToRef(N, *RefTarget);
-      LLVM_DEBUG(dbgs() << "Switch outgoing call edge to a ref edge from '" << N
-                        << "' to '" << *RefTarget << "'\n");
+      DEBUG(dbgs() << "Switch outgoing call edge to a ref edge from '" << N
+                   << "' to '" << *RefTarget << "'\n");
       continue;
     }
 
@@ -609,12 +593,12 @@ LazyCallGraph::SCC &llvm::updateCGAndAnalysisManagerForFunctionPass(
       assert(RC->isAncestorOf(TargetRC) &&
              "Cannot potentially form RefSCC cycles here!");
       RC->switchOutgoingEdgeToCall(N, *CallTarget);
-      LLVM_DEBUG(dbgs() << "Switch outgoing ref edge to a call edge from '" << N
-                        << "' to '" << *CallTarget << "'\n");
+      DEBUG(dbgs() << "Switch outgoing ref edge to a call edge from '" << N
+                   << "' to '" << *CallTarget << "'\n");
       continue;
     }
-    LLVM_DEBUG(dbgs() << "Switch an internal ref edge to a call edge from '"
-                      << N << "' to '" << *CallTarget << "'\n");
+    DEBUG(dbgs() << "Switch an internal ref edge to a call edge from '" << N
+                 << "' to '" << *CallTarget << "'\n");
 
     // Otherwise we are switching an internal ref edge to a call edge. This
     // may merge away some SCCs, and we add those to the UpdateResult. We also
@@ -677,14 +661,14 @@ LazyCallGraph::SCC &llvm::updateCGAndAnalysisManagerForFunctionPass(
       // post-order sequence, and may end up observing more precise context to
       // optimize the current SCC.
       UR.CWorklist.insert(C);
-      LLVM_DEBUG(dbgs() << "Enqueuing the existing SCC in the worklist: " << *C
-                        << "\n");
+      DEBUG(dbgs() << "Enqueuing the existing SCC in the worklist: " << *C
+                   << "\n");
       // Enqueue in reverse order as we pop off the back of the worklist.
       for (SCC &MovedC : llvm::reverse(make_range(RC->begin() + InitialSCCIndex,
                                                   RC->begin() + NewSCCIndex))) {
         UR.CWorklist.insert(&MovedC);
-        LLVM_DEBUG(dbgs() << "Enqueuing a newly earlier in post-order SCC: "
-                          << MovedC << "\n");
+        DEBUG(dbgs() << "Enqueuing a newly earlier in post-order SCC: "
+                     << MovedC << "\n");
       }
     }
   }

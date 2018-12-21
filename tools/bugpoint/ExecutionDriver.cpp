@@ -148,9 +148,8 @@ Error BugDriver::initializeExecutionEnvironment() {
   std::string Message;
 
   if (CCBinary.empty()) {
-    if (ErrorOr<std::string> ClangPath =
-            FindProgramByName("clang", getToolName(), &AbsTolerance))
-      CCBinary = *ClangPath;
+    if (sys::findProgramByName("clang"))
+      CCBinary = "clang";
     else
       CCBinary = "gcc";
   }
@@ -194,11 +193,11 @@ Error BugDriver::initializeExecutionEnvironment() {
     break;
   case CompileCustom:
     Interpreter = AbstractInterpreter::createCustomCompiler(
-        getToolName(), Message, CustomCompileCommand);
+        Message, CustomCompileCommand);
     break;
   case Custom:
-    Interpreter = AbstractInterpreter::createCustomExecutor(
-        getToolName(), Message, CustomExecCommand);
+    Interpreter =
+        AbstractInterpreter::createCustomExecutor(Message, CustomExecCommand);
     break;
   }
   if (!Interpreter)
@@ -240,8 +239,8 @@ Error BugDriver::initializeExecutionEnvironment() {
         SafeInterpreterSel == RunLLCIA);
     break;
   case Custom:
-    SafeInterpreter = AbstractInterpreter::createCustomExecutor(
-        getToolName(), Message, CustomExecCommand);
+    SafeInterpreter =
+        AbstractInterpreter::createCustomExecutor(Message, CustomExecCommand);
     break;
   default:
     Message = "Sorry, this back-end is not supported by bugpoint as the "
@@ -253,7 +252,7 @@ Error BugDriver::initializeExecutionEnvironment() {
     exit(1);
   }
 
-  cc = CC::create(getToolName(), Message, CCBinary, &CCToolArgv);
+  cc = CC::create(Message, CCBinary, &CCToolArgv);
   if (!cc) {
     outs() << Message << "\nExiting.\n";
     exit(1);
@@ -300,31 +299,25 @@ Expected<std::string> BugDriver::executeProgram(const Module &Program,
   if (!AI)
     AI = Interpreter;
   assert(AI && "Interpreter should have been created already!");
-  bool CreatedBitcode = false;
   if (BitcodeFile.empty()) {
     // Emit the program to a bitcode file...
-    SmallString<128> UniqueFilename;
-    int UniqueFD;
-    std::error_code EC = sys::fs::createUniqueFile(
-        OutputPrefix + "-test-program-%%%%%%%.bc", UniqueFD, UniqueFilename);
-    if (EC) {
-      errs() << ToolName << ": Error making unique filename: " << EC.message()
+    auto File =
+        sys::fs::TempFile::create(OutputPrefix + "-test-program-%%%%%%%.bc");
+    if (!File) {
+      errs() << ToolName
+             << ": Error making unique filename: " << toString(File.takeError())
              << "!\n";
       exit(1);
     }
-    BitcodeFile = UniqueFilename.str();
+    DiscardTemp Discard{*File};
+    BitcodeFile = File->TmpName;
 
-    if (writeProgramToFile(BitcodeFile, UniqueFD, Program)) {
+    if (writeProgramToFile(File->FD, Program)) {
       errs() << ToolName << ": Error emitting bitcode to file '" << BitcodeFile
              << "'!\n";
       exit(1);
     }
-    CreatedBitcode = true;
   }
-
-  // Remove the temporary bitcode file when we are done.
-  std::string BitcodePath(BitcodeFile);
-  FileRemover BitcodeFileRemover(BitcodePath, CreatedBitcode && !SaveTemps);
 
   if (OutputFile.empty())
     OutputFile = OutputPrefix + "-execution-output-%%%%%%%";

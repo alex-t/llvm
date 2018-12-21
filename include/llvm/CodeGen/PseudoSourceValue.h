@@ -36,7 +36,7 @@ raw_ostream &operator<<(raw_ostream &OS, const PseudoSourceValue* PSV);
 /// below the stack frame (e.g., argument space), or constant pool.
 class PseudoSourceValue {
 public:
-  enum PSVKind : unsigned {
+  enum PSVKind {
     Stack,
     GOT,
     JumpTable,
@@ -48,7 +48,7 @@ public:
   };
 
 private:
-  unsigned Kind;
+  PSVKind Kind;
   unsigned AddressSpace;
   friend raw_ostream &llvm::operator<<(raw_ostream &OS,
                                        const PseudoSourceValue* PSV);
@@ -60,11 +60,11 @@ private:
   virtual void printCustom(raw_ostream &O) const;
 
 public:
-  explicit PseudoSourceValue(unsigned Kind, const TargetInstrInfo &TII);
+  explicit PseudoSourceValue(PSVKind Kind, const TargetInstrInfo &TII);
 
   virtual ~PseudoSourceValue();
 
-  unsigned kind() const { return Kind; }
+  PSVKind kind() const { return Kind; }
 
   bool isStack() const { return Kind == Stack; }
   bool isGOT() const { return Kind == GOT; }
@@ -116,7 +116,7 @@ public:
 
 class CallEntryPseudoSourceValue : public PseudoSourceValue {
 protected:
-  CallEntryPseudoSourceValue(unsigned Kind, const TargetInstrInfo &TII);
+  CallEntryPseudoSourceValue(PSVKind Kind, const TargetInstrInfo &TII);
 
 public:
   bool isConstant(const MachineFrameInfo *) const override;

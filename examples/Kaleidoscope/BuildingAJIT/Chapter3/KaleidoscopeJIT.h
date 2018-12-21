@@ -51,23 +51,23 @@ private:
   std::map<VModuleKey, std::shared_ptr<SymbolResolver>> Resolvers;
   std::unique_ptr<TargetMachine> TM;
   const DataLayout DL;
-  LegacyRTDyldObjectLinkingLayer ObjectLayer;
-  LegacyIRCompileLayer<decltype(ObjectLayer), SimpleCompiler> CompileLayer;
+  RTDyldObjectLinkingLayer ObjectLayer;
+  IRCompileLayer<decltype(ObjectLayer), SimpleCompiler> CompileLayer;
 
   using OptimizeFunction =
       std::function<std::unique_ptr<Module>(std::unique_ptr<Module>)>;
 
-  LegacyIRTransformLayer<decltype(CompileLayer), OptimizeFunction> OptimizeLayer;
+  IRTransformLayer<decltype(CompileLayer), OptimizeFunction> OptimizeLayer;
 
   std::unique_ptr<JITCompileCallbackManager> CompileCallbackManager;
-  LegacyCompileOnDemandLayer<decltype(OptimizeLayer)> CODLayer;
+  CompileOnDemandLayer<decltype(OptimizeLayer)> CODLayer;
 
 public:
   KaleidoscopeJIT()
       : TM(EngineBuilder().selectTarget()), DL(TM->createDataLayout()),
         ObjectLayer(ES,
                     [this](VModuleKey K) {
-                      return LegacyRTDyldObjectLinkingLayer::Resources{
+                      return RTDyldObjectLinkingLayer::Resources{
                           std::make_shared<SectionMemoryManager>(),
                           Resolvers[K]};
                     }),
@@ -76,8 +76,8 @@ public:
                       [this](std::unique_ptr<Module> M) {
                         return optimizeModule(std::move(M));
                       }),
-        CompileCallbackManager(cantFail(orc::createLocalCompileCallbackManager(
-            TM->getTargetTriple(), ES, 0))),
+        CompileCallbackManager(
+            orc::createLocalCompileCallbackManager(TM->getTargetTriple(), 0)),
         CODLayer(ES, OptimizeLayer,
                  [&](orc::VModuleKey K) { return Resolvers[K]; },
                  [&](orc::VModuleKey K, std::shared_ptr<SymbolResolver> R) {
@@ -98,7 +98,6 @@ public:
 
     // Build a resolver and associate it with the new key.
     Resolvers[K] = createLegacyLookupResolver(
-        ES,
         [this](const std::string &Name) -> JITSymbol {
           if (auto Sym = CompileLayer.findSymbol(Name, false))
             return Sym;

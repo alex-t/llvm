@@ -19,7 +19,6 @@
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/ADT/StringMap.h"
 #include "llvm/ADT/StringRef.h"
-#include "llvm/Config/llvm-config.h"
 #include "llvm/Support/Allocator.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/Compiler.h"
@@ -158,9 +157,10 @@ RecordRecTy *RecordRecTy::get(ArrayRef<Record *> UnsortedClasses) {
 
   SmallVector<Record *, 4> Classes(UnsortedClasses.begin(),
                                    UnsortedClasses.end());
-  llvm::sort(Classes, [](Record *LHS, Record *RHS) {
-    return LHS->getNameInitAsString() < RHS->getNameInitAsString();
-  });
+  llvm::sort(Classes.begin(), Classes.end(),
+             [](Record *LHS, Record *RHS) {
+               return LHS->getNameInitAsString() < RHS->getNameInitAsString();
+             });
 
   FoldingSetNodeID ID;
   ProfileRecordRecTy(ID, Classes);
@@ -486,7 +486,7 @@ Init *IntInit::convertInitializerTo(RecTy *Ty) const {
 
     SmallVector<Init *, 16> NewBits(BRT->getNumBits());
     for (unsigned i = 0; i != BRT->getNumBits(); ++i)
-      NewBits[i] = BitInit::get(Value & ((i < 64) ? (1LL << i) : 0));
+      NewBits[i] = BitInit::get(Value & (1LL << i));
 
     return BitsInit::get(NewBits);
   }
@@ -709,8 +709,6 @@ Init *UnOpInit::Fold(Record *CurRec, bool IsFinal) const {
         return StringInit::get(LHSi->getAsString());
     } else if (isa<RecordRecTy>(getType())) {
       if (StringInit *Name = dyn_cast<StringInit>(LHS)) {
-        if (!CurRec && !IsFinal)
-          break;
         assert(CurRec && "NULL pointer");
         Record *D;
 
@@ -1197,16 +1195,14 @@ Init *TernOpInit::resolveReferences(Resolver &R) const {
 
 std::string TernOpInit::getAsString() const {
   std::string Result;
-  bool UnquotedLHS = false;
   switch (getOpcode()) {
   case SUBST: Result = "!subst"; break;
-  case FOREACH: Result = "!foreach"; UnquotedLHS = true; break;
+  case FOREACH: Result = "!foreach"; break;
   case IF: Result = "!if"; break;
   case DAG: Result = "!dag"; break;
   }
-  return (Result + "(" +
-          (UnquotedLHS ? LHS->getAsUnquotedString() : LHS->getAsString()) +
-          ", " + MHS->getAsString() + ", " + RHS->getAsString() + ")");
+  return Result + "(" + LHS->getAsString() + ", " + MHS->getAsString() + ", " +
+         RHS->getAsString() + ")";
 }
 
 static void ProfileFoldOpInit(FoldingSetNodeID &ID, Init *A, Init *B,
@@ -1573,8 +1569,10 @@ DefInit *VarDefInit::instantiate() {
     Record *NewRec = NewRecOwner.get();
 
     // Copy values from class to instance
-    for (const RecordVal &Val : Class->getValues())
-      NewRec->addValue(Val);
+    for (const RecordVal &Val : Class->getValues()) {
+      if (Val.getName() != "NAME")
+        NewRec->addValue(Val);
+    }
 
     // Substitute and resolve template arguments
     ArrayRef<Init *> TArgs = Class->getTemplateArgs();
@@ -1843,6 +1841,14 @@ void RecordVal::print(raw_ostream &OS, bool PrintSem) const {
 }
 
 unsigned Record::LastID = 0;
+
+void Record::init() {
+  checkName();
+
+  // Every record potentially has a def at the top.  This value is
+  // replaced with the top-level def name at instantiation time.
+  addValue(RecordVal(StringInit::get("NAME"), StringRecTy::get(), false));
+}
 
 void Record::checkName() {
   // Ensure the record name has string type.
@@ -2132,6 +2138,15 @@ DagInit *Record::getValueAsDag(StringRef FieldName) const {
 }
 
 #if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
+LLVM_DUMP_METHOD void MultiClass::dump() const {
+  errs() << "Record:\n";
+  Rec.dump();
+
+  errs() << "Defs:\n";
+  for (const auto &Proto : DefPrototypes)
+    Proto->dump();
+}
+
 LLVM_DUMP_METHOD void RecordKeeper::dump() const { errs() << *this; }
 #endif
 
@@ -2164,6 +2179,22 @@ RecordKeeper::getAllDerivedDefinitions(StringRef ClassName) const {
       Defs.push_back(D.second.get());
 
   return Defs;
+}
+
+Init *llvm::QualifyName(Record &CurRec, MultiClass *CurMultiClass,
+                        Init *Name, StringRef Scoper) {
+  Init *NewName =
+      BinOpInit::getStrConcat(CurRec.getNameInit(), StringInit::get(Scoper));
+  NewName = BinOpInit::getStrConcat(NewName, Name);
+  if (CurMultiClass && Scoper != "::") {
+    Init *Prefix = BinOpInit::getStrConcat(CurMultiClass->Rec.getNameInit(),
+                                           StringInit::get("::"));
+    NewName = BinOpInit::getStrConcat(Prefix, NewName);
+  }
+
+  if (BinOpInit *BinOp = dyn_cast<BinOpInit>(NewName))
+    NewName = BinOp->Fold(&CurRec);
+  return NewName;
 }
 
 Init *MapResolver::resolve(Init *VarName) {
@@ -2225,11 +2256,4 @@ Init *TrackUnresolvedResolver::resolve(Init *VarName) {
   if (!I)
     FoundUnresolved = true;
   return I;
-}
-
-Init *HasReferenceResolver::resolve(Init *VarName)
-{
-  if (VarName == VarNameToTrack)
-    Found = true;
-  return nullptr;
 }

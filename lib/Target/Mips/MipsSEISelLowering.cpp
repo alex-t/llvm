@@ -104,11 +104,6 @@ MipsSETargetLowering::MipsSETargetLowering(const MipsTargetMachine &TM,
     setTargetDAGCombine(ISD::SRL);
     setTargetDAGCombine(ISD::SETCC);
     setTargetDAGCombine(ISD::VSELECT);
-
-    if (Subtarget.hasMips32r2()) {
-      setOperationAction(ISD::ADDC, MVT::i32, Legal);
-      setOperationAction(ISD::ADDE, MVT::i32, Legal);
-    }
   }
 
   if (Subtarget.hasDSPR2())
@@ -158,8 +153,8 @@ MipsSETargetLowering::MipsSETargetLowering(const MipsTargetMachine &TM,
     setOperationAction(ISD::FTRUNC, MVT::f16, Promote);
     setOperationAction(ISD::FMINNUM, MVT::f16, Promote);
     setOperationAction(ISD::FMAXNUM, MVT::f16, Promote);
-    setOperationAction(ISD::FMINIMUM, MVT::f16, Promote);
-    setOperationAction(ISD::FMAXIMUM, MVT::f16, Promote);
+    setOperationAction(ISD::FMINNAN, MVT::f16, Promote);
+    setOperationAction(ISD::FMAXNAN, MVT::f16, Promote);
 
     setTargetDAGCombine(ISD::AND);
     setTargetDAGCombine(ISD::OR);
@@ -1045,9 +1040,11 @@ MipsSETargetLowering::PerformDAGCombine(SDNode *N, DAGCombinerInfo &DCI) const {
   }
 
   if (Val.getNode()) {
-    LLVM_DEBUG(dbgs() << "\nMipsSE DAG Combine:\n";
-               N->printrWithDepth(dbgs(), &DAG); dbgs() << "\n=> \n";
-               Val.getNode()->printrWithDepth(dbgs(), &DAG); dbgs() << "\n");
+    DEBUG(dbgs() << "\nMipsSE DAG Combine:\n";
+          N->printrWithDepth(dbgs(), &DAG);
+          dbgs() << "\n=> \n";
+          Val.getNode()->printrWithDepth(dbgs(), &DAG);
+          dbgs() << "\n");
     return Val;
   }
 
@@ -1346,16 +1343,7 @@ static SDValue lowerMSASplatZExt(SDValue Op, unsigned OpNr, SelectionDAG &DAG) {
   SDValue LaneB;
 
   if (ResVecTy == MVT::v2i64) {
-    // In case of the index being passed as an immediate value, set the upper
-    // lane to 0 so that the splati.d instruction can be matched.
-    if (isa<ConstantSDNode>(LaneA))
-      LaneB = DAG.getConstant(0, DL, MVT::i32);
-    // Having the index passed in a register, set the upper lane to the same
-    // value as the lower - this results in the BUILD_VECTOR node not being
-    // expanded through stack. This way we are able to pattern match the set of
-    // nodes created here to splat.d.
-    else
-      LaneB = LaneA;
+    LaneB = DAG.getConstant(0, DL, MVT::i32);
     ViaVecTy = MVT::v4i32;
     if(BigEndian)
       std::swap(LaneA, LaneB);
@@ -1870,8 +1858,10 @@ SDValue MipsSETargetLowering::lowerINTRINSIC_WO_CHAIN(SDValue Op,
   case Intrinsic::mips_fmsub_w:
   case Intrinsic::mips_fmsub_d: {
     // TODO: If intrinsics have fast-math-flags, propagate them.
-    return DAG.getNode(MipsISD::FMS, SDLoc(Op), Op->getValueType(0),
-                       Op->getOperand(1), Op->getOperand(2), Op->getOperand(3));
+    EVT ResTy = Op->getValueType(0);
+    return DAG.getNode(ISD::FSUB, SDLoc(Op), ResTy, Op->getOperand(1),
+                       DAG.getNode(ISD::FMUL, SDLoc(Op), ResTy,
+                                   Op->getOperand(2), Op->getOperand(3)));
   }
   case Intrinsic::mips_frint_w:
   case Intrinsic::mips_frint_d:
@@ -2360,6 +2350,24 @@ SDValue MipsSETargetLowering::lowerINTRINSIC_VOID(SDValue Op,
   }
 }
 
+/// \brief Check if the given BuildVectorSDNode is a splat.
+/// This method currently relies on DAG nodes being reused when equivalent,
+/// so it's possible for this to return false even when isConstantSplat returns
+/// true.
+static bool isSplatVector(const BuildVectorSDNode *N) {
+  unsigned int nOps = N->getNumOperands();
+  assert(nOps > 1 && "isSplatVector has 0 or 1 sized build vector");
+
+  SDValue Operand0 = N->getOperand(0);
+
+  for (unsigned int i = 1; i < nOps; ++i) {
+    if (N->getOperand(i) != Operand0)
+      return false;
+  }
+
+  return true;
+}
+
 // Lower ISD::EXTRACT_VECTOR_ELT into MipsISD::VEXTRACT_SEXT_ELT.
 //
 // The non-value bits resulting from ISD::EXTRACT_VECTOR_ELT are undefined. We
@@ -2470,7 +2478,7 @@ SDValue MipsSETargetLowering::lowerBUILD_VECTOR(SDValue Op,
       Result = DAG.getNode(ISD::BITCAST, SDLoc(Node), ResTy, Result);
 
     return Result;
-  } else if (DAG.isSplatValue(Op, /* AllowUndefs */ false))
+  } else if (isSplatVector(Node))
     return Op;
   else if (!isConstantOrUndefBUILD_VECTOR(Node)) {
     // Use INSERT_VECTOR_ELT operations rather than expand to stores.

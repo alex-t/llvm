@@ -72,23 +72,10 @@ void MCTargetStreamer::emitValue(const MCExpr *Value) {
   Streamer.EmitRawText(OS.str());
 }
 
-void MCTargetStreamer::emitRawBytes(StringRef Data) {
-  const MCAsmInfo *MAI = Streamer.getContext().getAsmInfo();
-  const char *Directive = MAI->getData8bitsDirective();
-  for (const unsigned char C : Data.bytes()) {
-    SmallString<128> Str;
-    raw_svector_ostream OS(Str);
-
-    OS << Directive << (unsigned)C;
-    Streamer.EmitRawText(OS.str());
-  }
-}
-
 void MCTargetStreamer::emitAssignment(MCSymbol *Symbol, const MCExpr *Value) {}
 
 MCStreamer::MCStreamer(MCContext &Ctx)
-    : Context(Ctx), CurrentWinFrameInfo(nullptr),
-      UseAssemblerInfoForParsing(false) {
+    : Context(Ctx), CurrentWinFrameInfo(nullptr) {
   SectionStack.push_back(std::pair<MCSectionSubPair, MCSectionSubPair>());
 }
 
@@ -282,28 +269,22 @@ bool MCStreamer::EmitCVInlineSiteIdDirective(unsigned FunctionId,
 void MCStreamer::EmitCVLocDirective(unsigned FunctionId, unsigned FileNo,
                                     unsigned Line, unsigned Column,
                                     bool PrologueEnd, bool IsStmt,
-                                    StringRef FileName, SMLoc Loc) {}
-
-bool MCStreamer::checkCVLocSection(unsigned FuncId, unsigned FileNo,
-                                   SMLoc Loc) {
+                                    StringRef FileName, SMLoc Loc) {
   CodeViewContext &CVC = getContext().getCVContext();
-  MCCVFunctionInfo *FI = CVC.getCVFunctionInfo(FuncId);
-  if (!FI) {
-    getContext().reportError(
+  MCCVFunctionInfo *FI = CVC.getCVFunctionInfo(FunctionId);
+  if (!FI)
+    return getContext().reportError(
         Loc, "function id not introduced by .cv_func_id or .cv_inline_site_id");
-    return false;
-  }
 
   // Track the section
   if (FI->Section == nullptr)
     FI->Section = getCurrentSectionOnly();
-  else if (FI->Section != getCurrentSectionOnly()) {
-    getContext().reportError(
+  else if (FI->Section != getCurrentSectionOnly())
+    return getContext().reportError(
         Loc,
         "all .cv_loc directives for a function must be in the same section");
-    return false;
-  }
-  return true;
+
+  CVC.setCurrentCVLoc(FunctionId, FileNo, Line, Column, PrologueEnd, IsStmt);
 }
 
 void MCStreamer::EmitCVLinetableDirective(unsigned FunctionId,
@@ -359,10 +340,10 @@ void MCStreamer::EmitCFISections(bool EH, bool Debug) {
   assert(EH || Debug);
 }
 
-void MCStreamer::EmitCFIStartProc(bool IsSimple, SMLoc Loc) {
+void MCStreamer::EmitCFIStartProc(bool IsSimple) {
   if (hasUnfinishedDwarfFrameInfo())
-    return getContext().reportError(
-        Loc, "starting new .cfi frame before finishing the previous one");
+    getContext().reportError(
+        SMLoc(), "starting new .cfi frame before finishing the previous one");
 
   MCDwarfFrameInfo Frame;
   Frame.IsSimple = IsSimple;
@@ -532,7 +513,7 @@ void MCStreamer::EmitCFIEscape(StringRef Values) {
 
 void MCStreamer::EmitCFIGnuArgsSize(int64_t Size) {
   MCSymbol *Label = EmitCFILabel();
-  MCCFIInstruction Instruction =
+  MCCFIInstruction Instruction = 
     MCCFIInstruction::createGnuArgsSize(Label, Size);
   MCDwarfFrameInfo *CurFrame = getCurrentDwarfFrameInfo();
   if (!CurFrame)
@@ -627,17 +608,6 @@ void MCStreamer::EmitWinCFIEndProc(SMLoc Loc) {
   CurFrame->End = Label;
 }
 
-void MCStreamer::EmitWinCFIFuncletOrFuncEnd(SMLoc Loc) {
-  WinEH::FrameInfo *CurFrame = EnsureValidWinFrameInfo(Loc);
-  if (!CurFrame)
-    return;
-  if (CurFrame->ChainedParent)
-    getContext().reportError(Loc, "Not all chained regions terminated!");
-
-  MCSymbol *Label = EmitCFILabel();
-  CurFrame->FuncletOrFuncEnd = Label;
-}
-
 void MCStreamer::EmitWinCFIStartChained(SMLoc Loc) {
   WinEH::FrameInfo *CurFrame = EnsureValidWinFrameInfo(Loc);
   if (!CurFrame)
@@ -690,10 +660,6 @@ void MCStreamer::EmitWinEHHandlerData(SMLoc Loc) {
     getContext().reportError(Loc, "Chained unwind areas can't have handlers!");
 }
 
-void MCStreamer::emitCGProfileEntry(const MCSymbolRefExpr *From,
-                                    const MCSymbolRefExpr *To, uint64_t Count) {
-}
-
 static MCSection *getWinCFISection(MCContext &Context, unsigned *NextWinCFIID,
                                    MCSection *MainCFISec,
                                    const MCSection *TextSec) {
@@ -702,31 +668,16 @@ static MCSection *getWinCFISection(MCContext &Context, unsigned *NextWinCFIID,
     return MainCFISec;
 
   const auto *TextSecCOFF = cast<MCSectionCOFF>(TextSec);
-  auto *MainCFISecCOFF = cast<MCSectionCOFF>(MainCFISec);
   unsigned UniqueID = TextSecCOFF->getOrAssignWinCFISectionID(NextWinCFIID);
 
   // If this section is COMDAT, this unwind section should be COMDAT associative
   // with its group.
   const MCSymbol *KeySym = nullptr;
-  if (TextSecCOFF->getCharacteristics() & COFF::IMAGE_SCN_LNK_COMDAT) {
+  if (TextSecCOFF->getCharacteristics() & COFF::IMAGE_SCN_LNK_COMDAT)
     KeySym = TextSecCOFF->getCOMDATSymbol();
 
-    // In a GNU environment, we can't use associative comdats. Instead, do what
-    // GCC does, which is to make plain comdat selectany section named like
-    // ".[px]data$_Z3foov".
-    if (!Context.getAsmInfo()->hasCOFFAssociativeComdats()) {
-      std::string SectionName =
-          (MainCFISecCOFF->getSectionName() + "$" +
-           TextSecCOFF->getSectionName().split('$').second)
-              .str();
-      return Context.getCOFFSection(
-          SectionName,
-          MainCFISecCOFF->getCharacteristics() | COFF::IMAGE_SCN_LNK_COMDAT,
-          MainCFISecCOFF->getKind(), "", COFF::IMAGE_COMDAT_SELECT_ANY);
-    }
-  }
-
-  return Context.getAssociativeCOFFSection(MainCFISecCOFF, KeySym, UniqueID);
+  return Context.getAssociativeCOFFSection(cast<MCSectionCOFF>(MainCFISec),
+                                           KeySym, UniqueID);
 }
 
 MCSection *MCStreamer::getAssociatedPDataSection(const MCSection *TextSec) {
@@ -858,8 +809,6 @@ void MCStreamer::EmitCOFFSectionIndex(MCSymbol const *Symbol) {
 }
 
 void MCStreamer::EmitCOFFSecRel32(MCSymbol const *Symbol, uint64_t Offset) {}
-
-void MCStreamer::EmitCOFFImgRel32(MCSymbol const *Symbol, int64_t Offset) {}
 
 /// EmitRawText - If this file is backed by an assembly streamer, this dumps
 /// the specified string in the output .s file.  This capability is
@@ -1045,8 +994,7 @@ MCSymbol *MCStreamer::endSection(MCSection *Section) {
   return Sym;
 }
 
-void MCStreamer::EmitVersionForTarget(const Triple &Target,
-                                      const VersionTuple &SDKVersion) {
+void MCStreamer::EmitVersionForTarget(const Triple &Target) {
   if (!Target.isOSBinFormatMachO() || !Target.isOSDarwin())
     return;
   // Do we even know the version?
@@ -1072,5 +1020,5 @@ void MCStreamer::EmitVersionForTarget(const Triple &Target,
     Target.getiOSVersion(Major, Minor, Update);
   }
   if (Major != 0)
-    EmitVersionMin(VersionType, Major, Minor, Update, SDKVersion);
+    EmitVersionMin(VersionType, Major, Minor, Update);
 }

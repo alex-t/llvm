@@ -47,7 +47,7 @@ public:
     return Error::success();
   }
   template <typename T> static Expected<T> deserializeAs(CVSymbol Symbol) {
-    T Record(static_cast<SymbolRecordKind>(Symbol.kind()));
+    T Record(Symbol.kind());
     if (auto EC = deserializeAs<T>(Symbol, Record))
       return std::move(EC);
     return Record;

@@ -318,15 +318,15 @@ return: ret void
 ; NOOPT-LABEL: optimal_jump_table1
 ; NOOPT: testl %edi, %edi
 ; NOOPT: je
-; NOOPT: subl $5, [[REG:%e[abcd][xi]]]
+; NOOPT: subl $5, %eax
 ; NOOPT: je
-; NOOPT: subl $6, [[REG]]
+; NOOPT: subl $6, %eax
 ; NOOPT: je
-; NOOPT: subl $12, [[REG]]
+; NOOPT: subl $12, %eax
 ; NOOPT: je
-; NOOPT: subl $13, [[REG]]
+; NOOPT: subl $13, %eax
 ; NOOPT: je
-; NOOPT: subl $15, [[REG]]
+; NOOPT: subl $15, %eax
 ; NOOPT: je
 }
 

@@ -14,11 +14,8 @@ using namespace llvm;
 using namespace llvm::codeview;
 
 Error DebugFrameDataSubsectionRef::initialize(BinaryStreamReader Reader) {
-  if (Reader.bytesRemaining() % sizeof(FrameData) != 0) {
-    if (auto EC = Reader.readObject(RelocPtr))
-      return EC;
-  }
-
+  if (auto EC = Reader.readObject(RelocPtr))
+    return EC;
   if (Reader.bytesRemaining() % sizeof(FrameData) != 0)
     return make_error<CodeViewError>(cv_error_code::corrupt_record,
                                      "Invalid frame data record format!");
@@ -29,30 +26,15 @@ Error DebugFrameDataSubsectionRef::initialize(BinaryStreamReader Reader) {
   return Error::success();
 }
 
-Error DebugFrameDataSubsectionRef::initialize(BinaryStreamRef Section) {
-  BinaryStreamReader Reader(Section);
-  return initialize(Reader);
-}
-
 uint32_t DebugFrameDataSubsection::calculateSerializedSize() const {
-  uint32_t Size = sizeof(FrameData) * Frames.size();
-  if (IncludeRelocPtr)
-    Size += sizeof(uint32_t);
-  return Size;
+  return 4 + sizeof(FrameData) * Frames.size();
 }
 
 Error DebugFrameDataSubsection::commit(BinaryStreamWriter &Writer) const {
-  if (IncludeRelocPtr) {
-    if (auto EC = Writer.writeInteger<uint32_t>(0))
-      return EC;
-  }
+  if (auto EC = Writer.writeInteger<uint32_t>(0))
+    return EC;
 
-  std::vector<FrameData> SortedFrames(Frames.begin(), Frames.end());
-  std::sort(SortedFrames.begin(), SortedFrames.end(),
-            [](const FrameData &LHS, const FrameData &RHS) {
-              return LHS.RvaStart < RHS.RvaStart;
-            });
-  if (auto EC = Writer.writeArray(makeArrayRef(SortedFrames)))
+  if (auto EC = Writer.writeArray(makeArrayRef(Frames)))
     return EC;
   return Error::success();
 }

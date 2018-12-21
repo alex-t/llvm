@@ -42,16 +42,16 @@ class raw_ostream;
 class SMLoc;
 class SourceMgr;
 
-/// Instances of this class represent the name of the dwarf
+/// \brief Instances of this class represent the name of the dwarf
 /// .file directive and its associated dwarf file number in the MC file,
 /// and MCDwarfFile's are created and uniqued by the MCContext class where
 /// the file number for each is its index into the vector of DwarfFiles (note
 /// index 0 is not used and not a valid dwarf file number).
 struct MCDwarfFile {
-  // The base name of the file without its directory path.
+  // \brief The base name of the file without its directory path.
   std::string Name;
 
-  // The index into the list of directory names for this file name.
+  // \brief The index into the list of directory names for this file name.
   unsigned DirIndex;
 
   /// The MD5 checksum, if there is one. Non-owning pointer to data allocated
@@ -63,7 +63,7 @@ struct MCDwarfFile {
   Optional<StringRef> Source;
 };
 
-/// Instances of this class represent the information from a
+/// \brief Instances of this class represent the information from a
 /// dwarf .loc directive.
 class MCDwarfLoc {
   uint32_t FileNum;
@@ -95,55 +95,55 @@ private: // MCContext manages these
   // for an MCDwarfLoc object.
 
 public:
-  /// Get the FileNum of this MCDwarfLoc.
+  /// \brief Get the FileNum of this MCDwarfLoc.
   unsigned getFileNum() const { return FileNum; }
 
-  /// Get the Line of this MCDwarfLoc.
+  /// \brief Get the Line of this MCDwarfLoc.
   unsigned getLine() const { return Line; }
 
-  /// Get the Column of this MCDwarfLoc.
+  /// \brief Get the Column of this MCDwarfLoc.
   unsigned getColumn() const { return Column; }
 
-  /// Get the Flags of this MCDwarfLoc.
+  /// \brief Get the Flags of this MCDwarfLoc.
   unsigned getFlags() const { return Flags; }
 
-  /// Get the Isa of this MCDwarfLoc.
+  /// \brief Get the Isa of this MCDwarfLoc.
   unsigned getIsa() const { return Isa; }
 
-  /// Get the Discriminator of this MCDwarfLoc.
+  /// \brief Get the Discriminator of this MCDwarfLoc.
   unsigned getDiscriminator() const { return Discriminator; }
 
-  /// Set the FileNum of this MCDwarfLoc.
+  /// \brief Set the FileNum of this MCDwarfLoc.
   void setFileNum(unsigned fileNum) { FileNum = fileNum; }
 
-  /// Set the Line of this MCDwarfLoc.
+  /// \brief Set the Line of this MCDwarfLoc.
   void setLine(unsigned line) { Line = line; }
 
-  /// Set the Column of this MCDwarfLoc.
+  /// \brief Set the Column of this MCDwarfLoc.
   void setColumn(unsigned column) {
     assert(column <= UINT16_MAX);
     Column = column;
   }
 
-  /// Set the Flags of this MCDwarfLoc.
+  /// \brief Set the Flags of this MCDwarfLoc.
   void setFlags(unsigned flags) {
     assert(flags <= UINT8_MAX);
     Flags = flags;
   }
 
-  /// Set the Isa of this MCDwarfLoc.
+  /// \brief Set the Isa of this MCDwarfLoc.
   void setIsa(unsigned isa) {
     assert(isa <= UINT8_MAX);
     Isa = isa;
   }
 
-  /// Set the Discriminator of this MCDwarfLoc.
+  /// \brief Set the Discriminator of this MCDwarfLoc.
   void setDiscriminator(unsigned discriminator) {
     Discriminator = discriminator;
   }
 };
 
-/// Instances of this class represent the line information for
+/// \brief Instances of this class represent the line information for
 /// the dwarf line table entries.  Which is created after a machine
 /// instruction is assembled and uses an address from a temporary label
 /// created at the current address in the current section and the info from
@@ -168,13 +168,13 @@ public:
   static void Make(MCObjectStreamer *MCOS, MCSection *Section);
 };
 
-/// Instances of this class represent the line information for a compile
+/// \brief Instances of this class represent the line information for a compile
 /// unit where machine instructions have been assembled after seeing .loc
 /// directives.  This is the information used to build the dwarf line
 /// table for a section.
 class MCLineSection {
 public:
-  // Add an entry to this MCLineSection's line entries.
+  // \brief Add an entry to this MCLineSection's line entries.
   void addLineEntry(const MCDwarfLineEntry &LineEntry, MCSection *Sec) {
     MCLineDivisions[Sec].push_back(LineEntry);
   }
@@ -213,14 +213,11 @@ struct MCDwarfLineTableHeader {
   SmallVector<std::string, 3> MCDwarfDirs;
   SmallVector<MCDwarfFile, 3> MCDwarfFiles;
   StringMap<unsigned> SourceIdMap;
-  std::string CompilationDir;
+  StringRef CompilationDir;
   MCDwarfFile RootFile;
+  bool HasMD5 = false;
   bool HasSource = false;
-private:
-  bool HasAllMD5 = true;
-  bool HasAnyMD5 = false;
 
-public:
   MCDwarfLineTableHeader() = default;
 
   Expected<unsigned> tryGetFile(StringRef &Directory, StringRef &FileName,
@@ -234,22 +231,11 @@ public:
   Emit(MCStreamer *MCOS, MCDwarfLineTableParams Params,
        ArrayRef<char> SpecialOpcodeLengths,
        Optional<MCDwarfLineStr> &LineStr) const;
-  void resetMD5Usage() {
-    HasAllMD5 = true;
-    HasAnyMD5 = false;
-  }
-  void trackMD5Usage(bool MD5Used) {
-    HasAllMD5 &= MD5Used;
-    HasAnyMD5 |= MD5Used;
-  }
-  bool isMD5UsageConsistent() const {
-    return MCDwarfFiles.empty() || (HasAllMD5 == HasAnyMD5);
-  }
 
 private:
   void emitV2FileDirTables(MCStreamer *MCOS) const;
-  void emitV5FileDirTables(MCStreamer *MCOS, Optional<MCDwarfLineStr> &LineStr,
-                           StringRef CtxCompilationDir) const;
+  void emitV5FileDirTables(MCStreamer *MCOS,
+                           Optional<MCDwarfLineStr> &LineStr) const;
 };
 
 class MCDwarfDwoLineTable {
@@ -265,7 +251,7 @@ public:
     Header.RootFile.DirIndex = 0;
     Header.RootFile.Checksum = Checksum;
     Header.RootFile.Source = Source;
-    Header.trackMD5Usage(Checksum);
+    Header.HasMD5 = (Checksum != nullptr);
     Header.HasSource = Source.hasValue();
   }
 
@@ -308,21 +294,9 @@ public:
     Header.RootFile.DirIndex = 0;
     Header.RootFile.Checksum = Checksum;
     Header.RootFile.Source = Source;
-    Header.trackMD5Usage(Checksum);
+    Header.HasMD5 = (Checksum != nullptr);
     Header.HasSource = Source.hasValue();
   }
-
-  void resetRootFile() {
-    assert(Header.MCDwarfFiles.empty());
-    Header.RootFile.Name.clear();
-    Header.resetMD5Usage();
-    Header.HasSource = false;
-  }
-
-  bool hasRootFile() const { return !Header.RootFile.Name.empty(); }
-
-  // Report whether MD5 usage has been consistent (all-or-none).
-  bool isMD5UsageConsistent() const { return Header.isMD5UsageConsistent(); }
 
   MCSymbol *getLabel() const {
     return Header.Label;
@@ -361,13 +335,6 @@ public:
   /// Utility function to encode a Dwarf pair of LineDelta and AddrDeltas.
   static void Encode(MCContext &Context, MCDwarfLineTableParams Params,
                      int64_t LineDelta, uint64_t AddrDelta, raw_ostream &OS);
-
-  /// Utility function to encode a Dwarf pair of LineDelta and AddrDeltas using
-  /// fixed length operands.
-  static bool FixedEncode(MCContext &Context,
-                          MCDwarfLineTableParams Params,
-                          int64_t LineDelta, uint64_t AddrDelta,
-                          raw_ostream &OS, uint32_t *Offset, uint32_t *Size);
 
   /// Utility function to emit the encoding to a streamer.
   static void Emit(MCStreamer *MCOS, MCDwarfLineTableParams Params,
@@ -455,41 +422,41 @@ private:
   }
 
 public:
-  /// .cfi_def_cfa defines a rule for computing CFA as: take address from
+  /// \brief .cfi_def_cfa defines a rule for computing CFA as: take address from
   /// Register and add Offset to it.
   static MCCFIInstruction createDefCfa(MCSymbol *L, unsigned Register,
                                        int Offset) {
     return MCCFIInstruction(OpDefCfa, L, Register, -Offset, "");
   }
 
-  /// .cfi_def_cfa_register modifies a rule for computing CFA. From now
+  /// \brief .cfi_def_cfa_register modifies a rule for computing CFA. From now
   /// on Register will be used instead of the old one. Offset remains the same.
   static MCCFIInstruction createDefCfaRegister(MCSymbol *L, unsigned Register) {
     return MCCFIInstruction(OpDefCfaRegister, L, Register, 0, "");
   }
 
-  /// .cfi_def_cfa_offset modifies a rule for computing CFA. Register
+  /// \brief .cfi_def_cfa_offset modifies a rule for computing CFA. Register
   /// remains the same, but offset is new. Note that it is the absolute offset
   /// that will be added to a defined register to the compute CFA address.
   static MCCFIInstruction createDefCfaOffset(MCSymbol *L, int Offset) {
     return MCCFIInstruction(OpDefCfaOffset, L, 0, -Offset, "");
   }
 
-  /// .cfi_adjust_cfa_offset Same as .cfi_def_cfa_offset, but
+  /// \brief .cfi_adjust_cfa_offset Same as .cfi_def_cfa_offset, but
   /// Offset is a relative value that is added/subtracted from the previous
   /// offset.
   static MCCFIInstruction createAdjustCfaOffset(MCSymbol *L, int Adjustment) {
     return MCCFIInstruction(OpAdjustCfaOffset, L, 0, Adjustment, "");
   }
 
-  /// .cfi_offset Previous value of Register is saved at offset Offset
+  /// \brief .cfi_offset Previous value of Register is saved at offset Offset
   /// from CFA.
   static MCCFIInstruction createOffset(MCSymbol *L, unsigned Register,
                                        int Offset) {
     return MCCFIInstruction(OpOffset, L, Register, Offset, "");
   }
 
-  /// .cfi_rel_offset Previous value of Register is saved at offset
+  /// \brief .cfi_rel_offset Previous value of Register is saved at offset
   /// Offset from the current CFA register. This is transformed to .cfi_offset
   /// using the known displacement of the CFA register from the CFA.
   static MCCFIInstruction createRelOffset(MCSymbol *L, unsigned Register,
@@ -497,54 +464,54 @@ public:
     return MCCFIInstruction(OpRelOffset, L, Register, Offset, "");
   }
 
-  /// .cfi_register Previous value of Register1 is saved in
+  /// \brief .cfi_register Previous value of Register1 is saved in
   /// register Register2.
   static MCCFIInstruction createRegister(MCSymbol *L, unsigned Register1,
                                          unsigned Register2) {
     return MCCFIInstruction(OpRegister, L, Register1, Register2);
   }
 
-  /// .cfi_window_save SPARC register window is saved.
+  /// \brief .cfi_window_save SPARC register window is saved.
   static MCCFIInstruction createWindowSave(MCSymbol *L) {
     return MCCFIInstruction(OpWindowSave, L, 0, 0, "");
   }
 
-  /// .cfi_restore says that the rule for Register is now the same as it
+  /// \brief .cfi_restore says that the rule for Register is now the same as it
   /// was at the beginning of the function, after all initial instructions added
   /// by .cfi_startproc were executed.
   static MCCFIInstruction createRestore(MCSymbol *L, unsigned Register) {
     return MCCFIInstruction(OpRestore, L, Register, 0, "");
   }
 
-  /// .cfi_undefined From now on the previous value of Register can't be
+  /// \brief .cfi_undefined From now on the previous value of Register can't be
   /// restored anymore.
   static MCCFIInstruction createUndefined(MCSymbol *L, unsigned Register) {
     return MCCFIInstruction(OpUndefined, L, Register, 0, "");
   }
 
-  /// .cfi_same_value Current value of Register is the same as in the
+  /// \brief .cfi_same_value Current value of Register is the same as in the
   /// previous frame. I.e., no restoration is needed.
   static MCCFIInstruction createSameValue(MCSymbol *L, unsigned Register) {
     return MCCFIInstruction(OpSameValue, L, Register, 0, "");
   }
 
-  /// .cfi_remember_state Save all current rules for all registers.
+  /// \brief .cfi_remember_state Save all current rules for all registers.
   static MCCFIInstruction createRememberState(MCSymbol *L) {
     return MCCFIInstruction(OpRememberState, L, 0, 0, "");
   }
 
-  /// .cfi_restore_state Restore the previously saved state.
+  /// \brief .cfi_restore_state Restore the previously saved state.
   static MCCFIInstruction createRestoreState(MCSymbol *L) {
     return MCCFIInstruction(OpRestoreState, L, 0, 0, "");
   }
 
-  /// .cfi_escape Allows the user to add arbitrary bytes to the unwind
+  /// \brief .cfi_escape Allows the user to add arbitrary bytes to the unwind
   /// info.
   static MCCFIInstruction createEscape(MCSymbol *L, StringRef Vals) {
     return MCCFIInstruction(OpEscape, L, 0, 0, Vals);
   }
 
-  /// A special wrapper for .cfi_escape that indicates GNU_ARGS_SIZE
+  /// \brief A special wrapper for .cfi_escape that indicates GNU_ARGS_SIZE
   static MCCFIInstruction createGnuArgsSize(MCSymbol *L, int Size) {
     return MCCFIInstruction(OpGnuArgsSize, L, 0, Size, "");
   }

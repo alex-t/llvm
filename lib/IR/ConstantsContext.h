@@ -529,9 +529,7 @@ struct ConstantExprKeyType {
   ConstantExpr *create(TypeClass *Ty) const {
     switch (Opcode) {
     default:
-      if (Instruction::isCast(Opcode) ||
-          (Opcode >= Instruction::UnaryOpsBegin &&
-           Opcode < Instruction::UnaryOpsEnd))
+      if (Instruction::isCast(Opcode))
         return new UnaryConstantExpr(Opcode, Ops[0], Ty);
       if ((Opcode >= Instruction::BinaryOpsBegin &&
            Opcode < Instruction::BinaryOpsEnd))
@@ -697,9 +695,7 @@ public:
     return nullptr;
   }
 
-  void dump() const {
-    LLVM_DEBUG(dbgs() << "Constant.cpp: ConstantUniqueMap\n");
-  }
+  void dump() const { DEBUG(dbgs() << "Constant.cpp: ConstantUniqueMap\n"); }
 };
 
 } // end namespace llvm

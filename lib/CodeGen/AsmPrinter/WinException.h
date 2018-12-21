@@ -38,9 +38,6 @@ class LLVM_LIBRARY_VISIBILITY WinException : public EHStreamer {
   /// True if this is a 64-bit target and we should use image relative offsets.
   bool useImageRel32 = false;
 
-  /// True if we are generating exception handling on Windows for ARM64.
-  bool isAArch64 = false;
-
   /// Pointer to the current funclet entry BB.
   const MachineBasicBlock *CurrentFuncletEntry = nullptr;
 
@@ -75,7 +72,7 @@ class LLVM_LIBRARY_VISIBILITY WinException : public EHStreamer {
 
   const MCExpr *create32bitRef(const MCSymbol *Value);
   const MCExpr *create32bitRef(const GlobalValue *GV);
-  const MCExpr *getLabel(const MCSymbol *Label);
+  const MCExpr *getLabelPlusOne(const MCSymbol *Label);
   const MCExpr *getOffset(const MCSymbol *OffsetOf, const MCSymbol *OffsetFrom);
   const MCExpr *getOffsetPlusOne(const MCSymbol *OffsetOf,
                                  const MCSymbol *OffsetFrom);
@@ -103,7 +100,7 @@ public:
   /// Gather and emit post-function exception information.
   void endFunction(const MachineFunction *) override;
 
-  /// Emit target-specific EH funclet machinery.
+  /// \brief Emit target-specific EH funclet machinery.
   void beginFunclet(const MachineBasicBlock &MBB, MCSymbol *Sym) override;
   void endFunclet() override;
 };

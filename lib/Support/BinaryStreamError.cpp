@@ -47,7 +47,7 @@ BinaryStreamError::BinaryStreamError(stream_error_code C, StringRef Context)
   }
 }
 
-void BinaryStreamError::log(raw_ostream &OS) const { OS << ErrMsg; }
+void BinaryStreamError::log(raw_ostream &OS) const { OS << ErrMsg << "\n"; }
 
 StringRef BinaryStreamError::getErrorMessage() const { return ErrMsg; }
 

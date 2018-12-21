@@ -3,7 +3,7 @@
 ; Test main functions with alternate signatures.
 
 target datalayout = "e-m:e-p:32:32-i64:64-n32:64-S128"
-target triple = "wasm32-unknown-unknown"
+target triple = "wasm32-unknown-unknown-wasm"
 
 declare void @main()
 
@@ -14,7 +14,6 @@ define void @foo() {
 
 ; CHECK-NOT:   __original_main
 ; CHECK-LABEL: foo:
-; CHECK-NEXT:    .functype foo () -> ()
 ; CHECK-NEXT:    call main@FUNCTION
 ; CHECK-NEXT:    end_function
 ; CHECK-NOT:   __original_main

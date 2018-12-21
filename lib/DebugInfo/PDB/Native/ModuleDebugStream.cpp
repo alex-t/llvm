@@ -47,8 +47,7 @@ Error ModuleDebugStreamRef::reload() {
 
   if (auto EC = Reader.readInteger(Signature))
     return EC;
-  Reader.setOffset(0);
-  if (auto EC = Reader.readSubstream(SymbolsSubstream, SymbolSize))
+  if (auto EC = Reader.readSubstream(SymbolsSubstream, SymbolSize - 4))
     return EC;
   if (auto EC = Reader.readSubstream(C11LinesSubstream, C11Size))
     return EC;
@@ -56,8 +55,8 @@ Error ModuleDebugStreamRef::reload() {
     return EC;
 
   BinaryStreamReader SymbolReader(SymbolsSubstream.StreamData);
-  if (auto EC = SymbolReader.readArray(
-          SymbolArray, SymbolReader.bytesRemaining(), sizeof(uint32_t)))
+  if (auto EC =
+          SymbolReader.readArray(SymbolArray, SymbolReader.bytesRemaining()))
     return EC;
 
   BinaryStreamReader SubsectionsReader(C13LinesSubstream.StreamData);
@@ -96,12 +95,6 @@ BinarySubstreamRef ModuleDebugStreamRef::getGlobalRefsSubstream() const {
 iterator_range<codeview::CVSymbolArray::Iterator>
 ModuleDebugStreamRef::symbols(bool *HadError) const {
   return make_range(SymbolArray.begin(HadError), SymbolArray.end());
-}
-
-CVSymbol ModuleDebugStreamRef::readSymbolAtOffset(uint32_t Offset) const {
-  auto Iter = SymbolArray.at(Offset);
-  assert(Iter != SymbolArray.end());
-  return *Iter;
 }
 
 iterator_range<ModuleDebugStreamRef::DebugSubsectionIterator>

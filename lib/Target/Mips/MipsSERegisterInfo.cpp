@@ -98,8 +98,6 @@ static inline unsigned getLoadStoreOffsetSizeInBits(const unsigned Opcode,
   case Mips::SC64_R6:
   case Mips::SCD_R6:
   case Mips::SC_R6:
-  case Mips::LL_MMR6:
-  case Mips::SC_MMR6:
     return 9;
   case Mips::INLINEASM: {
     unsigned ConstraintID = InlineAsm::getMemoryConstraintID(MO.getImm());
@@ -204,8 +202,7 @@ void MipsSERegisterInfo::eliminateFI(MachineBasicBlock::iterator II,
   Offset = SPOffset + (int64_t)StackSize;
   Offset += MI.getOperand(OpNo + 1).getImm();
 
-  LLVM_DEBUG(errs() << "Offset     : " << Offset << "\n"
-                    << "<--------->\n");
+  DEBUG(errs() << "Offset     : " << Offset << "\n" << "<--------->\n");
 
   if (!MI.isDebugValue()) {
     // Make sure Offset fits within the field available.

@@ -1,6 +1,6 @@
 //===- tools/dsymutil/MachODebugMapParser.cpp - Parse STABS debug maps ----===//
 //
-//                     The LLVM Compiler Infrastructure
+//                             The LLVM Linker
 //
 // This file is distributed under the University of Illinois Open Source
 // License. See LICENSE.TXT for details.
@@ -28,7 +28,8 @@ public:
                       bool PaperTrailWarnings = false, bool Verbose = false)
       : BinaryPath(BinaryPath), Archs(Archs.begin(), Archs.end()),
         PathPrefix(PathPrefix), PaperTrailWarnings(PaperTrailWarnings),
-        BinHolder(Verbose), CurrentDebugMapObject(nullptr) {}
+        MainBinaryHolder(Verbose), CurrentObjectHolder(Verbose),
+        CurrentDebugMapObject(nullptr) {}
 
   /// Parses and returns the DebugMaps of the input binary. The binary contains
   /// multiple maps in case it is a universal binary.
@@ -46,13 +47,15 @@ private:
   bool PaperTrailWarnings;
 
   /// Owns the MemoryBuffer for the main binary.
-  BinaryHolder BinHolder;
+  BinaryHolder MainBinaryHolder;
   /// Map of the binary symbol addresses.
   StringMap<uint64_t> MainBinarySymbolAddresses;
   StringRef MainBinaryStrings;
   /// The constructed DebugMap.
   std::unique_ptr<DebugMap> Result;
 
+  /// Owns the MemoryBuffer for the currently handled object file.
+  BinaryHolder CurrentObjectHolder;
   /// Map of the currently processed object file symbol addresses.
   StringMap<Optional<uint64_t>> CurrentObjectAddresses;
   /// Element of the debug map corresponding to the current object file.
@@ -133,25 +136,23 @@ void MachODebugMapParser::switchToNewDebugMapObject(
   SmallString<80> Path(PathPrefix);
   sys::path::append(Path, Filename);
 
-  auto ObjectEntry = BinHolder.getObjectEntry(Path, Timestamp);
-  if (!ObjectEntry) {
-    auto Err = ObjectEntry.takeError();
-    Warning("unable to open object file: " + toString(std::move(Err)),
-            Path.str());
+  auto MachOOrError =
+      CurrentObjectHolder.GetFilesAs<MachOObjectFile>(Path, Timestamp);
+  if (auto Error = MachOOrError.getError()) {
+    Warning("unable to open object file: " + Error.message(), Path.str());
     return;
   }
 
-  auto Object = ObjectEntry->getObjectAs<MachOObjectFile>(Result->getTriple());
-  if (!Object) {
-    auto Err = Object.takeError();
-    Warning("unable to open object file: " + toString(std::move(Err)),
-            Path.str());
+  auto ErrOrAchObj =
+      CurrentObjectHolder.GetAs<MachOObjectFile>(Result->getTriple());
+  if (auto Error = ErrOrAchObj.getError()) {
+    Warning("unable to open object file: " + Error.message(), Path.str());
     return;
   }
 
   CurrentDebugMapObject =
       &Result->addDebugMapObject(Path, Timestamp, MachO::N_OSO);
-  loadCurrentObjectFileSymbols(*Object);
+  loadCurrentObjectFileSymbols(*ErrOrAchObj);
 }
 
 static std::string getArchName(const object::MachOObjectFile &Obj) {
@@ -321,26 +322,17 @@ static bool shouldLinkArch(SmallVectorImpl<StringRef> &Archs, StringRef Arch) {
 }
 
 bool MachODebugMapParser::dumpStab() {
-  auto ObjectEntry = BinHolder.getObjectEntry(BinaryPath);
-  if (!ObjectEntry) {
-    auto Err = ObjectEntry.takeError();
-    WithColor::error() << "cannot load '" << BinaryPath
-                       << "': " << toString(std::move(Err)) << '\n';
+  auto MainBinOrError =
+      MainBinaryHolder.GetFilesAs<MachOObjectFile>(BinaryPath);
+  if (auto Error = MainBinOrError.getError()) {
+    llvm::errs() << "Cannot get '" << BinaryPath
+                 << "' as MachO file: " << Error.message() << "\n";
     return false;
   }
 
-  auto Objects = ObjectEntry->getObjectsAs<MachOObjectFile>();
-  if (!Objects) {
-    auto Err = Objects.takeError();
-    WithColor::error() << "cannot get '" << BinaryPath
-                       << "' as MachO file: " << toString(std::move(Err))
-                       << "\n";
-    return false;
-  }
-
-  for (const auto *Object : *Objects)
-    if (shouldLinkArch(Archs, Object->getArchTriple().getArchName()))
-      dumpOneBinaryStab(*Object, BinaryPath);
+  for (const auto *Binary : *MainBinOrError)
+    if (shouldLinkArch(Archs, Binary->getArchTriple().getArchName()))
+      dumpOneBinaryStab(*Binary, BinaryPath);
 
   return true;
 }
@@ -349,20 +341,15 @@ bool MachODebugMapParser::dumpStab() {
 /// successful iterates over the STAB entries. The real parsing is
 /// done in handleStabSymbolTableEntry.
 ErrorOr<std::vector<std::unique_ptr<DebugMap>>> MachODebugMapParser::parse() {
-  auto ObjectEntry = BinHolder.getObjectEntry(BinaryPath);
-  if (!ObjectEntry) {
-    return errorToErrorCode(ObjectEntry.takeError());
-  }
-
-  auto Objects = ObjectEntry->getObjectsAs<MachOObjectFile>();
-  if (!Objects) {
-    return errorToErrorCode(ObjectEntry.takeError());
-  }
+  auto MainBinOrError =
+      MainBinaryHolder.GetFilesAs<MachOObjectFile>(BinaryPath);
+  if (auto Error = MainBinOrError.getError())
+    return Error;
 
   std::vector<std::unique_ptr<DebugMap>> Results;
-  for (const auto *Object : *Objects)
-    if (shouldLinkArch(Archs, Object->getArchTriple().getArchName()))
-      Results.push_back(parseOneBinary(*Object, BinaryPath));
+  for (const auto *Binary : *MainBinOrError)
+    if (shouldLinkArch(Archs, Binary->getArchTriple().getArchName()))
+      Results.push_back(parseOneBinary(*Binary, BinaryPath));
 
   return std::move(Results);
 }
@@ -511,16 +498,14 @@ void MachODebugMapParser::loadMainBinarySymbols(
     // Skip undefined and STAB entries.
     if ((Type == SymbolRef::ST_Debug) || (Type == SymbolRef::ST_Unknown))
       continue;
-    // In theory, the only symbols of interest are the global variables. These
-    // are the only ones that need to be queried because the address of common
-    // data won't be described in the debug map. All other addresses should be
-    // fetched for the debug map. In reality, by playing with 'ld -r' and
-    // export lists, you can get symbols described as N_GSYM in the debug map,
-    // but associated with a local symbol. Gather all the symbols, but prefer
-    // the global ones.
+    // The only symbols of interest are the global variables. These
+    // are the only ones that need to be queried because the address
+    // of common data won't be described in the debug map. All other
+    // addresses should be fetched for the debug map.
     uint8_t SymType =
         MainBinary.getSymbolTableEntry(Sym.getRawDataRefImpl()).n_type;
-    bool Extern = SymType & (MachO::N_EXT | MachO::N_PEXT);
+    if (!(SymType & (MachO::N_EXT | MachO::N_PEXT)))
+      continue;
     Expected<section_iterator> SectionOrErr = Sym.getSection();
     if (!SectionOrErr) {
       // TODO: Actually report errors helpfully.
@@ -540,11 +525,7 @@ void MachODebugMapParser::loadMainBinarySymbols(
     StringRef Name = *NameOrErr;
     if (Name.size() == 0 || Name[0] == '\0')
       continue;
-    // Override only if the new key is global.
-    if (Extern)
-      MainBinarySymbolAddresses[Name] = Addr;
-    else
-      MainBinarySymbolAddresses.try_emplace(Name, Addr);
+    MainBinarySymbolAddresses[Name] = Addr;
   }
 }
 

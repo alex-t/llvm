@@ -1,16 +1,17 @@
-; RUN: llc < %s -asm-verbose=false -disable-wasm-fallthrough-return-opt -wasm-keep-registers | FileCheck %s
+; RUN: llc < %s -asm-verbose=false -disable-wasm-fallthrough-return-opt | FileCheck %s
 
 ; Test that basic 64-bit integer operations assemble as expected.
 
 target datalayout = "e-m:e-p:32:32-i64:64-n32:64-S128"
-target triple = "wasm32-unknown-unknown"
+target triple = "wasm32-unknown-unknown-wasm"
 
 declare i64 @llvm.ctlz.i64(i64, i1)
 declare i64 @llvm.cttz.i64(i64, i1)
 declare i64 @llvm.ctpop.i64(i64)
 
 ; CHECK-LABEL: add64:
-; CHECK-NEXT: .functype add64 (i64, i64) -> (i64){{$}}
+; CHECK-NEXT: .param i64, i64{{$}}
+; CHECK-NEXT: .result i64{{$}}
 ; CHECK-NEXT: get_local $push[[L0:[0-9]+]]=, 0{{$}}
 ; CHECK-NEXT: get_local $push[[L1:[0-9]+]]=, 1{{$}}
 ; CHECK-NEXT: i64.add $push0=, $pop[[L0]], $pop[[L1]]{{$}}
@@ -21,7 +22,8 @@ define i64 @add64(i64 %x, i64 %y) {
 }
 
 ; CHECK-LABEL: sub64:
-; CHECK-NEXT: .functype sub64 (i64, i64) -> (i64){{$}}
+; CHECK-NEXT: .param i64, i64{{$}}
+; CHECK-NEXT: .result i64{{$}}
 ; CHECK-NEXT: get_local $push[[L0:[0-9]+]]=, 0{{$}}
 ; CHECK-NEXT: get_local $push[[L1:[0-9]+]]=, 1{{$}}
 ; CHECK-NEXT: i64.sub $push0=, $pop[[L0]], $pop[[L1]]{{$}}
@@ -32,7 +34,8 @@ define i64 @sub64(i64 %x, i64 %y) {
 }
 
 ; CHECK-LABEL: mul64:
-; CHECK-NEXT: .functype mul64 (i64, i64) -> (i64){{$}}
+; CHECK-NEXT: .param i64, i64{{$}}
+; CHECK-NEXT: .result i64{{$}}
 ; CHECK-NEXT: get_local $push[[L0:[0-9]+]]=, 0{{$}}
 ; CHECK-NEXT: get_local $push[[L1:[0-9]+]]=, 1{{$}}
 ; CHECK-NEXT: i64.mul $push0=, $pop[[L0]], $pop[[L1]]{{$}}
@@ -43,7 +46,8 @@ define i64 @mul64(i64 %x, i64 %y) {
 }
 
 ; CHECK-LABEL: sdiv64:
-; CHECK-NEXT: .functype sdiv64 (i64, i64) -> (i64){{$}}
+; CHECK-NEXT: .param i64, i64{{$}}
+; CHECK-NEXT: .result i64{{$}}
 ; CHECK-NEXT: get_local $push[[L0:[0-9]+]]=, 0{{$}}
 ; CHECK-NEXT: get_local $push[[L1:[0-9]+]]=, 1{{$}}
 ; CHECK-NEXT: i64.div_s $push0=, $pop[[L0]], $pop[[L1]]{{$}}
@@ -54,7 +58,8 @@ define i64 @sdiv64(i64 %x, i64 %y) {
 }
 
 ; CHECK-LABEL: udiv64:
-; CHECK-NEXT: .functype udiv64 (i64, i64) -> (i64){{$}}
+; CHECK-NEXT: .param i64, i64{{$}}
+; CHECK-NEXT: .result i64{{$}}
 ; CHECK-NEXT: get_local $push[[L0:[0-9]+]]=, 0{{$}}
 ; CHECK-NEXT: get_local $push[[L1:[0-9]+]]=, 1{{$}}
 ; CHECK-NEXT: i64.div_u $push0=, $pop[[L0]], $pop[[L1]]{{$}}
@@ -65,7 +70,8 @@ define i64 @udiv64(i64 %x, i64 %y) {
 }
 
 ; CHECK-LABEL: srem64:
-; CHECK-NEXT: .functype srem64 (i64, i64) -> (i64){{$}}
+; CHECK-NEXT: .param i64, i64{{$}}
+; CHECK-NEXT: .result i64{{$}}
 ; CHECK-NEXT: get_local $push[[L0:[0-9]+]]=, 0{{$}}
 ; CHECK-NEXT: get_local $push[[L1:[0-9]+]]=, 1{{$}}
 ; CHECK-NEXT: i64.rem_s $push0=, $pop[[L0]], $pop[[L1]]{{$}}
@@ -76,7 +82,8 @@ define i64 @srem64(i64 %x, i64 %y) {
 }
 
 ; CHECK-LABEL: urem64:
-; CHECK-NEXT: .functype urem64 (i64, i64) -> (i64){{$}}
+; CHECK-NEXT: .param i64, i64{{$}}
+; CHECK-NEXT: .result i64{{$}}
 ; CHECK-NEXT: get_local $push[[L0:[0-9]+]]=, 0{{$}}
 ; CHECK-NEXT: get_local $push[[L1:[0-9]+]]=, 1{{$}}
 ; CHECK-NEXT: i64.rem_u $push0=, $pop[[L0]], $pop[[L1]]{{$}}
@@ -87,7 +94,8 @@ define i64 @urem64(i64 %x, i64 %y) {
 }
 
 ; CHECK-LABEL: and64:
-; CHECK-NEXT: .functype and64 (i64, i64) -> (i64){{$}}
+; CHECK-NEXT: .param i64, i64{{$}}
+; CHECK-NEXT: .result i64{{$}}
 ; CHECK-NEXT: get_local $push[[L0:[0-9]+]]=, 0{{$}}
 ; CHECK-NEXT: get_local $push[[L1:[0-9]+]]=, 1{{$}}
 ; CHECK-NEXT: i64.and $push0=, $pop[[L0]], $pop[[L1]]{{$}}
@@ -98,7 +106,8 @@ define i64 @and64(i64 %x, i64 %y) {
 }
 
 ; CHECK-LABEL: or64:
-; CHECK-NEXT: .functype or64 (i64, i64) -> (i64){{$}}
+; CHECK-NEXT: .param i64, i64{{$}}
+; CHECK-NEXT: .result i64{{$}}
 ; CHECK-NEXT: get_local $push[[L0:[0-9]+]]=, 0{{$}}
 ; CHECK-NEXT: get_local $push[[L1:[0-9]+]]=, 1{{$}}
 ; CHECK-NEXT: i64.or $push0=, $pop[[L0]], $pop[[L1]]{{$}}
@@ -109,7 +118,8 @@ define i64 @or64(i64 %x, i64 %y) {
 }
 
 ; CHECK-LABEL: xor64:
-; CHECK-NEXT: .functype xor64 (i64, i64) -> (i64){{$}}
+; CHECK-NEXT: .param i64, i64{{$}}
+; CHECK-NEXT: .result i64{{$}}
 ; CHECK-NEXT: get_local $push[[L0:[0-9]+]]=, 0{{$}}
 ; CHECK-NEXT: get_local $push[[L1:[0-9]+]]=, 1{{$}}
 ; CHECK-NEXT: i64.xor $push0=, $pop[[L0]], $pop[[L1]]{{$}}
@@ -120,7 +130,8 @@ define i64 @xor64(i64 %x, i64 %y) {
 }
 
 ; CHECK-LABEL: shl64:
-; CHECK-NEXT: .functype shl64 (i64, i64) -> (i64){{$}}
+; CHECK-NEXT: .param i64, i64{{$}}
+; CHECK-NEXT: .result i64{{$}}
 ; CHECK-NEXT: get_local $push[[L0:[0-9]+]]=, 0{{$}}
 ; CHECK-NEXT: get_local $push[[L1:[0-9]+]]=, 1{{$}}
 ; CHECK-NEXT: i64.shl $push0=, $pop[[L0]], $pop[[L1]]{{$}}
@@ -131,7 +142,8 @@ define i64 @shl64(i64 %x, i64 %y) {
 }
 
 ; CHECK-LABEL: shr64:
-; CHECK-NEXT: .functype shr64 (i64, i64) -> (i64){{$}}
+; CHECK-NEXT: .param i64, i64{{$}}
+; CHECK-NEXT: .result i64{{$}}
 ; CHECK-NEXT: get_local $push[[L0:[0-9]+]]=, 0{{$}}
 ; CHECK-NEXT: get_local $push[[L1:[0-9]+]]=, 1{{$}}
 ; CHECK-NEXT: i64.shr_u $push0=, $pop[[L0]], $pop[[L1]]{{$}}
@@ -142,7 +154,8 @@ define i64 @shr64(i64 %x, i64 %y) {
 }
 
 ; CHECK-LABEL: sar64:
-; CHECK-NEXT: .functype sar64 (i64, i64) -> (i64){{$}}
+; CHECK-NEXT: .param i64, i64{{$}}
+; CHECK-NEXT: .result i64{{$}}
 ; CHECK-NEXT: get_local $push[[L0:[0-9]+]]=, 0{{$}}
 ; CHECK-NEXT: get_local $push[[L1:[0-9]+]]=, 1{{$}}
 ; CHECK-NEXT: i64.shr_s $push0=, $pop[[L0]], $pop[[L1]]{{$}}
@@ -153,7 +166,8 @@ define i64 @sar64(i64 %x, i64 %y) {
 }
 
 ; CHECK-LABEL: clz64:
-; CHECK-NEXT: .functype clz64 (i64) -> (i64){{$}}
+; CHECK-NEXT: .param i64{{$}}
+; CHECK-NEXT: .result i64{{$}}
 ; CHECK-NEXT: get_local $push[[L0:[0-9]+]]=, 0{{$}}
 ; CHECK-NEXT: i64.clz $push0=, $pop[[L0]]{{$}}
 ; CHECK-NEXT: return $pop0{{$}}
@@ -163,7 +177,8 @@ define i64 @clz64(i64 %x) {
 }
 
 ; CHECK-LABEL: clz64_zero_undef:
-; CHECK-NEXT: .functype clz64_zero_undef (i64) -> (i64){{$}}
+; CHECK-NEXT: .param i64{{$}}
+; CHECK-NEXT: .result i64{{$}}
 ; CHECK-NEXT: get_local $push[[L0:[0-9]+]]=, 0{{$}}
 ; CHECK-NEXT: i64.clz $push0=, $pop[[L0]]{{$}}
 ; CHECK-NEXT: return $pop0{{$}}
@@ -173,7 +188,8 @@ define i64 @clz64_zero_undef(i64 %x) {
 }
 
 ; CHECK-LABEL: ctz64:
-; CHECK-NEXT: .functype ctz64 (i64) -> (i64){{$}}
+; CHECK-NEXT: .param i64{{$}}
+; CHECK-NEXT: .result i64{{$}}
 ; CHECK-NEXT: get_local $push[[L0:[0-9]+]]=, 0{{$}}
 ; CHECK-NEXT: i64.ctz $push0=, $pop[[L0]]{{$}}
 ; CHECK-NEXT: return $pop0{{$}}
@@ -183,7 +199,8 @@ define i64 @ctz64(i64 %x) {
 }
 
 ; CHECK-LABEL: ctz64_zero_undef:
-; CHECK-NEXT: .functype ctz64_zero_undef (i64) -> (i64){{$}}
+; CHECK-NEXT: .param i64{{$}}
+; CHECK-NEXT: .result i64{{$}}
 ; CHECK-NEXT: get_local $push[[L0:[0-9]+]]=, 0{{$}}
 ; CHECK-NEXT: i64.ctz $push0=, $pop[[L0]]{{$}}
 ; CHECK-NEXT: return $pop0{{$}}
@@ -193,7 +210,8 @@ define i64 @ctz64_zero_undef(i64 %x) {
 }
 
 ; CHECK-LABEL: popcnt64:
-; CHECK-NEXT: .functype popcnt64 (i64) -> (i64){{$}}
+; CHECK-NEXT: .param i64{{$}}
+; CHECK-NEXT: .result i64{{$}}
 ; CHECK-NEXT: get_local $push[[L0:[0-9]+]]=, 0{{$}}
 ; CHECK-NEXT: i64.popcnt $push0=, $pop[[L0]]{{$}}
 ; CHECK-NEXT: return $pop0{{$}}
@@ -203,7 +221,8 @@ define i64 @popcnt64(i64 %x) {
 }
 
 ; CHECK-LABEL: eqz64:
-; CHECK-NEXT: .functype eqz64 (i64) -> (i32){{$}}
+; CHECK-NEXT: .param i64{{$}}
+; CHECK-NEXT: .result i32{{$}}
 ; CHECK-NEXT: get_local $push[[L0:[0-9]+]]=, 0{{$}}
 ; CHECK-NEXT: i64.eqz $push0=, $pop[[L0]]{{$}}
 ; CHECK-NEXT: return $pop0{{$}}
@@ -214,7 +233,8 @@ define i32 @eqz64(i64 %x) {
 }
 
 ; CHECK-LABEL: rotl:
-; CHECK-NEXT: .functype rotl (i64, i64) -> (i64){{$}}
+; CHECK-NEXT: .param i64, i64{{$}}
+; CHECK-NEXT: .result i64{{$}}
 ; CHECK-NEXT: get_local $push[[L0:[0-9]+]]=, 0{{$}}
 ; CHECK-NEXT: get_local $push[[L1:[0-9]+]]=, 1{{$}}
 ; CHECK-NEXT: i64.rotl $push0=, $pop[[L0]], $pop[[L1]]
@@ -228,7 +248,8 @@ define i64 @rotl(i64 %x, i64 %y) {
 }
 
 ; CHECK-LABEL: masked_rotl:
-; CHECK-NEXT: .functype masked_rotl (i64, i64) -> (i64){{$}}
+; CHECK-NEXT: .param i64, i64{{$}}
+; CHECK-NEXT: .result i64{{$}}
 ; CHECK-NEXT: get_local $push[[L0:[0-9]+]]=, 0{{$}}
 ; CHECK-NEXT: get_local $push[[L1:[0-9]+]]=, 1{{$}}
 ; CHECK-NEXT: i64.rotl $push0=, $pop[[L0]], $pop[[L1]]
@@ -243,7 +264,8 @@ define i64 @masked_rotl(i64 %x, i64 %y) {
 }
 
 ; CHECK-LABEL: rotr:
-; CHECK-NEXT: .functype rotr (i64, i64) -> (i64){{$}}
+; CHECK-NEXT: .param i64, i64{{$}}
+; CHECK-NEXT: .result i64{{$}}
 ; CHECK-NEXT: get_local $push[[L0:[0-9]+]]=, 0{{$}}
 ; CHECK-NEXT: get_local $push[[L1:[0-9]+]]=, 1{{$}}
 ; CHECK-NEXT: i64.rotr $push0=, $pop[[L0]], $pop[[L1]]
@@ -257,7 +279,8 @@ define i64 @rotr(i64 %x, i64 %y) {
 }
 
 ; CHECK-LABEL: masked_rotr:
-; CHECK-NEXT: .functype masked_rotr (i64, i64) -> (i64){{$}}
+; CHECK-NEXT: .param i64, i64{{$}}
+; CHECK-NEXT: .result i64{{$}}
 ; CHECK-NEXT: get_local $push[[L0:[0-9]+]]=, 0{{$}}
 ; CHECK-NEXT: get_local $push[[L1:[0-9]+]]=, 1{{$}}
 ; CHECK-NEXT: i64.rotr $push0=, $pop[[L0]], $pop[[L1]]

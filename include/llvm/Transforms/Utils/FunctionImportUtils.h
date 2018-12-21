@@ -114,9 +114,6 @@ bool renameModuleForThinLTO(
     Module &M, const ModuleSummaryIndex &Index,
     SetVector<GlobalValue *> *GlobalsToImport = nullptr);
 
-/// Compute synthetic function entry counts.
-void computeSyntheticCounts(ModuleSummaryIndex &Index);
-
 } // End llvm namespace
 
 #endif

@@ -14,7 +14,7 @@
 package llvm
 
 /*
-#include "IRBindings.h"
+#include "DIBuilderBindings.h"
 #include <stdlib.h>
 */
 import "C"
@@ -297,9 +297,8 @@ func (d *DIBuilder) CreateBasicType(t DIBasicType) Metadata {
 		d.ref,
 		name,
 		C.size_t(len(t.Name)),
-		C.uint64_t(t.SizeInBits),
-		C.LLVMDWARFTypeEncoding(t.Encoding),
-		C.LLVMDIFlags(0),
+		C.unsigned(t.SizeInBits),
+		C.unsigned(t.Encoding),
 	)
 	return Metadata{C: result}
 }
@@ -320,8 +319,8 @@ func (d *DIBuilder) CreatePointerType(t DIPointerType) Metadata {
 	result := C.LLVMDIBuilderCreatePointerType(
 		d.ref,
 		t.Pointee.C,
-		C.uint64_t(t.SizeInBits),
-		C.uint32_t(t.AlignInBits),
+		C.unsigned(t.SizeInBits),
+		C.unsigned(t.AlignInBits),
 		C.unsigned(t.AddressSpace),
 		name,
 		C.size_t(len(t.Name)),
@@ -382,8 +381,8 @@ func (d *DIBuilder) CreateStructType(scope Metadata, t DIStructType) Metadata {
 		C.size_t(len(t.Name)),
 		t.File.C,
 		C.unsigned(t.Line),
-		C.uint64_t(t.SizeInBits),
-		C.uint32_t(t.AlignInBits),
+		C.unsigned(t.SizeInBits),
+		C.unsigned(t.AlignInBits),
 		C.LLVMDIFlags(t.Flags),
 		t.DerivedFrom.C,
 		elements,
@@ -425,8 +424,8 @@ func (d *DIBuilder) CreateReplaceableCompositeType(scope Metadata, t DIReplaceab
 		t.File.C,
 		C.unsigned(t.Line),
 		C.unsigned(t.RuntimeLang),
-		C.uint64_t(t.SizeInBits),
-		C.uint32_t(t.AlignInBits),
+		C.unsigned(t.SizeInBits),
+		C.unsigned(t.AlignInBits),
 		C.LLVMDIFlags(t.Flags),
 		uniqueID,
 		C.size_t(len(t.UniqueID)),
@@ -457,9 +456,9 @@ func (d *DIBuilder) CreateMemberType(scope Metadata, t DIMemberType) Metadata {
 		C.size_t(len(t.Name)),
 		t.File.C,
 		C.unsigned(t.Line),
-		C.uint64_t(t.SizeInBits),
-		C.uint32_t(t.AlignInBits),
-		C.uint64_t(t.OffsetInBits),
+		C.unsigned(t.SizeInBits),
+		C.unsigned(t.AlignInBits),
+		C.unsigned(t.OffsetInBits),
 		C.LLVMDIFlags(t.Flags),
 		t.Type.C,
 	)
@@ -489,8 +488,8 @@ func (d *DIBuilder) CreateArrayType(t DIArrayType) Metadata {
 	subscripts, length := llvmMetadataRefs(subscriptsSlice)
 	result := C.LLVMDIBuilderCreateArrayType(
 		d.ref,
-		C.uint64_t(t.SizeInBits),
-		C.uint32_t(t.AlignInBits),
+		C.unsigned(t.SizeInBits),
+		C.unsigned(t.AlignInBits),
 		t.ElementType.C,
 		subscripts,
 		length,
@@ -515,7 +514,6 @@ func (d *DIBuilder) CreateTypedef(t DITypedef) Metadata {
 		d.ref,
 		t.Type.C,
 		name,
-		C.size_t(len(t.Name)),
 		t.File.C,
 		C.unsigned(t.Line),
 		t.Context.C,
@@ -565,19 +563,15 @@ func (d *DIBuilder) CreateExpression(addr []int64) Metadata {
 
 // InsertDeclareAtEnd inserts a call to llvm.dbg.declare at the end of the
 // specified basic block for the given value and associated debug metadata.
-func (d *DIBuilder) InsertDeclareAtEnd(v Value, diVarInfo, expr Metadata, l DebugLoc, bb BasicBlock) Value {
-	loc := C.LLVMDIBuilderCreateDebugLocation(
-		d.m.Context().C, C.uint(l.Line), C.uint(l.Col), l.Scope.C, l.InlinedAt.C)
-	result := C.LLVMDIBuilderInsertDeclareAtEnd(d.ref, v.C, diVarInfo.C, expr.C, loc, bb.C)
+func (d *DIBuilder) InsertDeclareAtEnd(v Value, diVarInfo, expr Metadata, bb BasicBlock) Value {
+	result := C.LLVMDIBuilderInsertDeclareAtEnd(d.ref, v.C, diVarInfo.C, expr.C, nil, bb.C)
 	return Value{C: result}
 }
 
 // InsertValueAtEnd inserts a call to llvm.dbg.value at the end of the
 // specified basic block for the given value and associated debug metadata.
-func (d *DIBuilder) InsertValueAtEnd(v Value, diVarInfo, expr Metadata, l DebugLoc, bb BasicBlock) Value {
-	loc := C.LLVMDIBuilderCreateDebugLocation(
-		d.m.Context().C, C.uint(l.Line), C.uint(l.Col), l.Scope.C, l.InlinedAt.C)
-	result := C.LLVMDIBuilderInsertDbgValueAtEnd(d.ref, v.C, diVarInfo.C, expr.C, loc, bb.C)
+func (d *DIBuilder) InsertValueAtEnd(v Value, diVarInfo, expr Metadata, bb BasicBlock) Value {
+	result := C.LLVMDIBuilderInsertDbgValueAtEnd(d.ref, v.C, diVarInfo.C, expr.C, nil, bb.C)
 	return Value{C: result}
 }
 
@@ -590,18 +584,4 @@ func boolToCInt(v bool) C.int {
 		return 1
 	}
 	return 0
-}
-
-//-------------------------------------------------------------------------
-// llvm.Metadata
-//-------------------------------------------------------------------------
-
-func (c Context) TemporaryMDNode(mds []Metadata) (md Metadata) {
-	ptr, nvals := llvmMetadataRefs(mds)
-	md.C = C.LLVMTemporaryMDNode(c.C, ptr, C.size_t(nvals))
-	return
-}
-
-func (md Metadata) ReplaceAllUsesWith(new Metadata) {
-	C.LLVMMetadataReplaceAllUsesWith(md.C, new.C)
 }

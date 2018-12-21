@@ -11,9 +11,9 @@
 ; CHECK:       Data
 ; CHECK-SAME:  Latency=5
 ; CHECK-NEXT:  Data
-; CHECK-SAME:  Latency=0
+; CHECK-SAME:  Latency=5
 ; CHECK-NEXT:  Data
-; CHECK-SAME:  Latency=0
+; CHECK-SAME:  Latency=6
 
 define double @foo(double* %a) nounwind optsize {
 entry:

@@ -14,14 +14,12 @@
 #include "llvm/CodeGen/MachineOperand.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/Analysis/Loads.h"
-#include "llvm/Analysis/MemoryLocation.h"
 #include "llvm/CodeGen/MIRPrinter.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/MachineJumpTableInfo.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/TargetInstrInfo.h"
 #include "llvm/CodeGen/TargetRegisterInfo.h"
-#include "llvm/Config/llvm-config.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/IRPrintingPasses.h"
 #include "llvm/IR/ModuleSlotTracker.h"
@@ -461,8 +459,7 @@ static void printIRValueReference(raw_ostream &OS, const Value &V,
     printLLVMNameWithoutPrefix(OS, V.getName());
     return;
   }
-  int Slot = MST.getCurrentFunction() ? MST.getLocalSlot(&V) : -1;
-  MachineOperand::printIRSlotNumber(OS, Slot);
+  MachineOperand::printIRSlotNumber(OS, MST.getLocalSlot(&V));
 }
 
 static void printSyncScope(raw_ostream &OS, const LLVMContext &Context,
@@ -476,7 +473,7 @@ static void printSyncScope(raw_ostream &OS, const LLVMContext &Context,
       Context.getSyncScopeNames(SSNs);
 
     OS << "syncscope(\"";
-    printEscapedString(SSNs[SSID], OS);
+    PrintEscapedString(SSNs[SSID], OS);
     OS << "\") ";
     break;
   }
@@ -706,15 +703,9 @@ static void printCFI(raw_ostream &OS, const MCCFIInstruction &CFI,
 
 void MachineOperand::print(raw_ostream &OS, const TargetRegisterInfo *TRI,
                            const TargetIntrinsicInfo *IntrinsicInfo) const {
-  print(OS, LLT{}, TRI, IntrinsicInfo);
-}
-
-void MachineOperand::print(raw_ostream &OS, LLT TypeToPrint,
-                           const TargetRegisterInfo *TRI,
-                           const TargetIntrinsicInfo *IntrinsicInfo) const {
   tryToGetTargetInfo(*this, TRI, IntrinsicInfo);
   ModuleSlotTracker DummyMST(nullptr);
-  print(OS, DummyMST, TypeToPrint, /*PrintDef=*/false, /*IsStandalone=*/true,
+  print(OS, DummyMST, LLT{}, /*PrintDef=*/false, /*IsStandalone=*/true,
         /*ShouldPrintRegisterTies=*/true,
         /*TiedOperandIdx=*/0, TRI, IntrinsicInfo);
 }
@@ -744,10 +735,10 @@ void MachineOperand::print(raw_ostream &OS, ModuleSlotTracker &MST,
       OS << "undef ";
     if (isEarlyClobber())
       OS << "early-clobber ";
+    if (isDebug())
+      OS << "debug-use ";
     if (TargetRegisterInfo::isPhysicalRegister(getReg()) && isRenamable())
       OS << "renamable ";
-    // isDebug() is exactly true for register operands of a DBG_VALUE. So we
-    // simply infer it when parsing and do not need to print it.
 
     const MachineRegisterInfo *MRI = nullptr;
     if (TargetRegisterInfo::isVirtualRegister(Reg)) {
@@ -1080,11 +1071,7 @@ void MachineMemOperand::print(raw_ostream &OS, ModuleSlotTracker &MST,
   if (getFailureOrdering() != AtomicOrdering::NotAtomic)
     OS << toIRString(getFailureOrdering()) << ' ';
 
-  if (getSize() == MemoryLocation::UnknownSize)
-    OS << "unknown-size";
-  else
-    OS << getSize();
-
+  OS << getSize();
   if (const Value *Val = getValue()) {
     OS << ((isLoad() && isStore()) ? " on " : isLoad() ? " from " : " into ");
     printIRValueReference(OS, *Val, MST);

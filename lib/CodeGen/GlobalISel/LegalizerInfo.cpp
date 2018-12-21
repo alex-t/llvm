@@ -19,13 +19,11 @@
 
 #include "llvm/CodeGen/GlobalISel/LegalizerInfo.h"
 #include "llvm/ADT/SmallBitVector.h"
-#include "llvm/CodeGen/GlobalISel/GISelChangeObserver.h"
 #include "llvm/CodeGen/MachineInstr.h"
 #include "llvm/CodeGen/MachineOperand.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/TargetOpcodes.h"
 #include "llvm/MC/MCInstrDesc.h"
-#include "llvm/MC/MCInstrInfo.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/LowLevelTypeImpl.h"
@@ -44,34 +42,27 @@ cl::opt<bool> llvm::DisableGISelLegalityCheck(
     cl::Hidden);
 
 raw_ostream &LegalityQuery::print(raw_ostream &OS) const {
-  OS << Opcode << ", Tys={";
+  OS << Opcode << ", {";
   for (const auto &Type : Types) {
     OS << Type << ", ";
   }
-  OS << "}, Opcode=";
-
-  OS << Opcode << ", MMOs={";
-  for (const auto &MMODescr : MMODescrs) {
-    OS << MMODescr.SizeInBits << ", ";
-  }
   OS << "}";
-
   return OS;
 }
 
 LegalizeActionStep LegalizeRuleSet::apply(const LegalityQuery &Query) const {
-  LLVM_DEBUG(dbgs() << "Applying legalizer ruleset to: "; Query.print(dbgs());
-             dbgs() << "\n");
+  DEBUG(dbgs() << "Applying legalizer ruleset to: "; Query.print(dbgs());
+        dbgs() << "\n");
   if (Rules.empty()) {
-    LLVM_DEBUG(dbgs() << ".. fallback to legacy rules (no rules defined)\n");
+    DEBUG(dbgs() << ".. fallback to legacy rules (no rules defined)\n");
     return {LegalizeAction::UseLegacyRules, 0, LLT{}};
   }
   for (const auto &Rule : Rules) {
     if (Rule.match(Query)) {
-      LLVM_DEBUG(dbgs() << ".. match\n");
+      DEBUG(dbgs() << ".. match\n");
       std::pair<unsigned, LLT> Mutation = Rule.determineMutation(Query);
-      LLVM_DEBUG(dbgs() << ".. .. " << (unsigned)Rule.getAction() << ", "
-                        << Mutation.first << ", " << Mutation.second << "\n");
+      DEBUG(dbgs() << ".. .. " << (unsigned)Rule.getAction() << ", "
+                   << Mutation.first << ", " << Mutation.second << "\n");
       assert((Query.Types[Mutation.first] != Mutation.second ||
               Rule.getAction() == Lower ||
               Rule.getAction() == MoreElements ||
@@ -79,32 +70,10 @@ LegalizeActionStep LegalizeRuleSet::apply(const LegalityQuery &Query) const {
              "Simple loop detected");
       return {Rule.getAction(), Mutation.first, Mutation.second};
     } else
-      LLVM_DEBUG(dbgs() << ".. no match\n");
+      DEBUG(dbgs() << ".. no match\n");
   }
-  LLVM_DEBUG(dbgs() << ".. unsupported\n");
+  DEBUG(dbgs() << ".. unsupported\n");
   return {LegalizeAction::Unsupported, 0, LLT{}};
-}
-
-bool LegalizeRuleSet::verifyTypeIdxsCoverage(unsigned NumTypeIdxs) const {
-#ifndef NDEBUG
-  if (Rules.empty()) {
-    LLVM_DEBUG(
-        dbgs() << ".. type index coverage check SKIPPED: no rules defined\n");
-    return true;
-  }
-  const int64_t FirstUncovered = TypeIdxsCovered.find_first_unset();
-  if (FirstUncovered < 0) {
-    LLVM_DEBUG(dbgs() << ".. type index coverage check SKIPPED:"
-                         " user-defined predicate detected\n");
-    return true;
-  }
-  const bool AllCovered = (FirstUncovered >= NumTypeIdxs);
-  LLVM_DEBUG(dbgs() << ".. the first uncovered type index: " << FirstUncovered
-                    << ", " << (AllCovered ? "OK" : "FAIL") << "\n");
-  return AllCovered;
-#else
-  return true;
-#endif
 }
 
 LegalizerInfo::LegalizerInfo() : TablesInitialized(false) {
@@ -220,7 +189,7 @@ void LegalizerInfo::computeTables() {
             Opcode, TypeIdx, ElementSize,
             moreToWiderTypesAndLessToWidest(NumElementsActions));
       }
-      llvm::sort(ElementSizesSeen);
+      llvm::sort(ElementSizesSeen.begin(), ElementSizesSeen.end());
       SizeChangeStrategy VectorElementSizeChangeStrategy =
           &unsupportedForDifferentSizes;
       if (TypeIdx < VectorElementSizeChangeStrategies[OpcodeIdx].size() &&
@@ -271,11 +240,11 @@ unsigned LegalizerInfo::getOpcodeIdxForOpcode(unsigned Opcode) const {
 unsigned LegalizerInfo::getActionDefinitionsIdx(unsigned Opcode) const {
   unsigned OpcodeIdx = getOpcodeIdxForOpcode(Opcode);
   if (unsigned Alias = RulesForOpcode[OpcodeIdx].getAlias()) {
-    LLVM_DEBUG(dbgs() << ".. opcode " << Opcode << " is aliased to " << Alias
-                      << "\n");
+    DEBUG(dbgs() << ".. opcode " << Opcode << " is aliased to " << Alias
+                 << "\n");
     OpcodeIdx = getOpcodeIdxForOpcode(Alias);
-    LLVM_DEBUG(dbgs() << ".. opcode " << Alias << " is aliased to "
-                      << RulesForOpcode[OpcodeIdx].getAlias() << "\n");
+    DEBUG(dbgs() << ".. opcode " << Alias << " is aliased to "
+                 << RulesForOpcode[OpcodeIdx].getAlias() << "\n");
     assert(RulesForOpcode[OpcodeIdx].getAlias() == 0 && "Cannot chain aliases");
   }
 
@@ -299,7 +268,8 @@ LegalizeRuleSet &LegalizerInfo::getActionDefinitionsBuilder(
     std::initializer_list<unsigned> Opcodes) {
   unsigned Representative = *Opcodes.begin();
 
-  assert(!empty(Opcodes) && Opcodes.begin() + 1 != Opcodes.end() &&
+  assert(Opcodes.begin() != Opcodes.end() &&
+         Opcodes.begin() + 1 != Opcodes.end() &&
          "Initializer list must have at least two opcodes");
 
   for (auto I = Opcodes.begin() + 1, E = Opcodes.end(); I != E; ++I)
@@ -328,14 +298,13 @@ LegalizerInfo::getAction(const LegalityQuery &Query) const {
   for (unsigned i = 0; i < Query.Types.size(); ++i) {
     auto Action = getAspectAction({Query.Opcode, i, Query.Types[i]});
     if (Action.first != Legal) {
-      LLVM_DEBUG(dbgs() << ".. (legacy) Type " << i
-                        << " Action=" << (unsigned)Action.first << ", "
-                        << Action.second << "\n");
+      DEBUG(dbgs() << ".. (legacy) Type " << i << " Action="
+                   << (unsigned)Action.first << ", " << Action.second << "\n");
       return {Action.first, i, Action.second};
     } else
-      LLVM_DEBUG(dbgs() << ".. (legacy) Type " << i << " Legal\n");
+      DEBUG(dbgs() << ".. (legacy) Type " << i << " Legal\n");
   }
-  LLVM_DEBUG(dbgs() << ".. (legacy) Legal\n");
+  DEBUG(dbgs() << ".. (legacy) Legal\n");
   return {Legal, 0, LLT{}};
 }
 
@@ -361,13 +330,7 @@ LegalizerInfo::getAction(const MachineInstr &MI,
     LLT Ty = getTypeFromTypeIdx(MI, MRI, i, TypeIdx);
     Types.push_back(Ty);
   }
-
-  SmallVector<LegalityQuery::MemDesc, 2> MemDescrs;
-  for (const auto &MMO : MI.memoperands())
-    MemDescrs.push_back(
-        {MMO->getSize() /* in bytes */ * 8, MMO->getOrdering()});
-
-  return getAction({MI.getOpcode(), Types, MemDescrs});
+  return getAction({MI.getOpcode(), Types});
 }
 
 bool LegalizerInfo::isLegal(const MachineInstr &MI,
@@ -376,8 +339,7 @@ bool LegalizerInfo::isLegal(const MachineInstr &MI,
 }
 
 bool LegalizerInfo::legalizeCustom(MachineInstr &MI, MachineRegisterInfo &MRI,
-                                   MachineIRBuilder &MIRBuilder,
-                                   GISelChangeObserver &Observer) const {
+                                   MachineIRBuilder &MIRBuilder) const {
   return false;
 }
 
@@ -539,38 +501,6 @@ LegalizerInfo::findVectorLegalAction(const InstrAspect &Aspect) const {
   return {NumElementsAndAction.second,
           LLT::vector(NumElementsAndAction.first,
                       IntermediateType.getScalarSizeInBits())};
-}
-
-/// \pre Type indices of every opcode form a dense set starting from 0.
-void LegalizerInfo::verify(const MCInstrInfo &MII) const {
-#ifndef NDEBUG
-  std::vector<unsigned> FailedOpcodes;
-  for (unsigned Opcode = FirstOp; Opcode <= LastOp; ++Opcode) {
-    const MCInstrDesc &MCID = MII.get(Opcode);
-    const unsigned NumTypeIdxs = std::accumulate(
-        MCID.opInfo_begin(), MCID.opInfo_end(), 0U,
-        [](unsigned Acc, const MCOperandInfo &OpInfo) {
-          return OpInfo.isGenericType()
-                     ? std::max(OpInfo.getGenericTypeIndex() + 1U, Acc)
-                     : Acc;
-        });
-    LLVM_DEBUG(dbgs() << MII.getName(Opcode) << " (opcode " << Opcode
-                      << "): " << NumTypeIdxs << " type ind"
-                      << (NumTypeIdxs == 1 ? "ex" : "ices") << "\n");
-    const LegalizeRuleSet &RuleSet = getActionDefinitions(Opcode);
-    if (!RuleSet.verifyTypeIdxsCoverage(NumTypeIdxs))
-      FailedOpcodes.push_back(Opcode);
-  }
-  if (!FailedOpcodes.empty()) {
-    errs() << "The following opcodes have ill-defined legalization rules:";
-    for (unsigned Opcode : FailedOpcodes)
-      errs() << " " << MII.getName(Opcode);
-    errs() << "\n";
-
-    report_fatal_error("ill-defined LegalizerInfo"
-                       ", try -debug-only=legalizer-info for details");
-  }
-#endif
 }
 
 #ifndef NDEBUG

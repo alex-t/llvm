@@ -8,7 +8,6 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/MC/MCInst.h"
-#include "llvm/Config/llvm-config.h"
 #include "llvm/MC/MCExpr.h"
 #include "llvm/MC/MCInstPrinter.h"
 #include "llvm/Support/Casting.h"
@@ -72,17 +71,11 @@ void MCInst::print(raw_ostream &OS) const {
 
 void MCInst::dump_pretty(raw_ostream &OS, const MCInstPrinter *Printer,
                          StringRef Separator) const {
-  StringRef InstName = Printer ? Printer->getOpcodeName(getOpcode()) : "";
-  dump_pretty(OS, InstName, Separator);
-}
-
-void MCInst::dump_pretty(raw_ostream &OS, StringRef Name,
-                         StringRef Separator) const {
   OS << "<MCInst #" << getOpcode();
 
-  // Show the instruction opcode name if we have it.
-  if (!Name.empty())
-    OS << ' ' << Name;
+  // Show the instruction opcode name if we have access to a printer.
+  if (Printer)
+    OS << ' ' << Printer->getOpcodeName(getOpcode());
 
   for (unsigned i = 0, e = getNumOperands(); i != e; ++i) {
     OS << Separator;

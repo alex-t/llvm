@@ -49,7 +49,7 @@ class X86MachineFunctionInfo : public MachineFunctionInfo {
   /// ReturnAddrIndex - FrameIndex for return slot.
   int ReturnAddrIndex = 0;
 
-  /// FrameIndex for return slot.
+  /// \brief FrameIndex for return slot.
   int FrameAddrIndex = 0;
 
   /// TailCallReturnAddrDelta - The number of bytes by which return address

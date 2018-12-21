@@ -98,8 +98,8 @@ struct AArch64LoadStoreOpt : public MachineFunctionPass {
   const TargetRegisterInfo *TRI;
   const AArch64Subtarget *Subtarget;
 
-  // Track which register units have been modified and used.
-  LiveRegUnits ModifiedRegUnits, UsedRegUnits;
+  // Track which registers have been modified and used.
+  BitVector ModifiedRegs, UsedRegs;
 
   void getAnalysisUsage(AnalysisUsage &AU) const override {
     AU.addRequired<AAResultsWrapperPass>();
@@ -702,17 +702,17 @@ AArch64LoadStoreOpt::mergeNarrowZeroStores(MachineBasicBlock::iterator I,
             .addReg(isNarrowStore(Opc) ? AArch64::WZR : AArch64::XZR)
             .add(BaseRegOp)
             .addImm(OffsetImm)
-            .cloneMergedMemRefs({&*I, &*MergeMI})
+            .setMemRefs(I->mergeMemRefsWith(*MergeMI))
             .setMIFlags(I->mergeFlagsWith(*MergeMI));
   (void)MIB;
 
-  LLVM_DEBUG(dbgs() << "Creating wider store. Replacing instructions:\n    ");
-  LLVM_DEBUG(I->print(dbgs()));
-  LLVM_DEBUG(dbgs() << "    ");
-  LLVM_DEBUG(MergeMI->print(dbgs()));
-  LLVM_DEBUG(dbgs() << "  with instruction:\n    ");
-  LLVM_DEBUG(((MachineInstr *)MIB)->print(dbgs()));
-  LLVM_DEBUG(dbgs() << "\n");
+  DEBUG(dbgs() << "Creating wider store. Replacing instructions:\n    ");
+  DEBUG(I->print(dbgs()));
+  DEBUG(dbgs() << "    ");
+  DEBUG(MergeMI->print(dbgs()));
+  DEBUG(dbgs() << "  with instruction:\n    ");
+  DEBUG(((MachineInstr *)MIB)->print(dbgs()));
+  DEBUG(dbgs() << "\n");
 
   // Erase the old instructions.
   I->eraseFromParent();
@@ -819,17 +819,16 @@ AArch64LoadStoreOpt::mergePairedInsns(MachineBasicBlock::iterator I,
             .add(RegOp1)
             .add(BaseRegOp)
             .addImm(OffsetImm)
-            .cloneMergedMemRefs({&*I, &*Paired})
+            .setMemRefs(I->mergeMemRefsWith(*Paired))
             .setMIFlags(I->mergeFlagsWith(*Paired));
 
   (void)MIB;
 
-  LLVM_DEBUG(
-      dbgs() << "Creating pair load/store. Replacing instructions:\n    ");
-  LLVM_DEBUG(I->print(dbgs()));
-  LLVM_DEBUG(dbgs() << "    ");
-  LLVM_DEBUG(Paired->print(dbgs()));
-  LLVM_DEBUG(dbgs() << "  with instruction:\n    ");
+  DEBUG(dbgs() << "Creating pair load/store. Replacing instructions:\n    ");
+  DEBUG(I->print(dbgs()));
+  DEBUG(dbgs() << "    ");
+  DEBUG(Paired->print(dbgs()));
+  DEBUG(dbgs() << "  with instruction:\n    ");
   if (SExtIdx != -1) {
     // Generate the sign extension for the proper result of the ldp.
     // I.e., with X1, that would be:
@@ -843,8 +842,8 @@ AArch64LoadStoreOpt::mergePairedInsns(MachineBasicBlock::iterator I,
     unsigned DstRegW = TRI->getSubReg(DstRegX, AArch64::sub_32);
     // Update the result of LDP to use the W instead of the X variant.
     DstMO.setReg(DstRegW);
-    LLVM_DEBUG(((MachineInstr *)MIB)->print(dbgs()));
-    LLVM_DEBUG(dbgs() << "\n");
+    DEBUG(((MachineInstr *)MIB)->print(dbgs()));
+    DEBUG(dbgs() << "\n");
     // Make the machine verifier happy by providing a definition for
     // the X register.
     // Insert this definition right after the generated LDP, i.e., before
@@ -861,12 +860,12 @@ AArch64LoadStoreOpt::mergePairedInsns(MachineBasicBlock::iterator I,
             .addImm(0)
             .addImm(31);
     (void)MIBSXTW;
-    LLVM_DEBUG(dbgs() << "  Extend operand:\n    ");
-    LLVM_DEBUG(((MachineInstr *)MIBSXTW)->print(dbgs()));
+    DEBUG(dbgs() << "  Extend operand:\n    ");
+    DEBUG(((MachineInstr *)MIBSXTW)->print(dbgs()));
   } else {
-    LLVM_DEBUG(((MachineInstr *)MIB)->print(dbgs()));
+    DEBUG(((MachineInstr *)MIB)->print(dbgs()));
   }
-  LLVM_DEBUG(dbgs() << "\n");
+  DEBUG(dbgs() << "\n");
 
   // Erase the old instructions.
   I->eraseFromParent();
@@ -904,9 +903,9 @@ AArch64LoadStoreOpt::promoteLoadFromStore(MachineBasicBlock::iterator LoadI,
           break;
         }
       }
-      LLVM_DEBUG(dbgs() << "Remove load instruction:\n    ");
-      LLVM_DEBUG(LoadI->print(dbgs()));
-      LLVM_DEBUG(dbgs() << "\n");
+      DEBUG(dbgs() << "Remove load instruction:\n    ");
+      DEBUG(LoadI->print(dbgs()));
+      DEBUG(dbgs() << "\n");
       LoadI->eraseFromParent();
       return NextI;
     }
@@ -980,15 +979,15 @@ AArch64LoadStoreOpt::promoteLoadFromStore(MachineBasicBlock::iterator LoadI,
       break;
     }
 
-  LLVM_DEBUG(dbgs() << "Promoting load by replacing :\n    ");
-  LLVM_DEBUG(StoreI->print(dbgs()));
-  LLVM_DEBUG(dbgs() << "    ");
-  LLVM_DEBUG(LoadI->print(dbgs()));
-  LLVM_DEBUG(dbgs() << "  with instructions:\n    ");
-  LLVM_DEBUG(StoreI->print(dbgs()));
-  LLVM_DEBUG(dbgs() << "    ");
-  LLVM_DEBUG((BitExtMI)->print(dbgs()));
-  LLVM_DEBUG(dbgs() << "\n");
+  DEBUG(dbgs() << "Promoting load by replacing :\n    ");
+  DEBUG(StoreI->print(dbgs()));
+  DEBUG(dbgs() << "    ");
+  DEBUG(LoadI->print(dbgs()));
+  DEBUG(dbgs() << "  with instructions:\n    ");
+  DEBUG(StoreI->print(dbgs()));
+  DEBUG(dbgs() << "    ");
+  DEBUG((BitExtMI)->print(dbgs()));
+  DEBUG(dbgs() << "\n");
 
   // Erase the old instructions.
   LoadI->eraseFromParent();
@@ -1052,10 +1051,10 @@ bool AArch64LoadStoreOpt::findMatchingStore(
   if (MBBI == B)
     return false;
 
-  // Track which register units have been modified and used between the first
-  // insn and the second insn.
-  ModifiedRegUnits.clear();
-  UsedRegUnits.clear();
+  // Track which registers have been modified and used between the first insn
+  // and the second insn.
+  ModifiedRegs.reset();
+  UsedRegs.reset();
 
   unsigned Count = 0;
   do {
@@ -1074,7 +1073,7 @@ bool AArch64LoadStoreOpt::findMatchingStore(
     if (MI.mayStore() && isMatchingStore(LoadMI, MI) &&
         BaseReg == getLdStBaseOp(MI).getReg() &&
         isLdOffsetInRangeOfSt(LoadMI, MI, TII) &&
-        ModifiedRegUnits.available(getLdStRegOp(MI).getReg())) {
+        !ModifiedRegs[getLdStRegOp(MI).getReg()]) {
       StoreI = MBBI;
       return true;
     }
@@ -1082,12 +1081,12 @@ bool AArch64LoadStoreOpt::findMatchingStore(
     if (MI.isCall())
       return false;
 
-    // Update modified / uses register units.
-    LiveRegUnits::accumulateUsedDefed(MI, ModifiedRegUnits, UsedRegUnits, TRI);
+    // Update modified / uses register lists.
+    TII->trackRegDefsUses(MI, ModifiedRegs, UsedRegs, TRI);
 
     // Otherwise, if the base register is modified, we have no match, so
     // return early.
-    if (!ModifiedRegUnits.available(BaseReg))
+    if (ModifiedRegs[BaseReg])
       return false;
 
     // If we encounter a store aliased with the load, return early.
@@ -1165,10 +1164,10 @@ AArch64LoadStoreOpt::findMatchingInsn(MachineBasicBlock::iterator I,
   int OffsetStride = IsUnscaled ? getMemScale(FirstMI) : 1;
   bool IsPromotableZeroStore = isPromotableZeroStoreInst(FirstMI);
 
-  // Track which register units have been modified and used between the first
-  // insn (inclusive) and the second insn.
-  ModifiedRegUnits.clear();
-  UsedRegUnits.clear();
+  // Track which registers have been modified and used between the first insn
+  // (inclusive) and the second insn.
+  ModifiedRegs.reset();
+  UsedRegs.reset();
 
   // Remember any instructions that read/write memory between FirstMI and MI.
   SmallVector<MachineInstr *, 4> MemInsns;
@@ -1203,8 +1202,7 @@ AArch64LoadStoreOpt::findMatchingInsn(MachineBasicBlock::iterator I,
           // If the unscaled offset isn't a multiple of the MemSize, we can't
           // pair the operations together: bail and keep looking.
           if (MIOffset % MemSize) {
-            LiveRegUnits::accumulateUsedDefed(MI, ModifiedRegUnits,
-                                              UsedRegUnits, TRI);
+            TII->trackRegDefsUses(MI, ModifiedRegs, UsedRegs, TRI);
             MemInsns.push_back(&MI);
             continue;
           }
@@ -1224,8 +1222,7 @@ AArch64LoadStoreOpt::findMatchingInsn(MachineBasicBlock::iterator I,
           // the stored value is the same (i.e., WZR).
           if ((!IsUnscaled && alignTo(MinOffset, 2) != MinOffset) ||
               (IsPromotableZeroStore && Reg != getLdStRegOp(MI).getReg())) {
-            LiveRegUnits::accumulateUsedDefed(MI, ModifiedRegUnits,
-                                              UsedRegUnits, TRI);
+            TII->trackRegDefsUses(MI, ModifiedRegs, UsedRegs, TRI);
             MemInsns.push_back(&MI);
             continue;
           }
@@ -1235,8 +1232,7 @@ AArch64LoadStoreOpt::findMatchingInsn(MachineBasicBlock::iterator I,
           // immediate offset of merging these instructions is out of range for
           // a pairwise instruction, bail and keep looking.
           if (!inBoundsForPair(IsUnscaled, MinOffset, OffsetStride)) {
-            LiveRegUnits::accumulateUsedDefed(MI, ModifiedRegUnits,
-                                              UsedRegUnits, TRI);
+            TII->trackRegDefsUses(MI, ModifiedRegs, UsedRegs, TRI);
             MemInsns.push_back(&MI);
             continue;
           }
@@ -1244,8 +1240,7 @@ AArch64LoadStoreOpt::findMatchingInsn(MachineBasicBlock::iterator I,
           // can't express the offset of the unscaled input, bail and keep
           // looking.
           if (IsUnscaled && (alignTo(MinOffset, OffsetStride) != MinOffset)) {
-            LiveRegUnits::accumulateUsedDefed(MI, ModifiedRegUnits,
-                                              UsedRegUnits, TRI);
+            TII->trackRegDefsUses(MI, ModifiedRegs, UsedRegs, TRI);
             MemInsns.push_back(&MI);
             continue;
           }
@@ -1254,8 +1249,7 @@ AArch64LoadStoreOpt::findMatchingInsn(MachineBasicBlock::iterator I,
         // and keep looking. A load-pair instruction with both destination
         // registers the same is UNPREDICTABLE and will result in an exception.
         if (MayLoad && Reg == getLdStRegOp(MI).getReg()) {
-          LiveRegUnits::accumulateUsedDefed(MI, ModifiedRegUnits, UsedRegUnits,
-                                            TRI);
+          TII->trackRegDefsUses(MI, ModifiedRegs, UsedRegs, TRI);
           MemInsns.push_back(&MI);
           continue;
         }
@@ -1264,9 +1258,8 @@ AArch64LoadStoreOpt::findMatchingInsn(MachineBasicBlock::iterator I,
         // the two instructions and none of the instructions between the second
         // and first alias with the second, we can combine the second into the
         // first.
-        if (ModifiedRegUnits.available(getLdStRegOp(MI).getReg()) &&
-            !(MI.mayLoad() &&
-              !UsedRegUnits.available(getLdStRegOp(MI).getReg())) &&
+        if (!ModifiedRegs[getLdStRegOp(MI).getReg()] &&
+            !(MI.mayLoad() && UsedRegs[getLdStRegOp(MI).getReg()]) &&
             !mayAlias(MI, MemInsns, AA)) {
           Flags.setMergeForward(false);
           return MBBI;
@@ -1276,9 +1269,8 @@ AArch64LoadStoreOpt::findMatchingInsn(MachineBasicBlock::iterator I,
         // between the two instructions and none of the instructions between the
         // first and the second alias with the first, we can combine the first
         // into the second.
-        if (ModifiedRegUnits.available(getLdStRegOp(FirstMI).getReg()) &&
-            !(MayLoad &&
-              !UsedRegUnits.available(getLdStRegOp(FirstMI).getReg())) &&
+        if (!ModifiedRegs[getLdStRegOp(FirstMI).getReg()] &&
+            !(MayLoad && UsedRegs[getLdStRegOp(FirstMI).getReg()]) &&
             !mayAlias(FirstMI, MemInsns, AA)) {
           Flags.setMergeForward(true);
           return MBBI;
@@ -1293,12 +1285,12 @@ AArch64LoadStoreOpt::findMatchingInsn(MachineBasicBlock::iterator I,
     if (MI.isCall())
       return E;
 
-    // Update modified / uses register units.
-    LiveRegUnits::accumulateUsedDefed(MI, ModifiedRegUnits, UsedRegUnits, TRI);
+    // Update modified / uses register lists.
+    TII->trackRegDefsUses(MI, ModifiedRegs, UsedRegs, TRI);
 
     // Otherwise, if the base register is modified, we have no match, so
     // return early.
-    if (!ModifiedRegUnits.available(BaseReg))
+    if (ModifiedRegs[BaseReg])
       return E;
 
     // Update list of instructions that read/write memory.
@@ -1338,7 +1330,7 @@ AArch64LoadStoreOpt::mergeUpdateInsn(MachineBasicBlock::iterator I,
               .add(getLdStRegOp(*I))
               .add(getLdStBaseOp(*I))
               .addImm(Value)
-              .setMemRefs(I->memoperands())
+              .setMemRefs(I->memoperands_begin(), I->memoperands_end())
               .setMIFlags(I->mergeFlagsWith(*Update));
   } else {
     // Paired instruction.
@@ -1349,25 +1341,25 @@ AArch64LoadStoreOpt::mergeUpdateInsn(MachineBasicBlock::iterator I,
               .add(getLdStRegOp(*I, 1))
               .add(getLdStBaseOp(*I))
               .addImm(Value / Scale)
-              .setMemRefs(I->memoperands())
+              .setMemRefs(I->memoperands_begin(), I->memoperands_end())
               .setMIFlags(I->mergeFlagsWith(*Update));
   }
   (void)MIB;
 
   if (IsPreIdx) {
     ++NumPreFolded;
-    LLVM_DEBUG(dbgs() << "Creating pre-indexed load/store.");
+    DEBUG(dbgs() << "Creating pre-indexed load/store.");
   } else {
     ++NumPostFolded;
-    LLVM_DEBUG(dbgs() << "Creating post-indexed load/store.");
+    DEBUG(dbgs() << "Creating post-indexed load/store.");
   }
-  LLVM_DEBUG(dbgs() << "    Replacing instructions:\n    ");
-  LLVM_DEBUG(I->print(dbgs()));
-  LLVM_DEBUG(dbgs() << "    ");
-  LLVM_DEBUG(Update->print(dbgs()));
-  LLVM_DEBUG(dbgs() << "  with instruction:\n    ");
-  LLVM_DEBUG(((MachineInstr *)MIB)->print(dbgs()));
-  LLVM_DEBUG(dbgs() << "\n");
+  DEBUG(dbgs() << "    Replacing instructions:\n    ");
+  DEBUG(I->print(dbgs()));
+  DEBUG(dbgs() << "    ");
+  DEBUG(Update->print(dbgs()));
+  DEBUG(dbgs() << "  with instruction:\n    ");
+  DEBUG(((MachineInstr *)MIB)->print(dbgs()));
+  DEBUG(dbgs() << "\n");
 
   // Erase the old instructions for the block.
   I->eraseFromParent();
@@ -1454,10 +1446,10 @@ MachineBasicBlock::iterator AArch64LoadStoreOpt::findMatchingUpdateInsnForward(
       return E;
   }
 
-  // Track which register units have been modified and used between the first
-  // insn (inclusive) and the second insn.
-  ModifiedRegUnits.clear();
-  UsedRegUnits.clear();
+  // Track which registers have been modified and used between the first insn
+  // (inclusive) and the second insn.
+  ModifiedRegs.reset();
+  UsedRegs.reset();
   ++MBBI;
   for (unsigned Count = 0; MBBI != E && Count < Limit; ++MBBI) {
     MachineInstr &MI = *MBBI;
@@ -1472,12 +1464,11 @@ MachineBasicBlock::iterator AArch64LoadStoreOpt::findMatchingUpdateInsnForward(
       return MBBI;
 
     // Update the status of what the instruction clobbered and used.
-    LiveRegUnits::accumulateUsedDefed(MI, ModifiedRegUnits, UsedRegUnits, TRI);
+    TII->trackRegDefsUses(MI, ModifiedRegs, UsedRegs, TRI);
 
     // Otherwise, if the base register is used or modified, we have no match, so
     // return early.
-    if (!ModifiedRegUnits.available(BaseReg) ||
-        !UsedRegUnits.available(BaseReg))
+    if (ModifiedRegs[BaseReg] || UsedRegs[BaseReg])
       return E;
   }
   return E;
@@ -1506,10 +1497,10 @@ MachineBasicBlock::iterator AArch64LoadStoreOpt::findMatchingUpdateInsnBackward(
       return E;
   }
 
-  // Track which register units have been modified and used between the first
-  // insn (inclusive) and the second insn.
-  ModifiedRegUnits.clear();
-  UsedRegUnits.clear();
+  // Track which registers have been modified and used between the first insn
+  // (inclusive) and the second insn.
+  ModifiedRegs.reset();
+  UsedRegs.reset();
   unsigned Count = 0;
   do {
     --MBBI;
@@ -1525,12 +1516,11 @@ MachineBasicBlock::iterator AArch64LoadStoreOpt::findMatchingUpdateInsnBackward(
       return MBBI;
 
     // Update the status of what the instruction clobbered and used.
-    LiveRegUnits::accumulateUsedDefed(MI, ModifiedRegUnits, UsedRegUnits, TRI);
+    TII->trackRegDefsUses(MI, ModifiedRegs, UsedRegs, TRI);
 
     // Otherwise, if the base register is used or modified, we have no match, so
     // return early.
-    if (!ModifiedRegUnits.available(BaseReg) ||
-        !UsedRegUnits.available(BaseReg))
+    if (ModifiedRegs[BaseReg] || UsedRegs[BaseReg])
       return E;
   } while (MBBI != B && Count < Limit);
   return E;
@@ -1757,11 +1747,11 @@ bool AArch64LoadStoreOpt::runOnMachineFunction(MachineFunction &Fn) {
   TRI = Subtarget->getRegisterInfo();
   AA = &getAnalysis<AAResultsWrapperPass>().getAAResults();
 
-  // Resize the modified and used register unit trackers.  We do this once
-  // per function and then clear the register units each time we optimize a load
-  // or store.
-  ModifiedRegUnits.init(*TRI);
-  UsedRegUnits.init(*TRI);
+  // Resize the modified and used register bitfield trackers.  We do this once
+  // per function and then clear the bitfield each time we optimize a load or
+  // store.
+  ModifiedRegs.resize(TRI->getNumRegs());
+  UsedRegs.resize(TRI->getNumRegs());
 
   bool Modified = false;
   bool enableNarrowZeroStOpt = !Subtarget->requiresStrictAlign();

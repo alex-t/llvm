@@ -24,8 +24,12 @@ entry:
 ; ARMT2: movwgt [[R]], #123
 
 ; THUMB1-LABEL: t1:
-; THUMB1: cmp     r0, #1
-; THUMB1: bgt     .LBB0_2
+; THUMB1: mov     r1, r0
+; THUMB1: movs    r2, #255
+; THUMB1: adds    r2, #102
+; THUMB1: movs    r0, #123
+; THUMB1: cmp     r1, #1
+; THUMB1: bgt
 
 ; THUMB2-LABEL: t1:
 ; THUMB2: movw [[R:r[0-1]]], #357
@@ -71,7 +75,8 @@ entry:
 ; ARMT2: lsr r0, r0, #5
 
 ; THUMB1-LABEL: t3:
-; THUMB1: rsbs r1, r0, #0
+; THUMB1: movs r1, #0
+; THUMB1: subs r1, r1, r0
 ; THUMB1: adcs r0, r1
 
 ; THUMB2-LABEL: t3:
@@ -115,7 +120,8 @@ entry:
 
 ; THUMB1-LABEL: t5:
 ; THUMB1-NOT: bne
-; THUMB1: rsbs r0, r1, #0
+; THUMB1: movs r0, #0
+; THUMB1: subs r0, r0, r1
 ; THUMB1: adcs r0, r1
 
 ; THUMB2-LABEL: t5:
@@ -138,7 +144,7 @@ entry:
 
 ; THUMB1-LABEL: t6:
 ; THUMB1: cmp r{{[0-9]+}}, #0
-; THUMB1: beq
+; THUMB1: bne
 
 ; THUMB2-LABEL: t6:
 ; THUMB2-NOT: mov
@@ -194,7 +200,8 @@ entry:
 ; THUMB1: bl t7
 ; THUMB1: mov r1, r0
 ; THUMB1: subs r2, r4, #5
-; THUMB1: rsbs r0, r2, #0
+; THUMB1: movs r0, #0
+; THUMB1: subs r0, r0, r2
 ; THUMB1: adcs r0, r2
 
 ; THUMB2-LABEL: t8:
@@ -299,7 +306,8 @@ entry:
 ; ARMT2: lsr r0, r0, #5
 
 ; THUMB1-LABEL: t10:
-; THUMB1: rsbs r0, r1, #0
+; THUMB1: movs r0, #0
+; THUMB1: subs r0, r0, r1
 ; THUMB1: adcs r0, r1
 
 ; THUMB2-LABEL: t10:

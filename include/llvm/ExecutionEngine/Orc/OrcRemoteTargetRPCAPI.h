@@ -87,7 +87,8 @@ class SerializationTraits<ChannelT, JITSymbolFlags> {
 public:
 
   static Error serialize(ChannelT &C, const JITSymbolFlags &Flags) {
-    return serializeSeq(C, Flags.getRawFlagsValue(), Flags.getTargetFlags());
+    return serializeSeq(C, static_cast<JITSymbolFlags::UnderlyingType>(Flags),
+                        Flags.getTargetFlags());
   }
 
   static Error deserialize(ChannelT &C, JITSymbolFlags &Flags) {

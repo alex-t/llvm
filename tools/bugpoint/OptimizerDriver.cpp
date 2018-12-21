@@ -16,7 +16,6 @@
 //===----------------------------------------------------------------------===//
 
 #include "BugDriver.h"
-#include "ToolRunner.h"
 #include "llvm/Bitcode/BitcodeWriter.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/Module.h"
@@ -167,8 +166,7 @@ bool BugDriver::runPasses(Module &Program,
 
   std::string tool = OptCmd;
   if (OptCmd.empty()) {
-    if (ErrorOr<std::string> Path =
-            FindProgramByName("opt", getToolName(), &OutputPrefix))
+    if (ErrorOr<std::string> Path = sys::findProgramByName("opt"))
       tool = *Path;
     else
       errs() << Path.getError().message() << "\n";
@@ -196,20 +194,20 @@ bool BugDriver::runPasses(Module &Program,
   }
 
   // setup the child process' arguments
-  SmallVector<StringRef, 8> Args;
+  SmallVector<const char *, 8> Args;
   if (UseValgrind) {
     Args.push_back("valgrind");
     Args.push_back("--error-exitcode=1");
     Args.push_back("-q");
-    Args.push_back(tool);
+    Args.push_back(tool.c_str());
   } else
-    Args.push_back(tool);
+    Args.push_back(tool.c_str());
 
   for (unsigned i = 0, e = OptArgs.size(); i != e; ++i)
-    Args.push_back(OptArgs[i]);
+    Args.push_back(OptArgs[i].c_str());
   Args.push_back("-disable-symbolication");
   Args.push_back("-o");
-  Args.push_back(OutputFilename);
+  Args.push_back(OutputFilename.c_str());
   std::vector<std::string> pass_args;
   for (unsigned i = 0, e = PluginLoader::getNumPlugins(); i != e; ++i) {
     pass_args.push_back(std::string("-load"));
@@ -226,11 +224,12 @@ bool BugDriver::runPasses(Module &Program,
   Args.push_back(Temp->TmpName.c_str());
   for (unsigned i = 0; i < NumExtraArgs; ++i)
     Args.push_back(*ExtraArgs);
+  Args.push_back(nullptr);
 
-  LLVM_DEBUG(errs() << "\nAbout to run:\t";
-             for (unsigned i = 0, e = Args.size() - 1; i != e; ++i) errs()
-             << " " << Args[i];
-             errs() << "\n";);
+  DEBUG(errs() << "\nAbout to run:\t";
+        for (unsigned i = 0, e = Args.size() - 1; i != e; ++i) errs()
+        << " " << Args[i];
+        errs() << "\n";);
 
   Optional<StringRef> Redirects[3] = {None, None, None};
   // Redirect stdout and stderr to nowhere if SilencePasses is given.
@@ -240,8 +239,8 @@ bool BugDriver::runPasses(Module &Program,
   }
 
   std::string ErrMsg;
-  int result = sys::ExecuteAndWait(Prog, Args, None, Redirects, Timeout,
-                                   MemoryLimit, &ErrMsg);
+  int result = sys::ExecuteAndWait(Prog, Args.data(), nullptr, Redirects,
+                                   Timeout, MemoryLimit, &ErrMsg);
 
   // If we are supposed to delete the bitcode file or if the passes crashed,
   // remove it now.  This may fail if the file was never created, but that's ok.

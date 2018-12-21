@@ -48,7 +48,7 @@
 #include "llvm/ADT/Statistic.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/Analysis/GlobalsModRef.h"
-#include "llvm/Transforms/Utils/Local.h"
+#include "llvm/Analysis/Utils/Local.h"
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/CFG.h"
 #include "llvm/IR/Constants.h"
@@ -239,7 +239,7 @@ public:
     SmallVector<std::pair<BasicBlock *, Value *>, 4> Ops;
     for (unsigned I = 0, E = PN->getNumIncomingValues(); I != E; ++I)
       Ops.push_back({PN->getIncomingBlock(I), PN->getIncomingValue(I)});
-    llvm::sort(Ops);
+    llvm::sort(Ops.begin(), Ops.end());
     for (auto &P : Ops) {
       Blocks.push_back(P.first);
       Values.push_back(P.second);
@@ -258,14 +258,14 @@ public:
   /// Create a PHI from an array of incoming values and incoming blocks.
   template <typename VArray, typename BArray>
   ModelledPHI(const VArray &V, const BArray &B) {
-    llvm::copy(V, std::back_inserter(Values));
-    llvm::copy(B, std::back_inserter(Blocks));
+    std::copy(V.begin(), V.end(), std::back_inserter(Values));
+    std::copy(B.begin(), B.end(), std::back_inserter(Blocks));
   }
 
   /// Create a PHI from [I[OpNum] for I in Insts].
   template <typename BArray>
   ModelledPHI(ArrayRef<Instruction *> Insts, unsigned OpNum, const BArray &B) {
-    llvm::copy(B, std::back_inserter(Blocks));
+    std::copy(B.begin(), B.end(), std::back_inserter(Blocks));
     for (auto *I : Insts)
       Values.push_back(I->getOperand(OpNum));
   }
@@ -561,14 +561,13 @@ public:
   GVNSink() = default;
 
   bool run(Function &F) {
-    LLVM_DEBUG(dbgs() << "GVNSink: running on function @" << F.getName()
-                      << "\n");
+    DEBUG(dbgs() << "GVNSink: running on function @" << F.getName() << "\n");
 
     unsigned NumSunk = 0;
     ReversePostOrderTraversal<Function*> RPOT(&F);
     for (auto *N : RPOT)
       NumSunk += sinkBB(N);
-
+    
     return NumSunk > 0;
   }
 
@@ -630,15 +629,15 @@ Optional<SinkingInstructionCandidate> GVNSink::analyzeInstructionForSinking(
   LockstepReverseIterator &LRI, unsigned &InstNum, unsigned &MemoryInstNum,
   ModelledPHISet &NeededPHIs, SmallPtrSetImpl<Value *> &PHIContents) {
   auto Insts = *LRI;
-  LLVM_DEBUG(dbgs() << " -- Analyzing instruction set: [\n"; for (auto *I
-                                                                  : Insts) {
+  DEBUG(dbgs() << " -- Analyzing instruction set: [\n"; for (auto *I
+                                                             : Insts) {
     I->dump();
   } dbgs() << " ]\n";);
 
   DenseMap<uint32_t, unsigned> VNums;
   for (auto *I : Insts) {
     uint32_t N = VN.lookupOrAdd(I);
-    LLVM_DEBUG(dbgs() << " VN=" << Twine::utohexstr(N) << " for" << *I << "\n");
+    DEBUG(dbgs() << " VN=" << Twine::utohexstr(N) << " for" << *I << "\n");
     if (N == ~0U)
       return None;
     VNums[N]++;
@@ -750,8 +749,8 @@ Optional<SinkingInstructionCandidate> GVNSink::analyzeInstructionForSinking(
 }
 
 unsigned GVNSink::sinkBB(BasicBlock *BBEnd) {
-  LLVM_DEBUG(dbgs() << "GVNSink: running on basic block ";
-             BBEnd->printAsOperand(dbgs()); dbgs() << "\n");
+  DEBUG(dbgs() << "GVNSink: running on basic block ";
+        BBEnd->printAsOperand(dbgs()); dbgs() << "\n");
   SmallVector<BasicBlock *, 4> Preds;
   for (auto *B : predecessors(BBEnd)) {
     auto *T = B->getTerminator();
@@ -762,7 +761,7 @@ unsigned GVNSink::sinkBB(BasicBlock *BBEnd) {
   }
   if (Preds.size() < 2)
     return 0;
-  llvm::sort(Preds);
+  llvm::sort(Preds.begin(), Preds.end());
 
   unsigned NumOrigPreds = Preds.size();
   // We can only sink instructions through unconditional branches.
@@ -795,23 +794,23 @@ unsigned GVNSink::sinkBB(BasicBlock *BBEnd) {
       Candidates.begin(), Candidates.end(),
       [](const SinkingInstructionCandidate &A,
          const SinkingInstructionCandidate &B) { return A > B; });
-  LLVM_DEBUG(dbgs() << " -- Sinking candidates:\n"; for (auto &C
-                                                         : Candidates) dbgs()
-                                                    << "  " << C << "\n";);
+  DEBUG(dbgs() << " -- Sinking candidates:\n"; for (auto &C
+                                                    : Candidates) dbgs()
+                                               << "  " << C << "\n";);
 
   // Pick the top candidate, as long it is positive!
   if (Candidates.empty() || Candidates.front().Cost <= 0)
     return 0;
   auto C = Candidates.front();
 
-  LLVM_DEBUG(dbgs() << " -- Sinking: " << C << "\n");
+  DEBUG(dbgs() << " -- Sinking: " << C << "\n");
   BasicBlock *InsertBB = BBEnd;
   if (C.Blocks.size() < NumOrigPreds) {
-    LLVM_DEBUG(dbgs() << " -- Splitting edge to ";
-               BBEnd->printAsOperand(dbgs()); dbgs() << "\n");
+    DEBUG(dbgs() << " -- Splitting edge to "; BBEnd->printAsOperand(dbgs());
+          dbgs() << "\n");
     InsertBB = SplitBlockPredecessors(BBEnd, C.Blocks, ".gvnsink.split");
     if (!InsertBB) {
-      LLVM_DEBUG(dbgs() << " -- FAILED to split edge!\n");
+      DEBUG(dbgs() << " -- FAILED to split edge!\n");
       // Edge couldn't be split.
       return 0;
     }
@@ -859,7 +858,7 @@ void GVNSink::sinkLastInstruction(ArrayRef<BasicBlock *> Blocks,
   // Update metadata and IR flags.
   for (auto *I : Insts)
     if (I != I0) {
-      combineMetadataForCSE(I0, I, true);
+      combineMetadataForCSE(I0, I);
       I0->andIRFlags(I);
     }
 

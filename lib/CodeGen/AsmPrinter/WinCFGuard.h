@@ -29,23 +29,23 @@ public:
 
   void setSymbolSize(const MCSymbol *Sym, uint64_t Size) override {}
 
-  /// Emit the Control Flow Guard function ID table
+  /// \brief Emit the Control Flow Guard function ID table
   void endModule() override;
 
-  /// Gather pre-function debug information.
+  /// \brief Gather pre-function debug information.
   /// Every beginFunction(MF) call should be followed by an endFunction(MF)
   /// call.
   void beginFunction(const MachineFunction *MF) override {}
 
-  /// Gather post-function debug information.
+  /// \brief Gather post-function debug information.
   /// Please note that some AsmPrinter implementations may not call
   /// beginFunction at all.
   void endFunction(const MachineFunction *MF) override {}
 
-  /// Process beginning of an instruction.
+  /// \brief Process beginning of an instruction.
   void beginInstruction(const MachineInstr *MI) override {}
 
-  /// Process end of an instruction.
+  /// \brief Process end of an instruction.
   void endInstruction() override {}
 };
 

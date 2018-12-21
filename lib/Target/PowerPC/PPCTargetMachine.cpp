@@ -24,7 +24,6 @@
 #include "llvm/Analysis/TargetTransformInfo.h"
 #include "llvm/CodeGen/Passes.h"
 #include "llvm/CodeGen/TargetPassConfig.h"
-#include "llvm/CodeGen/MachineScheduler.h"
 #include "llvm/IR/Attributes.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/Function.h"
@@ -181,9 +180,6 @@ static std::unique_ptr<TargetLoweringObjectFile> createTLOF(const Triple &TT) {
 
 static PPCTargetMachine::PPCABI computeTargetABI(const Triple &TT,
                                                  const TargetOptions &Options) {
-  if (TT.isOSDarwin())
-    report_fatal_error("Darwin is no longer supported for PowerPC");
-  
   if (Options.MCOptions.getABIName().startswith("elfv1"))
     return PPCTargetMachine::PPC_ABI_ELFv1;
   else if (Options.MCOptions.getABIName().startswith("elfv2"))
@@ -214,24 +210,19 @@ static Reloc::Model getEffectiveRelocModel(const Triple &TT,
   if (TT.isOSDarwin())
     return Reloc::DynamicNoPIC;
 
-  // Big Endian PPC is PIC by default.
-  if (TT.getArch() == Triple::ppc64)
+  // Non-darwin 64-bit platforms are PIC by default.
+  if (TT.getArch() == Triple::ppc64 || TT.getArch() == Triple::ppc64le)
     return Reloc::PIC_;
 
-  // Rest are static by default.
+  // 32-bit is static by default.
   return Reloc::Static;
 }
 
-static CodeModel::Model getEffectivePPCCodeModel(const Triple &TT,
-                                                 Optional<CodeModel::Model> CM,
-                                                 bool JIT) {
-  if (CM) {
-    if (*CM == CodeModel::Tiny)
-      report_fatal_error("Target does not support the tiny CodeModel");
-    if (*CM == CodeModel::Kernel)
-      report_fatal_error("Target does not support the kernel CodeModel");
+static CodeModel::Model getEffectiveCodeModel(const Triple &TT,
+                                              Optional<CodeModel::Model> CM,
+                                              bool JIT) {
+  if (CM)
     return *CM;
-  }
   if (!TT.isOSDarwin() && !JIT &&
       (TT.getArch() == Triple::ppc64 || TT.getArch() == Triple::ppc64le))
     return CodeModel::Medium;
@@ -251,7 +242,7 @@ PPCTargetMachine::PPCTargetMachine(const Target &T, const Triple &TT,
     : LLVMTargetMachine(T, getDataLayoutString(TT), TT, CPU,
                         computeFSAdditions(FS, OL, TT), Options,
                         getEffectiveRelocModel(TT, RM),
-                        getEffectivePPCCodeModel(TT, CM, JIT), OL),
+                        getEffectiveCodeModel(TT, CM, JIT), OL),
       TLOF(createTLOF(getTargetTriple())),
       TargetABI(computeTargetABI(TT, Options)) {
   initAsmInfo();
@@ -312,12 +303,7 @@ namespace {
 class PPCPassConfig : public TargetPassConfig {
 public:
   PPCPassConfig(PPCTargetMachine &TM, PassManagerBase &PM)
-    : TargetPassConfig(TM, PM) {
-    // At any optimization level above -O0 we use the Machine Scheduler and not
-    // the default Post RA List Scheduler.
-    if (TM.getOptLevel() != CodeGenOpt::None)
-      substitutePass(&PostRASchedulerID, &PostMachineSchedulerID);
-  }
+    : TargetPassConfig(TM, PM) {}
 
   PPCTargetMachine &getPPCTargetMachine() const {
     return getTM<PPCTargetMachine>();

@@ -19,12 +19,9 @@
 #include "RuntimeDyldMachO.h"
 #include "llvm/Object/COFF.h"
 #include "llvm/Object/ELFObjectFile.h"
-#include "llvm/Support/MSVCErrorWorkarounds.h"
 #include "llvm/Support/ManagedStatic.h"
 #include "llvm/Support/MathExtras.h"
 #include "llvm/Support/MutexGuard.h"
-
-#include <future>
 
 using namespace llvm;
 using namespace llvm::object;
@@ -125,8 +122,10 @@ void RuntimeDyldImpl::resolveRelocations() {
   MutexGuard locked(lock);
 
   // Print out the sections prior to relocation.
-  LLVM_DEBUG(for (int i = 0, e = Sections.size(); i != e; ++i)
-                 dumpSectionMemory(Sections[i], "before relocations"););
+  DEBUG(
+    for (int i = 0, e = Sections.size(); i != e; ++i)
+      dumpSectionMemory(Sections[i], "before relocations");
+  );
 
   // First, resolve relocations associated with external symbols.
   if (auto Err = resolveExternalSymbols()) {
@@ -134,14 +133,6 @@ void RuntimeDyldImpl::resolveRelocations() {
     ErrorStr = toString(std::move(Err));
   }
 
-  resolveLocalRelocations();
-
-  // Print out sections after relocation.
-  LLVM_DEBUG(for (int i = 0, e = Sections.size(); i != e; ++i)
-                 dumpSectionMemory(Sections[i], "after relocations"););
-}
-
-void RuntimeDyldImpl::resolveLocalRelocations() {
   // Iterate over all outstanding relocations
   for (auto it = Relocations.begin(), e = Relocations.end(); it != e; ++it) {
     // The Section here (Sections[i]) refers to the section in which the
@@ -149,11 +140,18 @@ void RuntimeDyldImpl::resolveLocalRelocations() {
     // entry provides the section to which the relocation will be applied.
     int Idx = it->first;
     uint64_t Addr = Sections[Idx].getLoadAddress();
-    LLVM_DEBUG(dbgs() << "Resolving relocations Section #" << Idx << "\t"
-                      << format("%p", (uintptr_t)Addr) << "\n");
+    DEBUG(dbgs() << "Resolving relocations Section #" << Idx << "\t"
+                 << format("%p", (uintptr_t)Addr) << "\n");
     resolveRelocationList(it->second, Addr);
   }
   Relocations.clear();
+
+  // Print out sections after relocation.
+  DEBUG(
+    for (int i = 0, e = Sections.size(); i != e; ++i)
+      dumpSectionMemory(Sections[i], "after relocations");
+  );
+
 }
 
 void RuntimeDyldImpl::mapSectionAddress(const void *LocalAddress,
@@ -211,7 +209,7 @@ RuntimeDyldImpl::loadObjectImpl(const object::ObjectFile &Obj) {
 
   // First, collect all weak and common symbols. We need to know if stronger
   // definitions occur elsewhere.
-  JITSymbolResolver::LookupSet ResponsibilitySet;
+  JITSymbolResolver::LookupFlagsResult SymbolFlags;
   {
     JITSymbolResolver::LookupSet Symbols;
     for (auto &Sym : Obj.symbols()) {
@@ -225,14 +223,14 @@ RuntimeDyldImpl::loadObjectImpl(const object::ObjectFile &Obj) {
       }
     }
 
-    if (auto ResultOrErr = Resolver.getResponsibilitySet(Symbols))
-      ResponsibilitySet = std::move(*ResultOrErr);
+    if (auto FlagsResultOrErr = Resolver.lookupFlags(Symbols))
+      SymbolFlags = std::move(*FlagsResultOrErr);
     else
-      return ResultOrErr.takeError();
+      return FlagsResultOrErr.takeError();
   }
 
   // Parse symbols
-  LLVM_DEBUG(dbgs() << "Parse symbols:\n");
+  DEBUG(dbgs() << "Parse symbols:\n");
   for (symbol_iterator I = Obj.symbol_begin(), E = Obj.symbol_end(); I != E;
        ++I) {
     uint32_t Flags = I->getFlags();
@@ -256,36 +254,37 @@ RuntimeDyldImpl::loadObjectImpl(const object::ObjectFile &Obj) {
       return NameOrErr.takeError();
 
     // Compute JIT symbol flags.
-    auto JITSymFlags = getJITSymbolFlags(*I);
-    if (!JITSymFlags)
-      return JITSymFlags.takeError();
+    JITSymbolFlags JITSymFlags = getJITSymbolFlags(*I);
 
     // If this is a weak definition, check to see if there's a strong one.
     // If there is, skip this symbol (we won't be providing it: the strong
     // definition will). If there's no strong definition, make this definition
     // strong.
-    if (JITSymFlags->isWeak() || JITSymFlags->isCommon()) {
+    if (JITSymFlags.isWeak() || JITSymFlags.isCommon()) {
       // First check whether there's already a definition in this instance.
+      // FIXME: Override existing weak definitions with strong ones.
       if (GlobalSymbolTable.count(Name))
         continue;
 
-      // If we're not responsible for this symbol, skip it.
-      if (!ResponsibilitySet.count(Name))
+      // Then check whether we found flags for an existing symbol during the
+      // flags lookup earlier.
+      auto FlagsI = SymbolFlags.find(Name);
+      if (FlagsI == SymbolFlags.end() ||
+          (JITSymFlags.isWeak() && !FlagsI->second.isStrong()) ||
+          (JITSymFlags.isCommon() && FlagsI->second.isCommon())) {
+        if (JITSymFlags.isWeak())
+          JITSymFlags &= ~JITSymbolFlags::Weak;
+        if (JITSymFlags.isCommon()) {
+          JITSymFlags &= ~JITSymbolFlags::Common;
+          uint32_t Align = I->getAlignment();
+          uint64_t Size = I->getCommonSize();
+          if (!CommonAlign)
+            CommonAlign = Align;
+          CommonSize += alignTo(CommonSize, Align) + Size;
+          CommonSymbolsToAllocate.push_back(*I);
+        }
+      } else
         continue;
-
-      // Otherwise update the flags on the symbol to make this definition
-      // strong.
-      if (JITSymFlags->isWeak())
-        *JITSymFlags &= ~JITSymbolFlags::Weak;
-      if (JITSymFlags->isCommon()) {
-        *JITSymFlags &= ~JITSymbolFlags::Common;
-        uint32_t Align = I->getAlignment();
-        uint64_t Size = I->getCommonSize();
-        if (!CommonAlign)
-          CommonAlign = Align;
-        CommonSize = alignTo(CommonSize, Align) + Size;
-        CommonSymbolsToAllocate.push_back(*I);
-      }
     }
 
     if (Flags & SymbolRef::SF_Absolute &&
@@ -298,11 +297,11 @@ RuntimeDyldImpl::loadObjectImpl(const object::ObjectFile &Obj) {
 
       unsigned SectionID = AbsoluteSymbolSection;
 
-      LLVM_DEBUG(dbgs() << "\tType: " << SymType << " (absolute) Name: " << Name
-                        << " SID: " << SectionID
-                        << " Offset: " << format("%p", (uintptr_t)Addr)
-                        << " flags: " << Flags << "\n");
-      GlobalSymbolTable[Name] = SymbolTableEntry(SectionID, Addr, *JITSymFlags);
+      DEBUG(dbgs() << "\tType: " << SymType << " (absolute) Name: " << Name
+                   << " SID: " << SectionID
+                   << " Offset: " << format("%p", (uintptr_t)Addr)
+                   << " flags: " << Flags << "\n");
+      GlobalSymbolTable[Name] = SymbolTableEntry(SectionID, Addr, JITSymFlags);
     } else if (SymType == object::SymbolRef::ST_Function ||
                SymType == object::SymbolRef::ST_Data ||
                SymType == object::SymbolRef::ST_Unknown ||
@@ -330,12 +329,12 @@ RuntimeDyldImpl::loadObjectImpl(const object::ObjectFile &Obj) {
       else
         return SectionIDOrErr.takeError();
 
-      LLVM_DEBUG(dbgs() << "\tType: " << SymType << " Name: " << Name
-                        << " SID: " << SectionID
-                        << " Offset: " << format("%p", (uintptr_t)SectOffset)
-                        << " flags: " << Flags << "\n");
+      DEBUG(dbgs() << "\tType: " << SymType << " Name: " << Name
+                   << " SID: " << SectionID
+                   << " Offset: " << format("%p", (uintptr_t)SectOffset)
+                   << " flags: " << Flags << "\n");
       GlobalSymbolTable[Name] =
-          SymbolTableEntry(SectionID, SectOffset, *JITSymFlags);
+          SymbolTableEntry(SectionID, SectOffset, JITSymFlags);
     }
   }
 
@@ -345,7 +344,7 @@ RuntimeDyldImpl::loadObjectImpl(const object::ObjectFile &Obj) {
     return std::move(Err);
 
   // Parse and process relocations
-  LLVM_DEBUG(dbgs() << "Parse relocations:\n");
+  DEBUG(dbgs() << "Parse relocations:\n");
   for (section_iterator SI = Obj.section_begin(), SE = Obj.section_end();
        SI != SE; ++SI) {
     StubMap Stubs;
@@ -368,7 +367,7 @@ RuntimeDyldImpl::loadObjectImpl(const object::ObjectFile &Obj) {
     else
       return SectionIDOrErr.takeError();
 
-    LLVM_DEBUG(dbgs() << "\tSectionID: " << SectionID << "\n");
+    DEBUG(dbgs() << "\tSectionID: " << SectionID << "\n");
 
     for (; I != E;)
       if (auto IOrErr = processRelocationRef(SectionID, I, Obj, LocalSections, Stubs))
@@ -648,8 +647,7 @@ void RuntimeDyldImpl::writeBytesUnaligned(uint64_t Value, uint8_t *Dst,
   }
 }
 
-Expected<JITSymbolFlags>
-RuntimeDyldImpl::getJITSymbolFlags(const SymbolRef &SR) {
+JITSymbolFlags RuntimeDyldImpl::getJITSymbolFlags(const BasicSymbolRef &SR) {
   return JITSymbolFlags::fromObjectSymbol(SR);
 }
 
@@ -671,9 +669,8 @@ Error RuntimeDyldImpl::emitCommonSymbols(const ObjectFile &Obj,
       SectionEntry("<common symbols>", Addr, CommonSize, CommonSize, 0));
   memset(Addr, 0, CommonSize);
 
-  LLVM_DEBUG(dbgs() << "emitCommonSection SectionID: " << SectionID
-                    << " new addr: " << format("%p", Addr)
-                    << " DataSize: " << CommonSize << "\n");
+  DEBUG(dbgs() << "emitCommonSection SectionID: " << SectionID << " new addr: "
+               << format("%p", Addr) << " DataSize: " << CommonSize << "\n");
 
   // Assign the address of each symbol
   for (auto &Sym : SymbolsToAllocate) {
@@ -690,15 +687,11 @@ Error RuntimeDyldImpl::emitCommonSymbols(const ObjectFile &Obj,
       Addr += AlignOffset;
       Offset += AlignOffset;
     }
-    auto JITSymFlags = getJITSymbolFlags(Sym);
-
-    if (!JITSymFlags)
-      return JITSymFlags.takeError();
-
-    LLVM_DEBUG(dbgs() << "Allocating common symbol " << Name << " address "
-                      << format("%p", Addr) << "\n");
+    JITSymbolFlags JITSymFlags = getJITSymbolFlags(Sym);
+    DEBUG(dbgs() << "Allocating common symbol " << Name << " address "
+                 << format("%p", Addr) << "\n");
     GlobalSymbolTable[Name] =
-        SymbolTableEntry(SectionID, Offset, std::move(*JITSymFlags));
+      SymbolTableEntry(SectionID, Offset, JITSymFlags);
     Offset += Size;
     Addr += Size;
   }
@@ -792,22 +785,21 @@ RuntimeDyldImpl::emitSection(const ObjectFile &Obj,
         DataSize &= ~(getStubAlignment() - 1);
     }
 
-    LLVM_DEBUG(dbgs() << "emitSection SectionID: " << SectionID << " Name: "
-                      << Name << " obj addr: " << format("%p", pData)
-                      << " new addr: " << format("%p", Addr) << " DataSize: "
-                      << DataSize << " StubBufSize: " << StubBufSize
-                      << " Allocate: " << Allocate << "\n");
+    DEBUG(dbgs() << "emitSection SectionID: " << SectionID << " Name: " << Name
+                 << " obj addr: " << format("%p", pData)
+                 << " new addr: " << format("%p", Addr)
+                 << " DataSize: " << DataSize << " StubBufSize: " << StubBufSize
+                 << " Allocate: " << Allocate << "\n");
   } else {
     // Even if we didn't load the section, we need to record an entry for it
     // to handle later processing (and by 'handle' I mean don't do anything
     // with these sections).
     Allocate = 0;
     Addr = nullptr;
-    LLVM_DEBUG(
-        dbgs() << "emitSection SectionID: " << SectionID << " Name: " << Name
-               << " obj addr: " << format("%p", data.data()) << " new addr: 0"
-               << " DataSize: " << DataSize << " StubBufSize: " << StubBufSize
-               << " Allocate: " << Allocate << "\n");
+    DEBUG(dbgs() << "emitSection SectionID: " << SectionID << " Name: " << Name
+                 << " obj addr: " << format("%p", data.data()) << " new addr: 0"
+                 << " DataSize: " << DataSize << " StubBufSize: " << StubBufSize
+                 << " Allocate: " << Allocate << "\n");
   }
 
   Sections.push_back(
@@ -984,11 +976,10 @@ void RuntimeDyldImpl::reassignSectionAddress(unsigned SectionID,
   // Addr is a uint64_t because we can't assume the pointer width
   // of the target is the same as that of the host. Just use a generic
   // "big enough" type.
-  LLVM_DEBUG(
-      dbgs() << "Reassigning address for section " << SectionID << " ("
-             << Sections[SectionID].getName() << "): "
-             << format("0x%016" PRIx64, Sections[SectionID].getLoadAddress())
-             << " -> " << format("0x%016" PRIx64, Addr) << "\n");
+  DEBUG(dbgs() << "Reassigning address for section " << SectionID << " ("
+               << Sections[SectionID].getName() << "): "
+               << format("0x%016" PRIx64, Sections[SectionID].getLoadAddress())
+               << " -> " << format("0x%016" PRIx64, Addr) << "\n");
   Sections[SectionID].setLoadAddress(Addr);
 }
 
@@ -1003,8 +994,39 @@ void RuntimeDyldImpl::resolveRelocationList(const RelocationList &Relocs,
   }
 }
 
-void RuntimeDyldImpl::applyExternalSymbolRelocations(
-    const StringMap<JITEvaluatedSymbol> ExternalSymbolMap) {
+Error RuntimeDyldImpl::resolveExternalSymbols() {
+  StringMap<JITEvaluatedSymbol> ExternalSymbolMap;
+
+  // Resolution can trigger emission of more symbols, so iterate until
+  // we've resolved *everything*.
+  {
+    JITSymbolResolver::LookupSet ResolvedSymbols;
+
+    while (true) {
+      JITSymbolResolver::LookupSet NewSymbols;
+
+      for (auto &RelocKV : ExternalSymbolRelocations) {
+        StringRef Name = RelocKV.first();
+        if (!Name.empty() && !GlobalSymbolTable.count(Name) &&
+            !ResolvedSymbols.count(Name))
+          NewSymbols.insert(Name);
+      }
+
+      if (NewSymbols.empty())
+        break;
+
+      auto NewResolverResults = Resolver.lookup(NewSymbols);
+      if (!NewResolverResults)
+        return NewResolverResults.takeError();
+
+      for (auto &RRKV : *NewResolverResults) {
+        assert(!ResolvedSymbols.count(RRKV.first) && "Redundant resolution?");
+        ExternalSymbolMap.insert(RRKV);
+        ResolvedSymbols.insert(RRKV.first);
+      }
+    }
+  }
+
   while (!ExternalSymbolRelocations.empty()) {
 
     StringMap<RelocationList>::iterator i = ExternalSymbolRelocations.begin();
@@ -1012,8 +1034,8 @@ void RuntimeDyldImpl::applyExternalSymbolRelocations(
     StringRef Name = i->first();
     if (Name.size() == 0) {
       // This is an absolute symbol, use an address of zero.
-      LLVM_DEBUG(dbgs() << "Resolving absolute relocations."
-                        << "\n");
+      DEBUG(dbgs() << "Resolving absolute relocations."
+                   << "\n");
       RelocationList &Relocs = i->second;
       resolveRelocationList(Relocs, 0);
     } else {
@@ -1055,8 +1077,8 @@ void RuntimeDyldImpl::applyExternalSymbolRelocations(
         // if the target symbol is Thumb.
         Addr = modifyAddressBasedOnFlags(Addr, Flags);
 
-        LLVM_DEBUG(dbgs() << "Resolving relocations Name: " << Name << "\t"
-                          << format("0x%lx", Addr) << "\n");
+        DEBUG(dbgs() << "Resolving relocations Name: " << Name << "\t"
+                     << format("0x%lx", Addr) << "\n");
         // This list may have been updated when we called getSymbolAddress, so
         // don't change this code to get the list earlier.
         RelocationList &Relocs = i->second;
@@ -1066,112 +1088,8 @@ void RuntimeDyldImpl::applyExternalSymbolRelocations(
 
     ExternalSymbolRelocations.erase(i);
   }
-}
-
-Error RuntimeDyldImpl::resolveExternalSymbols() {
-  StringMap<JITEvaluatedSymbol> ExternalSymbolMap;
-
-  // Resolution can trigger emission of more symbols, so iterate until
-  // we've resolved *everything*.
-  {
-    JITSymbolResolver::LookupSet ResolvedSymbols;
-
-    while (true) {
-      JITSymbolResolver::LookupSet NewSymbols;
-
-      for (auto &RelocKV : ExternalSymbolRelocations) {
-        StringRef Name = RelocKV.first();
-        if (!Name.empty() && !GlobalSymbolTable.count(Name) &&
-            !ResolvedSymbols.count(Name))
-          NewSymbols.insert(Name);
-      }
-
-      if (NewSymbols.empty())
-        break;
-
-#ifdef _MSC_VER
-      using ExpectedLookupResult =
-          MSVCPExpected<JITSymbolResolver::LookupResult>;
-#else
-      using ExpectedLookupResult = Expected<JITSymbolResolver::LookupResult>;
-#endif
-
-      auto NewSymbolsP = std::make_shared<std::promise<ExpectedLookupResult>>();
-      auto NewSymbolsF = NewSymbolsP->get_future();
-      Resolver.lookup(NewSymbols,
-                      [=](Expected<JITSymbolResolver::LookupResult> Result) {
-                        NewSymbolsP->set_value(std::move(Result));
-                      });
-
-      auto NewResolverResults = NewSymbolsF.get();
-
-      if (!NewResolverResults)
-        return NewResolverResults.takeError();
-
-      assert(NewResolverResults->size() == NewSymbols.size() &&
-             "Should have errored on unresolved symbols");
-
-      for (auto &RRKV : *NewResolverResults) {
-        assert(!ResolvedSymbols.count(RRKV.first) && "Redundant resolution?");
-        ExternalSymbolMap.insert(RRKV);
-        ResolvedSymbols.insert(RRKV.first);
-      }
-    }
-  }
-
-  applyExternalSymbolRelocations(ExternalSymbolMap);
 
   return Error::success();
-}
-
-void RuntimeDyldImpl::finalizeAsync(
-    std::unique_ptr<RuntimeDyldImpl> This, std::function<void(Error)> OnEmitted,
-    std::unique_ptr<MemoryBuffer> UnderlyingBuffer) {
-
-  // FIXME: Move-capture OnRelocsApplied and UnderlyingBuffer once we have
-  // c++14.
-  auto SharedUnderlyingBuffer =
-      std::shared_ptr<MemoryBuffer>(std::move(UnderlyingBuffer));
-  auto SharedThis = std::shared_ptr<RuntimeDyldImpl>(std::move(This));
-  auto PostResolveContinuation =
-      [SharedThis, OnEmitted, SharedUnderlyingBuffer](
-          Expected<JITSymbolResolver::LookupResult> Result) {
-        if (!Result) {
-          OnEmitted(Result.takeError());
-          return;
-        }
-
-        /// Copy the result into a StringMap, where the keys are held by value.
-        StringMap<JITEvaluatedSymbol> Resolved;
-        for (auto &KV : *Result)
-          Resolved[KV.first] = KV.second;
-
-        SharedThis->applyExternalSymbolRelocations(Resolved);
-        SharedThis->resolveLocalRelocations();
-        SharedThis->registerEHFrames();
-        std::string ErrMsg;
-        if (SharedThis->MemMgr.finalizeMemory(&ErrMsg))
-          OnEmitted(make_error<StringError>(std::move(ErrMsg),
-                                            inconvertibleErrorCode()));
-        else
-          OnEmitted(Error::success());
-      };
-
-  JITSymbolResolver::LookupSet Symbols;
-
-  for (auto &RelocKV : SharedThis->ExternalSymbolRelocations) {
-    StringRef Name = RelocKV.first();
-    assert(!Name.empty() && "Symbol has no name?");
-    assert(!SharedThis->GlobalSymbolTable.count(Name) &&
-           "Name already processed. RuntimeDyld instances can not be re-used "
-           "when finalizing with finalizeAsync.");
-    Symbols.insert(Name);
-  }
-
-  if (!Symbols.empty()) {
-    SharedThis->Resolver.lookup(Symbols, PostResolveContinuation);
-  } else
-    PostResolveContinuation(std::map<StringRef, JITEvaluatedSymbol>());
 }
 
 //===----------------------------------------------------------------------===//
@@ -1320,36 +1238,6 @@ void RuntimeDyld::registerEHFrames() {
 void RuntimeDyld::deregisterEHFrames() {
   if (Dyld)
     Dyld->deregisterEHFrames();
-}
-// FIXME: Kill this with fire once we have a new JIT linker: this is only here
-// so that we can re-use RuntimeDyld's implementation without twisting the
-// interface any further for ORC's purposes.
-void jitLinkForORC(object::ObjectFile &Obj,
-                   std::unique_ptr<MemoryBuffer> UnderlyingBuffer,
-                   RuntimeDyld::MemoryManager &MemMgr,
-                   JITSymbolResolver &Resolver, bool ProcessAllSections,
-                   std::function<Error(
-                       std::unique_ptr<RuntimeDyld::LoadedObjectInfo> LoadedObj,
-                       std::map<StringRef, JITEvaluatedSymbol>)>
-                       OnLoaded,
-                   std::function<void(Error)> OnEmitted) {
-
-  RuntimeDyld RTDyld(MemMgr, Resolver);
-  RTDyld.setProcessAllSections(ProcessAllSections);
-
-  auto Info = RTDyld.loadObject(Obj);
-
-  if (RTDyld.hasError()) {
-    OnEmitted(make_error<StringError>(RTDyld.getErrorString(),
-                                      inconvertibleErrorCode()));
-    return;
-  }
-
-  if (auto Err = OnLoaded(std::move(Info), RTDyld.getSymbolTable()))
-    OnEmitted(std::move(Err));
-
-  RuntimeDyldImpl::finalizeAsync(std::move(RTDyld.Dyld), std::move(OnEmitted),
-                                 std::move(UnderlyingBuffer));
 }
 
 } // end namespace llvm

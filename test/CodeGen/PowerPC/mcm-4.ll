@@ -33,7 +33,8 @@ entry:
 ; MEDIUM-VSX: .quad 4562098671269285104
 ; MEDIUM-VSX-LABEL: test_double_const:
 ; MEDIUM-VSX: addis [[REG1:[0-9]+]], 2, [[VAR]]@toc@ha
-; MEDIUM-VSX: lfd {{[0-9]+}}, [[VAR]]@toc@l([[REG1]])
+; MEDIUM-VSX: addi [[REG2:[0-9]+]], [[REG1]], [[VAR]]@toc@l
+; MEDIUM-VSX: lxsdx {{[0-9]+}}, 0, [[REG2]]
 
 ; LARGE: [[VAR:[a-z0-9A-Z_.]+]]:
 ; LARGE: .quad 4562098671269285104
@@ -47,7 +48,7 @@ entry:
 ; LARGE-VSX-LABEL: test_double_const:
 ; LARGE-VSX: addis [[REG1:[0-9]+]], 2, [[VAR2:[a-z0-9A-Z_.]+]]@toc@ha
 ; LARGE-VSX: ld [[REG2:[0-9]+]], [[VAR2]]@toc@l([[REG1]])
-; LARGE-VSX: lfdx {{[0-9]+}}, 0, [[REG2]]
+; LARGE-VSX: lxsdx {{[0-9]+}}, 0, [[REG2]]
 
 ; MEDIUM-P9: [[VAR:[a-z0-9A-Z_.]+]]:
 ; MEDIUM-P9: .quad 4562098671269285104

@@ -166,6 +166,7 @@ bool TypeMapTy::areTypesIsomorphic(Type *DstTy, Type *SrcTy) {
   if (PointerType *PT = dyn_cast<PointerType>(DstTy)) {
     if (PT->getAddressSpace() != cast<PointerType>(SrcTy)->getAddressSpace())
       return false;
+
   } else if (FunctionType *FT = dyn_cast<FunctionType>(DstTy)) {
     if (FT->isVarArg() != cast<FunctionType>(SrcTy)->isVarArg())
       return false;
@@ -240,27 +241,18 @@ Type *TypeMapTy::get(Type *Ty, SmallPtrSet<StructType *, 8> &Visited) {
   // These are types that LLVM itself will unique.
   bool IsUniqued = !isa<StructType>(Ty) || cast<StructType>(Ty)->isLiteral();
 
-  if (!IsUniqued) {
-    StructType *STy = cast<StructType>(Ty);
-    // This is actually a type from the destination module, this can be reached
-    // when this type is loaded in another module, added to DstStructTypesSet,
-    // and then we reach the same type in another module where it has not been
-    // added to MappedTypes. (PR37684)
-    if (STy->getContext().isODRUniquingDebugTypes() && !STy->isOpaque() &&
-        DstStructTypesSet.hasType(STy))
-      return *Entry = STy;
-
 #ifndef NDEBUG
+  if (!IsUniqued) {
     for (auto &Pair : MappedTypes) {
       assert(!(Pair.first != Ty && Pair.second == Ty) &&
              "mapping to a source type");
     }
+  }
 #endif
 
-    if (!Visited.insert(STy).second) {
-      StructType *DTy = StructType::create(Ty->getContext());
-      return *Entry = DTy;
-    }
+  if (!IsUniqued && !Visited.insert(cast<StructType>(Ty)).second) {
+    StructType *DTy = StructType::create(Ty->getContext());
+    return *Entry = DTy;
   }
 
   // If this is not a recursive type, then just map all of the elements and
@@ -947,7 +939,7 @@ Expected<Constant *> IRLinker::linkGlobalValueProto(GlobalValue *SGV,
     if (DoneLinkingBodies)
       return nullptr;
 
-    NewGV = copyGlobalValueProto(SGV, ShouldLink || ForAlias);
+    NewGV = copyGlobalValueProto(SGV, ShouldLink);
     if (ShouldLink || !ForAlias)
       forceRenaming(NewGV, SGV->getName());
   }
@@ -978,14 +970,11 @@ Expected<Constant *> IRLinker::linkGlobalValueProto(GlobalValue *SGV,
   // containing a GV from the source module, in which case SGV will be
   // the same as DGV and NewGV, and TypeMap.get() will assert since it
   // assumes it is being invoked on a type in the source module.
-  if (DGV && NewGV != SGV) {
-    C = ConstantExpr::getPointerBitCastOrAddrSpaceCast(
-      NewGV, TypeMap.get(SGV->getType()));
-  }
+  if (DGV && NewGV != SGV)
+    C = ConstantExpr::getBitCast(NewGV, TypeMap.get(SGV->getType()));
 
   if (DGV && NewGV != DGV) {
-    DGV->replaceAllUsesWith(
-      ConstantExpr::getPointerBitCastOrAddrSpaceCast(NewGV, DGV->getType()));
+    DGV->replaceAllUsesWith(ConstantExpr::getBitCast(NewGV, DGV->getType()));
     DGV->eraseFromParent();
   }
 
@@ -1062,15 +1051,10 @@ void IRLinker::prepareCompileUnitsForImport() {
     ValueMap.MD()[CU->getRawEnumTypes()].reset(nullptr);
     ValueMap.MD()[CU->getRawMacros()].reset(nullptr);
     ValueMap.MD()[CU->getRawRetainedTypes()].reset(nullptr);
-    // The original definition (or at least its debug info - if the variable is
-    // internalized an optimized away) will remain in the source module, so
-    // there's no need to import them.
-    // If LLVM ever does more advanced optimizations on global variables
-    // (removing/localizing write operations, for instance) that can track
-    // through debug info, this decision may need to be revisited - but do so
-    // with care when it comes to debug info size. Emitting small CUs containing
-    // only a few imported entities into every destination module may be very
-    // size inefficient.
+    // We import global variables only temporarily in order for instcombine
+    // and globalopt to perform constant folding and static constructor
+    // evaluation. After that elim-avail-extern will covert imported globals
+    // back to declarations, so we don't need debug info for them.
     ValueMap.MD()[CU->getRawGlobalVariables()].reset(nullptr);
 
     // Imported entities only need to be mapped in if they have local
@@ -1235,14 +1219,8 @@ Error IRLinker::linkModuleFlagsMetadata() {
     case Module::Warning: {
       // Emit a warning if the values differ.
       if (SrcOp->getOperand(2) != DstOp->getOperand(2)) {
-        std::string str;
-        raw_string_ostream(str)
-            << "linking module flags '" << ID->getString()
-            << "': IDs have conflicting values ('" << *SrcOp->getOperand(2)
-            << "' from " << SrcM->getModuleIdentifier() << " with '"
-            << *DstOp->getOperand(2) << "' from " << DstM.getModuleIdentifier()
-            << ')';
-        emitWarning(str);
+        emitWarning("linking module flags '" + ID->getString() +
+                    "': IDs have conflicting values");
       }
       continue;
     }

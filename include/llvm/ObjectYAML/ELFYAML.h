@@ -8,7 +8,7 @@
 //===----------------------------------------------------------------------===//
 ///
 /// \file
-/// This file declares classes for handling the YAML representation
+/// \brief This file declares classes for handling the YAML representation
 /// of ELF.
 ///
 //===----------------------------------------------------------------------===//
@@ -123,7 +123,6 @@ struct Section {
   StringRef Link;
   StringRef Info;
   llvm::yaml::Hex64 AddressAlign;
-  Optional<llvm::yaml::Hex64> EntSize;
 
   Section(SectionKind Kind) : Kind(Kind) {}
   virtual ~Section();

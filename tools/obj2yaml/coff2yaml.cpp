@@ -147,7 +147,7 @@ void COFFDumper::dumpSections(unsigned NumSections) {
     COFFYAML::Section NewYAMLSection;
     ObjSection.getName(NewYAMLSection.Name);
     NewYAMLSection.Header.Characteristics = COFFSection->Characteristics;
-    NewYAMLSection.Header.VirtualAddress = COFFSection->VirtualAddress;
+    NewYAMLSection.Header.VirtualAddress = ObjSection.getAddress();
     NewYAMLSection.Header.VirtualSize = COFFSection->VirtualSize;
     NewYAMLSection.Header.NumberOfLineNumbers =
         COFFSection->NumberOfLinenumbers;
@@ -159,8 +159,7 @@ void COFFDumper::dumpSections(unsigned NumSections) {
     NewYAMLSection.Header.PointerToRelocations =
         COFFSection->PointerToRelocations;
     NewYAMLSection.Header.SizeOfRawData = COFFSection->SizeOfRawData;
-    uint32_t Shift = (COFFSection->Characteristics >> 20) & 0xF;
-    NewYAMLSection.Alignment = (1U << Shift) >> 1;
+    NewYAMLSection.Alignment = ObjSection.getAlignment();
     assert(NewYAMLSection.Alignment <= 8192);
 
     ArrayRef<uint8_t> sectionData;
@@ -188,7 +187,7 @@ void COFFDumper::dumpSections(unsigned NumSections) {
       if (!SymbolNameOrErr) {
        std::string Buf;
        raw_string_ostream OS(Buf);
-       logAllUnhandledErrors(SymbolNameOrErr.takeError(), OS);
+       logAllUnhandledErrors(SymbolNameOrErr.takeError(), OS, "");
        OS.flush();
        report_fatal_error(Buf);
       }

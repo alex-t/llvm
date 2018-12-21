@@ -11,6 +11,7 @@
 #ifndef LLVM_LIB_TARGET_AMDGPU_AMDGPU_H
 #define LLVM_LIB_TARGET_AMDGPU_AMDGPU_H
 
+#include "MCTargetDesc/AMDGPUMCTargetDesc.h"
 #include "llvm/Target/TargetMachine.h"
 
 namespace llvm {
@@ -37,12 +38,10 @@ FunctionPass *createAMDGPUCFGStructurizerPass();
 FunctionPass *createR600ISelDag(TargetMachine *TM, CodeGenOpt::Level OptLevel);
 
 // SI Passes
-FunctionPass *createGCNDPPCombinePass();
 FunctionPass *createSIAnnotateControlFlowPass();
 FunctionPass *createSIFoldOperandsPass();
 FunctionPass *createSIPeepholeSDWAPass();
 FunctionPass *createSILowerI1CopiesPass();
-FunctionPass *createSIFixupVectorISelPass();
 FunctionPass *createSIShrinkInstructionsPass();
 FunctionPass *createSILoadStoreOptimizerPass();
 FunctionPass *createSIWholeQuadModePass();
@@ -51,15 +50,14 @@ FunctionPass *createSIOptimizeExecMaskingPreRAPass();
 FunctionPass *createSIFixSGPRCopiesPass();
 FunctionPass *createSIMemoryLegalizerPass();
 FunctionPass *createSIDebuggerInsertNopsPass();
+FunctionPass *createSIInsertWaitsPass();
 FunctionPass *createSIInsertWaitcntsPass();
 FunctionPass *createSIFixWWMLivenessPass();
-FunctionPass *createSIFormMemoryClausesPass();
 FunctionPass *createAMDGPUSimplifyLibCallsPass(const TargetOptions &);
 FunctionPass *createAMDGPUUseNativeCallsPass();
 FunctionPass *createAMDGPUCodeGenPreparePass();
 FunctionPass *createAMDGPUMachineCFGStructurizerPass();
 FunctionPass *createAMDGPURewriteOutArgumentsPass();
-FunctionPass *createSIModeRegisterPass();
 
 void initializeAMDGPUDAGToDAGISelPass(PassRegistry&);
 
@@ -72,31 +70,12 @@ Pass *createAMDGPUAnnotateKernelFeaturesPass();
 void initializeAMDGPUAnnotateKernelFeaturesPass(PassRegistry &);
 extern char &AMDGPUAnnotateKernelFeaturesID;
 
-FunctionPass *createAMDGPUAtomicOptimizerPass();
-void initializeAMDGPUAtomicOptimizerPass(PassRegistry &);
-extern char &AMDGPUAtomicOptimizerID;
-
 ModulePass *createAMDGPULowerIntrinsicsPass();
 void initializeAMDGPULowerIntrinsicsPass(PassRegistry &);
 extern char &AMDGPULowerIntrinsicsID;
 
-ModulePass *createAMDGPUFixFunctionBitcastsPass();
-void initializeAMDGPUFixFunctionBitcastsPass(PassRegistry &);
-extern char &AMDGPUFixFunctionBitcastsID;
-
-FunctionPass *createAMDGPULowerKernelArgumentsPass();
-void initializeAMDGPULowerKernelArgumentsPass(PassRegistry &);
-extern char &AMDGPULowerKernelArgumentsID;
-
-ModulePass *createAMDGPULowerKernelAttributesPass();
-void initializeAMDGPULowerKernelAttributesPass(PassRegistry &);
-extern char &AMDGPULowerKernelAttributesID;
-
 void initializeAMDGPURewriteOutArgumentsPass(PassRegistry &);
 extern char &AMDGPURewriteOutArgumentsID;
-
-void initializeGCNDPPCombinePass(PassRegistry &);
-extern char &GCNDPPCombineID;
 
 void initializeR600ClauseMergePassPass(PassRegistry &);
 extern char &R600ClauseMergePassID;
@@ -128,9 +107,6 @@ extern char &SIFixSGPRCopiesID;
 void initializeSIFixVGPRCopiesPass(PassRegistry &);
 extern char &SIFixVGPRCopiesID;
 
-void initializeSIFixupVectorISelPass(PassRegistry &);
-extern char &SIFixupVectorISelID;
-
 void initializeSILowerI1CopiesPass(PassRegistry &);
 extern char &SILowerI1CopiesID;
 
@@ -158,9 +134,6 @@ extern char &AMDGPUSimplifyLibCallsID;
 void initializeAMDGPUUseNativeCallsPass(PassRegistry &);
 extern char &AMDGPUUseNativeCallsID;
 
-void initializeAMDGPUPerfHintAnalysisPass(PassRegistry &);
-extern char &AMDGPUPerfHintAnalysisID;
-
 // Passes common to R600 and SI
 FunctionPass *createAMDGPUPromoteAlloca();
 void initializeAMDGPUPromoteAllocaPass(PassRegistry&);
@@ -171,7 +144,7 @@ FunctionPass *createAMDGPUISelDag(
   TargetMachine *TM = nullptr,
   CodeGenOpt::Level OptLevel = CodeGenOpt::Default);
 ModulePass *createAMDGPUAlwaysInlinePass(bool GlobalOpt = true);
-ModulePass *createR600OpenCLImageTypeLoweringPass();
+ModulePass *createAMDGPUOpenCLImageTypeLoweringPass();
 FunctionPass *createAMDGPUAnnotateUniformValues();
 
 ModulePass* createAMDGPUUnifyMetadataPass();
@@ -196,22 +169,17 @@ extern char &SIMemoryLegalizerID;
 void initializeSIDebuggerInsertNopsPass(PassRegistry&);
 extern char &SIDebuggerInsertNopsID;
 
-void initializeSIModeRegisterPass(PassRegistry&);
-extern char &SIModeRegisterID;
+void initializeSIInsertWaitsPass(PassRegistry&);
+extern char &SIInsertWaitsID;
 
 void initializeSIInsertWaitcntsPass(PassRegistry&);
 extern char &SIInsertWaitcntsID;
-
-void initializeSIFormMemoryClausesPass(PassRegistry&);
-extern char &SIFormMemoryClausesID;
 
 void initializeAMDGPUUnifyDivergentExitNodesPass(PassRegistry&);
 extern char &AMDGPUUnifyDivergentExitNodesID;
 
 ImmutablePass *createAMDGPUAAWrapperPass();
 void initializeAMDGPUAAWrapperPassPass(PassRegistry&);
-ImmutablePass *createAMDGPUExternalAAWrapperPass();
-void initializeAMDGPUExternalAAWrapperPass(PassRegistry&);
 
 void initializeAMDGPUArgumentUsageInfoPass(PassRegistry &);
 
@@ -243,18 +211,19 @@ enum TargetIndex {
 /// however on the GPU, each address space points to
 /// a separate piece of memory that is unique from other
 /// memory locations.
-namespace AMDGPUAS {
+struct AMDGPUAS {
+  // The following address space values depend on the triple environment.
+  unsigned PRIVATE_ADDRESS;  ///< Address space for private memory.
+  unsigned FLAT_ADDRESS;     ///< Address space for flat memory.
+  unsigned REGION_ADDRESS;   ///< Address space for region memory.
+
   enum : unsigned {
     // The maximum value for flat, generic, local, private, constant and region.
-    MAX_AMDGPU_ADDRESS = 6,
+    MAX_COMMON_ADDRESS = 5,
 
-    FLAT_ADDRESS = 0,     ///< Address space for flat memory.
     GLOBAL_ADDRESS = 1,   ///< Address space for global memory (RAT0, VTX0).
-    REGION_ADDRESS = 2,   ///< Address space for region memory.
-
     CONSTANT_ADDRESS = 4, ///< Address space for constant memory (VTX2)
     LOCAL_ADDRESS = 3,    ///< Address space for local memory.
-    PRIVATE_ADDRESS = 5,  ///< Address space for private memory.
 
     CONSTANT_ADDRESS_32BIT = 6, ///< Address space for 32-bit constant memory
 
@@ -289,6 +258,14 @@ namespace AMDGPUAS {
     // Some places use this if the address space can't be determined.
     UNKNOWN_ADDRESS_SPACE = ~0u,
   };
-}
+};
+
+namespace llvm {
+namespace AMDGPU {
+AMDGPUAS getAMDGPUAS(const Module &M);
+AMDGPUAS getAMDGPUAS(const TargetMachine &TM);
+AMDGPUAS getAMDGPUAS(Triple T);
+} // namespace AMDGPU
+} // namespace llvm
 
 #endif

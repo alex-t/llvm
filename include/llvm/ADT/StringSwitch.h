@@ -20,7 +20,7 @@
 
 namespace llvm {
 
-/// A switch()-like statement whose cases are string literals.
+/// \brief A switch()-like statement whose cases are string literals.
 ///
 /// The StringSwitch class is a simple form of a switch() statement that
 /// determines whether the given string matches one of the given string
@@ -41,10 +41,10 @@ namespace llvm {
 /// \endcode
 template<typename T, typename R = T>
 class StringSwitch {
-  /// The string we are matching.
+  /// \brief The string we are matching.
   const StringRef Str;
 
-  /// The pointer to the result of this switch statement, once known,
+  /// \brief The pointer to the result of this switch statement, once known,
   /// null before that.
   Optional<T> Result;
 

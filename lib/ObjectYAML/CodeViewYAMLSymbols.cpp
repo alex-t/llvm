@@ -108,7 +108,7 @@ void ScalarBitSetTraits<ExportFlags>::bitset(IO &io, ExportFlags &Flags) {
 }
 
 void ScalarBitSetTraits<PublicSymFlags>::bitset(IO &io, PublicSymFlags &Flags) {
-  auto FlagNames = getPublicSymFlagNames();
+  auto FlagNames = getProcSymFlagNames();
   for (const auto &E : FlagNames) {
     io.bitSetCase(Flags, E.Name.str().c_str(),
                   static_cast<PublicSymFlags>(E.Value));
@@ -548,10 +548,6 @@ template <> void SymbolRecordImpl<ThreadLocalDataSym>::map(IO &IO) {
   IO.mapOptional("Offset", Symbol.DataOffset, 0U);
   IO.mapOptional("Segment", Symbol.Segment, uint16_t(0));
   IO.mapRequired("DisplayName", Symbol.Name);
-}
-
-template <> void SymbolRecordImpl<UsingNamespaceSym>::map(IO &IO) {
-  IO.mapRequired("Namespace", Symbol.Name);
 }
 
 } // end namespace detail

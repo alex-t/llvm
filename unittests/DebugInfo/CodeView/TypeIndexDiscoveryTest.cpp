@@ -601,10 +601,3 @@ TEST_F(TypeIndexIteratorTest, VariableSizeIntegers) {
   writeFieldList(BaseClass1, BaseClass2);
   checkTypeReferences(0, TypeIndex(47), TypeIndex(48));
 }
-
-TEST_F(TypeIndexIteratorTest, UsingNamespace) {
-  UsingNamespaceSym UN(SymbolRecordKind::UsingNamespaceSym);
-  UN.Name = "std";
-  writeSymbolRecords(UN);
-  checkTypeReferences(0);
-}

@@ -5,17 +5,18 @@
 %s.1 = type { [1 x %s.2], i32, [4 x i8] }
 %s.2 = type { [16 x i32] }
 
-define hidden void @f0(void (%s.0*)* %a0) #0 {
+; Function Attrs: noreturn nounwind
+define hidden void @f0() #0 section ".text.compat" {
 b0:
   br i1 undef, label %b2, label %b1
 
 b1:                                               ; preds = %b0
-  ret void
+  unreachable
 
 b2:                                               ; preds = %b0
-  call void %a0(%s.0* null) #1
+  call void undef(%s.0* undef) #1
   unreachable
 }
- 
+
 attributes #0 = { noreturn nounwind }
 attributes #1 = { noreturn }

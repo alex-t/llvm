@@ -23,8 +23,12 @@ namespace pdb {
 /// fit anywhere else in the lexical hierarchy.
 /// https://msdn.microsoft.com/en-us/library/d88sf09h.aspx
 class PDBSymbolCustom : public PDBSymbol {
-  DECLARE_PDB_SYMBOL_CONCRETE_TYPE(PDB_SymType::Custom)
 public:
+  PDBSymbolCustom(const IPDBSession &PDBSession,
+                  std::unique_ptr<IPDBRawSymbol> CustomSymbol);
+
+  DECLARE_PDB_SYMBOL_CONCRETE_TYPE(PDB_SymType::Custom)
+
   void dump(PDBSymDumper &Dumper) const override;
 
   void getDataBytes(llvm::SmallVector<uint8_t, 32> &bytes);

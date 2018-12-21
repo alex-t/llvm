@@ -32,7 +32,7 @@ public:
       : ObjDumper(Writer), Obj(Obj) {}
 
   void printFileHeaders() override;
-  void printSectionHeaders() override;
+  void printSections() override;
   void printRelocations() override;
   void printSymbols() override;
   void printDynamicSymbols() override;
@@ -59,7 +59,7 @@ private:
 
   void printRelocation(const MachOObjectFile *Obj, const RelocationRef &Reloc);
 
-  void printSectionHeaders(const MachOObjectFile *Obj);
+  void printSections(const MachOObjectFile *Obj);
 
   const MachOObjectFile *Obj;
 };
@@ -428,9 +428,11 @@ void MachODumper::printFileHeaders(const MachHeader &Header) {
   W.printFlags("Flags", Header.flags, makeArrayRef(MachOHeaderFlags));
 }
 
-void MachODumper::printSectionHeaders() { return printSectionHeaders(Obj); }
+void MachODumper::printSections() {
+  return printSections(Obj);
+}
 
-void MachODumper::printSectionHeaders(const MachOObjectFile *Obj) {
+void MachODumper::printSections(const MachOObjectFile *Obj) {
   ListScope Group(W, "Sections");
 
   int SectionIndex = -1;

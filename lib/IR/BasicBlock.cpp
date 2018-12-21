@@ -135,10 +135,9 @@ const Module *BasicBlock::getModule() const {
   return getParent()->getParent();
 }
 
-const Instruction *BasicBlock::getTerminator() const {
-  if (InstList.empty() || !InstList.back().isTerminator())
-    return nullptr;
-  return &InstList.back();
+const TerminatorInst *BasicBlock::getTerminator() const {
+  if (InstList.empty()) return nullptr;
+  return dyn_cast<TerminatorInst>(&InstList.back());
 }
 
 const CallInst *BasicBlock::getTerminatingMustTailCall() const {
@@ -258,14 +257,6 @@ const BasicBlock *BasicBlock::getUniquePredecessor() const {
     // This is OK.
   }
   return PredBB;
-}
-
-bool BasicBlock::hasNPredecessors(unsigned N) const {
-  return hasNItems(pred_begin(this), pred_end(this), N);
-}
-
-bool BasicBlock::hasNPredecessorsOrMore(unsigned N) const {
-  return hasNItemsOrMore(pred_begin(this), pred_end(this), N);
 }
 
 const BasicBlock *BasicBlock::getSingleSuccessor() const {
@@ -393,7 +384,7 @@ bool BasicBlock::isLegalToHoistInto() const {
   assert(Term->getNumSuccessors() > 0);
 
   // Instructions should not be hoisted across exception handling boundaries.
-  return !Term->isExceptionalTerminator();
+  return !Term->isExceptional();
 }
 
 /// This splits a basic block into two at the specified
@@ -446,12 +437,12 @@ BasicBlock *BasicBlock::splitBasicBlock(iterator I, const Twine &BBName) {
 }
 
 void BasicBlock::replaceSuccessorsPhiUsesWith(BasicBlock *New) {
-  Instruction *TI = getTerminator();
+  TerminatorInst *TI = getTerminator();
   if (!TI)
     // Cope with being called on a BasicBlock that doesn't have a terminator
     // yet. Clang's CodeGenFunction::EmitReturnBlock() likes to do this.
     return;
-  for (BasicBlock *Succ : successors(TI)) {
+  for (BasicBlock *Succ : TI->successors()) {
     // N.B. Succ might not be a complete BasicBlock, so don't assume
     // that it ends with a non-phi instruction.
     for (iterator II = Succ->begin(), IE = Succ->end(); II != IE; ++II) {
@@ -477,7 +468,7 @@ const LandingPadInst *BasicBlock::getLandingPadInst() const {
 }
 
 Optional<uint64_t> BasicBlock::getIrrLoopHeaderWeight() const {
-  const Instruction *TI = getTerminator();
+  const TerminatorInst *TI = getTerminator();
   if (MDNode *MDIrrLoopHeader =
       TI->getMetadata(LLVMContext::MD_irr_loop)) {
     MDString *MDName = cast<MDString>(MDIrrLoopHeader->getOperand(0));
@@ -487,10 +478,4 @@ Optional<uint64_t> BasicBlock::getIrrLoopHeaderWeight() const {
     }
   }
   return Optional<uint64_t>();
-}
-
-BasicBlock::iterator llvm::skipDebugIntrinsics(BasicBlock::iterator It) {
-  while (isa<DbgInfoIntrinsic>(It))
-    ++It;
-  return It;
 }

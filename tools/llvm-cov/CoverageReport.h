@@ -20,7 +20,7 @@
 
 namespace llvm {
 
-/// Displays the code coverage report.
+/// \brief Displays the code coverage report.
 class CoverageReport {
   const CoverageViewOptions &Options;
   const coverage::CoverageMapping &Coverage;

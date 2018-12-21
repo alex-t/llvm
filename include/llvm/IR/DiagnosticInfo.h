@@ -39,7 +39,7 @@ class LLVMContext;
 class Module;
 class SMDiagnostic;
 
-/// Defines the different supported severity of a diagnostic.
+/// \brief Defines the different supported severity of a diagnostic.
 enum DiagnosticSeverity : char {
   DS_Error,
   DS_Warning,
@@ -49,7 +49,7 @@ enum DiagnosticSeverity : char {
   DS_Note
 };
 
-/// Defines the different supported kind of a diagnostic.
+/// \brief Defines the different supported kind of a diagnostic.
 /// This enum should be extended with a new ID for each added concrete subclass.
 enum DiagnosticKind {
   DK_InlineAsm,
@@ -79,7 +79,7 @@ enum DiagnosticKind {
   DK_FirstPluginKind
 };
 
-/// Get the next available kind ID for a plugin diagnostic.
+/// \brief Get the next available kind ID for a plugin diagnostic.
 /// Each time this function is called, it returns a different number.
 /// Therefore, a plugin that wants to "identify" its own classes
 /// with a dynamic identifier, just have to use this method to get a new ID
@@ -89,7 +89,7 @@ enum DiagnosticKind {
 /// DiagnosticKind values.
 int getNextAvailablePluginDiagnosticKind();
 
-/// This is the base abstract class for diagnostic reporting in
+/// \brief This is the base abstract class for diagnostic reporting in
 /// the backend.
 /// The print method must be overloaded by the subclasses to print a
 /// user-friendly message in the client of the backend (let us call it a
@@ -340,7 +340,7 @@ private:
 };
 
 class DiagnosticLocation {
-  DIFile *File = nullptr;
+  StringRef Filename;
   unsigned Line = 0;
   unsigned Column = 0;
 
@@ -349,11 +349,8 @@ public:
   DiagnosticLocation(const DebugLoc &DL);
   DiagnosticLocation(const DISubprogram *SP);
 
-  bool isValid() const { return File; }
-  /// Return the full path to the file.
-  std::string getAbsolutePath() const;
-  /// Return the file name relative to the compilation directory.
-  StringRef getRelativePath() const;
+  bool isValid() const { return !Filename.empty(); }
+  StringRef getFilename() const { return Filename; }
   unsigned getLine() const { return Line; }
   unsigned getColumn() const { return Column; }
 };
@@ -378,13 +375,9 @@ public:
   const std::string getLocationStr() const;
 
   /// Return location information for this diagnostic in three parts:
-  /// the relative source file path, line number and column.
-  void getLocation(StringRef &RelativePath, unsigned &Line,
-                   unsigned &Column) const;
+  /// the source file name, line number and column.
+  void getLocation(StringRef *Filename, unsigned *Line, unsigned *Column) const;
 
-  /// Return the absolute path tot the file.
-  std::string getAbsolutePath() const;
-  
   const Function &getFunction() const { return Fn; }
   DiagnosticLocation getLocation() const { return Loc; }
 
@@ -396,20 +389,20 @@ private:
   DiagnosticLocation Loc;
 };
 
-/// Common features for diagnostics dealing with optimization remarks
+/// \brief Common features for diagnostics dealing with optimization remarks
 /// that are used by both IR and MIR passes.
 class DiagnosticInfoOptimizationBase : public DiagnosticInfoWithLocationBase {
 public:
-  /// Used to set IsVerbose via the stream interface.
+  /// \brief Used to set IsVerbose via the stream interface.
   struct setIsVerbose {};
 
-  /// When an instance of this is inserted into the stream, the arguments
+  /// \brief When an instance of this is inserted into the stream, the arguments
   /// following will not appear in the remark printed in the compiler output
   /// (-Rpass) but only in the optimization record file
   /// (-fsave-optimization-record).
   struct setExtraArgs {};
 
-  /// Used in the streaming interface as the general argument type.  It
+  /// \brief Used in the streaming interface as the general argument type.  It
   /// internally converts everything into a key-value pair.
   struct Argument {
     std::string Key;
@@ -421,7 +414,6 @@ public:
     Argument(StringRef Key, const Value *V);
     Argument(StringRef Key, const Type *T);
     Argument(StringRef Key, StringRef S);
-    Argument(StringRef Key, const char *S) : Argument(Key, StringRef(S)) {};
     Argument(StringRef Key, int N);
     Argument(StringRef Key, float N);
     Argument(StringRef Key, long N);
@@ -512,7 +504,7 @@ protected:
   /// The remark is expected to be noisy.
   bool IsVerbose = false;
 
-  /// If positive, the index of the first argument that only appear in
+  /// \brief If positive, the index of the first argument that only appear in
   /// the optimization records and not in the remark printed in the compiler
   /// output.
   int FirstExtraArgIndex = -1;
@@ -595,7 +587,7 @@ operator<<(RemarkT &R,
   return R;
 }
 
-/// Common features for diagnostics dealing with optimization remarks
+/// \brief Common features for diagnostics dealing with optimization remarks
 /// that are used by IR passes.
 class DiagnosticInfoIROptimization : public DiagnosticInfoOptimizationBase {
 public:
@@ -617,7 +609,7 @@ public:
                                        Loc),
         CodeRegion(CodeRegion) {}
 
-  /// This is ctor variant allows a pass to build an optimization remark
+  /// \brief This is ctor variant allows a pass to build an optimization remark
   /// from an existing remark.
   ///
   /// This is useful when a transformation pass (e.g LV) wants to emit a remark
@@ -720,7 +712,7 @@ public:
                            const DiagnosticLocation &Loc,
                            const Value *CodeRegion);
 
-  /// Same as above but \p Inst is used to derive code region and debug
+  /// \brief Same as above but \p Inst is used to derive code region and debug
   /// location.
   OptimizationRemarkMissed(const char *PassName, StringRef RemarkName,
                            const Instruction *Inst);
@@ -761,7 +753,7 @@ public:
                              const DiagnosticLocation &Loc,
                              const Value *CodeRegion);
 
-  /// This is ctor variant allows a pass to build an optimization remark
+  /// \brief This is ctor variant allows a pass to build an optimization remark
   /// from an existing remark.
   ///
   /// This is useful when a transformation pass (e.g LV) wants to emit a remark
@@ -772,7 +764,7 @@ public:
                              const OptimizationRemarkAnalysis &Orig)
       : DiagnosticInfoIROptimization(PassName, Prepend, Orig) {}
 
-  /// Same as above but \p Inst is used to derive code region and debug
+  /// \brief Same as above but \p Inst is used to derive code region and debug
   /// location.
   OptimizationRemarkAnalysis(const char *PassName, StringRef RemarkName,
                              const Instruction *Inst);

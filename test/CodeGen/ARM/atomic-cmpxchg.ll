@@ -24,7 +24,8 @@ entry:
 ; CHECK-THUMB: bl __sync_val_compare_and_swap_1
 ; CHECK-THUMB-NOT: mov [[R1:r[0-7]]], r0
 ; CHECK-THUMB: subs [[R1:r[0-7]]], r0, {{r[0-9]+}}
-; CHECK-THUMB: rsbs r0, [[R1]], #0
+; CHECK-THUMB: movs r0, #0
+; CHECK-THUMB: subs r0, r0, [[R1]]
 ; CHECK-THUMB: adcs r0, [[R1]]
 
 ; CHECK-ARMV6-LABEL: test_cmpxchg_res_i8:
@@ -46,7 +47,8 @@ entry:
 ; CHECK-THUMBV6-NEXT:  bl __sync_val_compare_and_swap_1
 ; CHECK-THUMBV6-NEXT:  uxtb r1, r4
 ; CHECK-THUMBV6-NEXT:  subs [[R1:r[0-7]]], r0, {{r[0-9]+}}
-; CHECK-THUMBV6-NEXT:  rsbs r0, [[R1]], #0
+; CHECK-THUMBV6-NEXT:  movs r0, #0
+; CHECK-THUMBV6-NEXT:  subs r0, r0, [[R1]]
 ; CHECK-THUMBV6-NEXT:  adcs r0, [[R1]]
 
 ; CHECK-ARMV7-LABEL: test_cmpxchg_res_i8:

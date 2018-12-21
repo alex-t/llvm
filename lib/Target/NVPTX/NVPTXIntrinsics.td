@@ -1937,12 +1937,6 @@ multiclass NG_TO_G<string Str, Intrinsic Intrin> {
    def _yes_64 : NVPTXInst<(outs Int64Regs:$result), (ins Int64Regs:$src),
           !strconcat("cvta.", Str, ".u64 \t$result, $src;"),
       [(set Int64Regs:$result, (Intrin Int64Regs:$src))]>;
-   def _yes_6432 : NVPTXInst<(outs Int64Regs:$result), (ins Int32Regs:$src),
-          "{{ .reg .b64 %tmp;\n\t"
-          #"  cvt.u64.u32 \t%tmp, $src;\n\t"
-          #"  cvta." # Str # ".u64 \t$result, %tmp; }}",
-      [(set Int64Regs:$result, (Intrin Int32Regs:$src))]>,
-      Requires<[useShortPtr]>;
 }
 
 multiclass G_TO_NG<string Str, Intrinsic Intrin> {
@@ -1952,12 +1946,6 @@ multiclass G_TO_NG<string Str, Intrinsic Intrin> {
    def _yes_64 : NVPTXInst<(outs Int64Regs:$result), (ins Int64Regs:$src),
           !strconcat("cvta.to.", Str, ".u64 \t$result, $src;"),
       [(set Int64Regs:$result, (Intrin Int64Regs:$src))]>;
-   def _yes_3264 : NVPTXInst<(outs Int32Regs:$result), (ins Int64Regs:$src),
-          "{{ .reg .b64 %tmp;\n\t"
-          #"  cvta.to." # Str # ".u64 \t%tmp, $src;\n\t"
-          #"  cvt.u32.u64 \t$result, %tmp; }}",
-      [(set Int32Regs:$result, (Intrin Int64Regs:$src))]>,
-      Requires<[useShortPtr]>;
 }
 
 defm cvta_local  : NG_TO_G<"local", int_nvvm_ptr_local_to_gen>;
@@ -7468,7 +7456,7 @@ class WMMA_LOAD_INTR_HELPER<string Geometry, string Abc, string Layout,
   }];
 
   let Operands = !if(WithStride, (ops node:$src, node:$ldm), (ops node:$src));
-  let Fragments = [!foreach(tmp, Operands, !subst(ops, Intr, tmp))];
+  let Fragment = !foreach(tmp, Operands, !subst(ops, Intr, tmp));
   let PredicateCode = !if(!eq(Space, ".shared"), match_shared,
                       !if(!eq(Space, ".global"), match_global, match_generic));
 }
@@ -7608,7 +7596,7 @@ class WMMA_STORE_INTR_HELPER<string Geometry, string Layout, string Space,
                                  node:$r4, node:$r5, node:$r6, node:$r7));
   dag StrideArg = !if(WithStride, (ops node:$ldm), (ops));
   let Operands = !con(Args, StrideArg);
-  let Fragments = [!foreach(tmp, Operands, !subst(ops, Intr, tmp))];
+  let Fragment = !foreach(tmp, Operands, !subst(ops, Intr, tmp));
   let PredicateCode = !if(!eq(Space, ".shared"), match_shared,
                       !if(!eq(Space, ".global"), match_global, match_generic));
 }

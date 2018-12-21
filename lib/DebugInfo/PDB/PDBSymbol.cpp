@@ -50,20 +50,23 @@
 using namespace llvm;
 using namespace llvm::pdb;
 
-PDBSymbol::PDBSymbol(const IPDBSession &PDBSession) : Session(PDBSession) {}
+PDBSymbol::PDBSymbol(const IPDBSession &PDBSession,
+                     std::unique_ptr<IPDBRawSymbol> Symbol)
+    : Session(PDBSession), RawSymbol(std::move(Symbol)) {}
 
-PDBSymbol::PDBSymbol(PDBSymbol &&Other)
-    : Session(Other.Session), RawSymbol(std::move(Other.RawSymbol)) {}
+PDBSymbol::PDBSymbol(PDBSymbol &Symbol)
+    : Session(Symbol.Session), RawSymbol(std::move(Symbol.RawSymbol)) {}
 
 PDBSymbol::~PDBSymbol() = default;
 
 #define FACTORY_SYMTAG_CASE(Tag, Type)                                         \
   case PDB_SymType::Tag:                                                       \
-    return std::unique_ptr<PDBSymbol>(new Type(PDBSession));
+    return std::unique_ptr<PDBSymbol>(new Type(PDBSession, std::move(Symbol)));
 
 std::unique_ptr<PDBSymbol>
-PDBSymbol::createSymbol(const IPDBSession &PDBSession, PDB_SymType Tag) {
-  switch (Tag) {
+PDBSymbol::create(const IPDBSession &PDBSession,
+                  std::unique_ptr<IPDBRawSymbol> Symbol) {
+  switch (Symbol->getSymTag()) {
     FACTORY_SYMTAG_CASE(Exe, PDBSymbolExe)
     FACTORY_SYMTAG_CASE(Compiland, PDBSymbolCompiland)
     FACTORY_SYMTAG_CASE(CompilandDetails, PDBSymbolCompilandDetails)
@@ -95,35 +98,18 @@ PDBSymbol::createSymbol(const IPDBSession &PDBSession, PDB_SymType Tag) {
     FACTORY_SYMTAG_CASE(ManagedType, PDBSymbolTypeManaged)
     FACTORY_SYMTAG_CASE(Dimension, PDBSymbolTypeDimension)
   default:
-    return std::unique_ptr<PDBSymbol>(new PDBSymbolUnknown(PDBSession));
+    return std::unique_ptr<PDBSymbol>(
+        new PDBSymbolUnknown(PDBSession, std::move(Symbol)));
   }
 }
 
-std::unique_ptr<PDBSymbol>
-PDBSymbol::create(const IPDBSession &PDBSession,
-                  std::unique_ptr<IPDBRawSymbol> RawSymbol) {
-  auto SymbolPtr = createSymbol(PDBSession, RawSymbol->getSymTag());
-  SymbolPtr->RawSymbol = RawSymbol.get();
-  SymbolPtr->OwnedRawSymbol = std::move(RawSymbol);
-  return SymbolPtr;
-}
-
-std::unique_ptr<PDBSymbol> PDBSymbol::create(const IPDBSession &PDBSession,
-                                             IPDBRawSymbol &RawSymbol) {
-  auto SymbolPtr = createSymbol(PDBSession, RawSymbol.getSymTag());
-  SymbolPtr->RawSymbol = &RawSymbol;
-  return SymbolPtr;
-}
-
-void PDBSymbol::defaultDump(raw_ostream &OS, int Indent,
-                            PdbSymbolIdField ShowFlags,
-                            PdbSymbolIdField RecurseFlags) const {
-  RawSymbol->dump(OS, Indent, ShowFlags, RecurseFlags);
+void PDBSymbol::defaultDump(raw_ostream &OS, int Indent) const {
+  RawSymbol->dump(OS, Indent);
 }
 
 void PDBSymbol::dumpProperties() const {
   outs() << "\n";
-  defaultDump(outs(), 0, PdbSymbolIdField::All, PdbSymbolIdField::None);
+  defaultDump(outs(), 0);
   outs().flush();
 }
 
@@ -135,6 +121,10 @@ void PDBSymbol::dumpChildStats() const {
     outs() << Stat.first << ": " << Stat.second << "\n";
   }
   outs().flush();
+}
+
+std::unique_ptr<PDBSymbol> PDBSymbol::clone() const {
+  return Session.getSymbolById(getSymIndexId());
 }
 
 PDB_SymType PDBSymbol::getSymTag() const { return RawSymbol->getSymTag(); }
@@ -181,35 +171,4 @@ PDBSymbol::getChildStats(TagStats &Stats) const {
 
 std::unique_ptr<PDBSymbol> PDBSymbol::getSymbolByIdHelper(uint32_t Id) const {
   return Session.getSymbolById(Id);
-}
-
-void llvm::pdb::dumpSymbolIdField(raw_ostream &OS, StringRef Name,
-                                  SymIndexId Value, int Indent,
-                                  const IPDBSession &Session,
-                                  PdbSymbolIdField FieldId,
-                                  PdbSymbolIdField ShowFlags,
-                                  PdbSymbolIdField RecurseFlags) {
-  if ((FieldId & ShowFlags) == PdbSymbolIdField::None)
-    return;
-
-  OS << "\n";
-  OS.indent(Indent);
-  OS << Name << ": " << Value;
-  // Don't recurse unless the user requested it.
-  if ((FieldId & RecurseFlags) == PdbSymbolIdField::None)
-    return;
-  // And obviously don't recurse on the symbol itself.
-  if (FieldId == PdbSymbolIdField::SymIndexId)
-    return;
-
-  auto Child = Session.getSymbolById(Value);
-
-  // It could have been a placeholder symbol for a type we don't yet support,
-  // so just exit in that case.
-  if (!Child)
-    return;
-
-  // Don't recurse more than once, so pass PdbSymbolIdField::None) for the
-  // recurse flags.
-  Child->defaultDump(OS, Indent + 2, ShowFlags, PdbSymbolIdField::None);
 }

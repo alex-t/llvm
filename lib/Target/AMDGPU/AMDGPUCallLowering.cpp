@@ -20,7 +20,6 @@
 #include "SIISelLowering.h"
 #include "SIMachineFunctionInfo.h"
 #include "SIRegisterInfo.h"
-#include "MCTargetDesc/AMDGPUMCTargetDesc.h"
 #include "llvm/CodeGen/CallingConvLower.h"
 #include "llvm/CodeGen/GlobalISel/MachineIRBuilder.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
@@ -28,12 +27,11 @@
 using namespace llvm;
 
 AMDGPUCallLowering::AMDGPUCallLowering(const AMDGPUTargetLowering &TLI)
-  : CallLowering(&TLI) {
+  : CallLowering(&TLI), AMDGPUASI(TLI.getAMDGPUAS()) {
 }
 
 bool AMDGPUCallLowering::lowerReturn(MachineIRBuilder &MIRBuilder,
-                                     const Value *Val,
-                                     ArrayRef<unsigned> VRegs) const {
+                                     const Value *Val, unsigned VReg) const {
   // FIXME: Add support for non-void returns.
   if (Val)
     return false;
@@ -44,14 +42,14 @@ bool AMDGPUCallLowering::lowerReturn(MachineIRBuilder &MIRBuilder,
 
 unsigned AMDGPUCallLowering::lowerParameterPtr(MachineIRBuilder &MIRBuilder,
                                                Type *ParamTy,
-                                               uint64_t Offset) const {
+                                               unsigned Offset) const {
 
   MachineFunction &MF = MIRBuilder.getMF();
   const SIMachineFunctionInfo *MFI = MF.getInfo<SIMachineFunctionInfo>();
   MachineRegisterInfo &MRI = MF.getRegInfo();
   const Function &F = MF.getFunction();
   const DataLayout &DL = F.getParent()->getDataLayout();
-  PointerType *PtrTy = PointerType::get(ParamTy, AMDGPUAS::CONSTANT_ADDRESS);
+  PointerType *PtrTy = PointerType::get(ParamTy, AMDGPUASI.CONSTANT_ADDRESS);
   LLT PtrType = getLLTForType(*PtrTy, DL);
   unsigned DstReg = MRI.createGenericVirtualRegister(PtrType);
   unsigned KernArgSegmentPtr =
@@ -67,15 +65,15 @@ unsigned AMDGPUCallLowering::lowerParameterPtr(MachineIRBuilder &MIRBuilder,
 }
 
 void AMDGPUCallLowering::lowerParameter(MachineIRBuilder &MIRBuilder,
-                                        Type *ParamTy, uint64_t Offset,
-                                        unsigned Align,
+                                        Type *ParamTy, unsigned Offset,
                                         unsigned DstReg) const {
   MachineFunction &MF = MIRBuilder.getMF();
   const Function &F = MF.getFunction();
   const DataLayout &DL = F.getParent()->getDataLayout();
-  PointerType *PtrTy = PointerType::get(ParamTy, AMDGPUAS::CONSTANT_ADDRESS);
+  PointerType *PtrTy = PointerType::get(ParamTy, AMDGPUASI.CONSTANT_ADDRESS);
   MachinePointerInfo PtrInfo(UndefValue::get(PtrTy));
   unsigned TypeSize = DL.getTypeStoreSize(ParamTy);
+  unsigned Align = DL.getABITypeAlignment(ParamTy);
   unsigned PtrReg = lowerParameterPtr(MIRBuilder, ParamTy, Offset);
 
   MachineMemOperand *MMO =
@@ -90,16 +88,12 @@ void AMDGPUCallLowering::lowerParameter(MachineIRBuilder &MIRBuilder,
 bool AMDGPUCallLowering::lowerFormalArguments(MachineIRBuilder &MIRBuilder,
                                               const Function &F,
                                               ArrayRef<unsigned> VRegs) const {
-  // AMDGPU_GS and AMDGP_HS are not supported yet.
-  if (F.getCallingConv() == CallingConv::AMDGPU_GS ||
-      F.getCallingConv() == CallingConv::AMDGPU_HS)
-    return false;
 
   MachineFunction &MF = MIRBuilder.getMF();
-  const GCNSubtarget *Subtarget = &MF.getSubtarget<GCNSubtarget>();
+  const SISubtarget *Subtarget = static_cast<const SISubtarget *>(&MF.getSubtarget());
   MachineRegisterInfo &MRI = MF.getRegInfo();
   SIMachineFunctionInfo *Info = MF.getInfo<SIMachineFunctionInfo>();
-  const SIRegisterInfo *TRI = MF.getSubtarget<GCNSubtarget>().getRegisterInfo();
+  const SIRegisterInfo *TRI = MF.getSubtarget<SISubtarget>().getRegisterInfo();
   const DataLayout &DL = F.getParent()->getDataLayout();
 
   SmallVector<CCValAssign, 16> ArgLocs;
@@ -144,36 +138,6 @@ bool AMDGPUCallLowering::lowerFormalArguments(MachineIRBuilder &MIRBuilder,
     unsigned FlatScratchInitReg = Info->addFlatScratchInit(*TRI);
     // FIXME: Need to add reg as live-in
     CCInfo.AllocateReg(FlatScratchInitReg);
-  }
-
-  // The infrastructure for normal calling convention lowering is essentially
-  // useless for kernels. We want to avoid any kind of legalization or argument
-  // splitting.
-  if (F.getCallingConv() == CallingConv::AMDGPU_KERNEL) {
-    unsigned i = 0;
-    const unsigned KernArgBaseAlign = 16;
-    const unsigned BaseOffset = Subtarget->getExplicitKernelArgOffset(F);
-    uint64_t ExplicitArgOffset = 0;
-
-    // TODO: Align down to dword alignment and extract bits for extending loads.
-    for (auto &Arg : F.args()) {
-      Type *ArgTy = Arg.getType();
-      unsigned AllocSize = DL.getTypeAllocSize(ArgTy);
-      if (AllocSize == 0)
-        continue;
-
-      unsigned ABIAlign = DL.getABITypeAlignment(ArgTy);
-
-      uint64_t ArgOffset = alignTo(ExplicitArgOffset, ABIAlign) + BaseOffset;
-      ExplicitArgOffset = alignTo(ExplicitArgOffset, ABIAlign) + AllocSize;
-
-      unsigned Align = MinAlign(KernArgBaseAlign, ArgOffset);
-      ArgOffset = alignTo(ArgOffset, DL.getABITypeAlignment(ArgTy));
-      lowerParameter(MIRBuilder, ArgTy, ArgOffset, Align, VRegs[i]);
-      ++i;
-    }
-
-    return true;
   }
 
   unsigned NumArgs = F.arg_size();
@@ -247,5 +211,13 @@ bool AMDGPUCallLowering::lowerFormalArguments(MachineIRBuilder &MIRBuilder,
     return true;
   }
 
-  return false;
+  for (unsigned i = 0; i != ArgLocs.size(); ++i, ++Arg) {
+    // FIXME: We should be getting DebugInfo from the arguments some how.
+    CCValAssign &VA = ArgLocs[i];
+    lowerParameter(MIRBuilder, Arg->getType(),
+                   VA.getLocMemOffset() +
+                   Subtarget->getExplicitKernelArgOffset(MF), VRegs[i]);
+  }
+
+  return true;
 }

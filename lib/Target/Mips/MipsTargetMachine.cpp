@@ -53,9 +53,6 @@ extern "C" void LLVMInitializeMipsTarget() {
 
   PassRegistry *PR = PassRegistry::getPassRegistry();
   initializeGlobalISel(*PR);
-  initializeMipsDelaySlotFillerPass(*PR);
-  initializeMipsBranchExpansionPass(*PR);
-  initializeMicroMipsSizeReducePass(*PR);
 }
 
 static std::string computeDataLayout(const Triple &TT, StringRef CPU,
@@ -101,6 +98,12 @@ static Reloc::Model getEffectiveRelocModel(bool JIT,
   return *RM;
 }
 
+static CodeModel::Model getEffectiveCodeModel(Optional<CodeModel::Model> CM) {
+  if (CM)
+    return *CM;
+  return CodeModel::Small;
+}
+
 // On function prologue, the stack is created by decrementing
 // its pointer. Once decremented, all references are done with positive
 // offset from the stack/frame pointer, using StackGrowsUp enables
@@ -115,7 +118,7 @@ MipsTargetMachine::MipsTargetMachine(const Target &T, const Triple &TT,
                                      bool isLittle)
     : LLVMTargetMachine(T, computeDataLayout(TT, CPU, Options, isLittle), TT,
                         CPU, FS, Options, getEffectiveRelocModel(JIT, RM),
-                        getEffectiveCodeModel(CM, CodeModel::Small), OL),
+                        getEffectiveCodeModel(CM), OL),
       isLittle(isLittle), TLOF(llvm::make_unique<MipsTargetObjectFile>()),
       ABI(MipsABIInfo::computeTargetABI(TT, CPU, Options.MCOptions)),
       Subtarget(nullptr), DefaultSubtarget(TT, CPU, FS, isLittle, *this,
@@ -202,7 +205,7 @@ MipsTargetMachine::getSubtargetImpl(const Function &F) const {
 }
 
 void MipsTargetMachine::resetSubtarget(MachineFunction *MF) {
-  LLVM_DEBUG(dbgs() << "resetSubtarget\n");
+  DEBUG(dbgs() << "resetSubtarget\n");
 
   Subtarget = const_cast<MipsSubtarget *>(getSubtargetImpl(MF->getFunction()));
   MF->setSubtarget(Subtarget);
@@ -270,12 +273,12 @@ void MipsPassConfig::addPreRegAlloc() {
 TargetTransformInfo
 MipsTargetMachine::getTargetTransformInfo(const Function &F) {
   if (Subtarget->allowMixed16_32()) {
-    LLVM_DEBUG(errs() << "No Target Transform Info Pass Added\n");
+    DEBUG(errs() << "No Target Transform Info Pass Added\n");
     // FIXME: This is no longer necessary as the TTI returned is per-function.
     return TargetTransformInfo(F.getParent()->getDataLayout());
   }
 
-  LLVM_DEBUG(errs() << "Target Transform Info Pass Added\n");
+  DEBUG(errs() << "Target Transform Info Pass Added\n");
   return TargetTransformInfo(BasicTTIImpl(this, F));
 }
 
@@ -283,27 +286,14 @@ MipsTargetMachine::getTargetTransformInfo(const Function &F) {
 // machine code is emitted. return true if -print-machineinstrs should
 // print out the code after the passes.
 void MipsPassConfig::addPreEmitPass() {
-  // Expand pseudo instructions that are sensitive to register allocation.
-  addPass(createMipsExpandPseudoPass());
+  addPass(createMicroMipsSizeReductionPass());
 
-  // The microMIPS size reduction pass performs instruction reselection for
-  // instructions which can be remapped to a 16 bit instruction.
-  addPass(createMicroMipsSizeReducePass());
-
-  // The delay slot filler pass can potientially create forbidden slot hazards
-  // for MIPSR6 and therefore it should go before MipsBranchExpansion pass.
+  // The delay slot filler and the long branch passes can potientially create
+  // forbidden slot/ hazards for MIPSR6 which the hazard schedule pass will
+  // fix. Any new pass must come before the hazard schedule pass.
   addPass(createMipsDelaySlotFillerPass());
-
-  // This pass expands branches and takes care about the forbidden slot hazards.
-  // Expanding branches may potentially create forbidden slot hazards for
-  // MIPSR6, and fixing such hazard may potentially break a branch by extending
-  // its offset out of range. That's why this pass combine these two tasks, and
-  // runs them alternately until one of them finishes without any changes. Only
-  // then we can be sure that all branches are expanded properly and no hazards
-  // exists.
-  // Any new pass should go before this pass.
-  addPass(createMipsBranchExpansion());
-
+  addPass(createMipsLongBranchPass());
+  addPass(createMipsHazardSchedule());
   addPass(createMipsConstantIslandPass());
 }
 

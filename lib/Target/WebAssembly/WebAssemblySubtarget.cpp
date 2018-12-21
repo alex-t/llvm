@@ -8,7 +8,7 @@
 //===----------------------------------------------------------------------===//
 ///
 /// \file
-/// This file implements the WebAssembly-specific subclass of
+/// \brief This file implements the WebAssembly-specific subclass of
 /// TargetSubtarget.
 ///
 //===----------------------------------------------------------------------===//

@@ -35,8 +35,6 @@ def Directive970 : SubtargetFeature<"", "DarwinDirective", "PPC::DIR_970", "">;
 def Directive32  : SubtargetFeature<"", "DarwinDirective", "PPC::DIR_32", "">;
 def Directive64  : SubtargetFeature<"", "DarwinDirective", "PPC::DIR_64", "">;
 def DirectiveA2  : SubtargetFeature<"", "DarwinDirective", "PPC::DIR_A2", "">;
-def DirectiveE500   : SubtargetFeature<"", "DarwinDirective",
-                                       "PPC::DIR_E500", "">;
 def DirectiveE500mc : SubtargetFeature<"", "DarwinDirective",
                                        "PPC::DIR_E500mc", "">;
 def DirectiveE5500  : SubtargetFeature<"", "DarwinDirective",
@@ -61,12 +59,9 @@ def Feature64BitRegs : SubtargetFeature<"64bitregs","Use64BitRegs", "true",
                               "Enable 64-bit registers usage for ppc32 [beta]">;
 def FeatureCRBits    : SubtargetFeature<"crbits", "UseCRBits", "true",
                               "Use condition-register bits individually">;
-def FeatureFPU       : SubtargetFeature<"fpu","HasFPU","true",
-                                        "Enable classic FPU instructions",
-                                        [FeatureHardFloat]>;
 def FeatureAltivec   : SubtargetFeature<"altivec","HasAltivec", "true",
                                         "Enable Altivec instructions",
-                                        [FeatureFPU]>;
+                                        [FeatureHardFloat]>;
 def FeatureSPE       : SubtargetFeature<"spe","HasSPE", "true",
                                         "Enable SPE instructions",
                                         [FeatureHardFloat]>;
@@ -74,36 +69,36 @@ def FeatureMFOCRF    : SubtargetFeature<"mfocrf","HasMFOCRF", "true",
                                         "Enable the MFOCRF instruction">;
 def FeatureFSqrt     : SubtargetFeature<"fsqrt","HasFSQRT", "true",
                                         "Enable the fsqrt instruction",
-                                        [FeatureFPU]>;
+                                        [FeatureHardFloat]>;
 def FeatureFCPSGN    : SubtargetFeature<"fcpsgn", "HasFCPSGN", "true",
                                         "Enable the fcpsgn instruction",
-                                        [FeatureFPU]>;
+                                        [FeatureHardFloat]>;
 def FeatureFRE       : SubtargetFeature<"fre", "HasFRE", "true",
                                         "Enable the fre instruction",
-                                        [FeatureFPU]>;
+                                        [FeatureHardFloat]>;
 def FeatureFRES      : SubtargetFeature<"fres", "HasFRES", "true",
                                         "Enable the fres instruction",
-                                        [FeatureFPU]>;
+                                        [FeatureHardFloat]>;
 def FeatureFRSQRTE   : SubtargetFeature<"frsqrte", "HasFRSQRTE", "true",
                                         "Enable the frsqrte instruction",
-                                        [FeatureFPU]>;
+                                        [FeatureHardFloat]>;
 def FeatureFRSQRTES  : SubtargetFeature<"frsqrtes", "HasFRSQRTES", "true",
                                         "Enable the frsqrtes instruction",
-                                        [FeatureFPU]>;
+                                        [FeatureHardFloat]>;
 def FeatureRecipPrec : SubtargetFeature<"recipprec", "HasRecipPrec", "true",
                               "Assume higher precision reciprocal estimates">;
 def FeatureSTFIWX    : SubtargetFeature<"stfiwx","HasSTFIWX", "true",
                                         "Enable the stfiwx instruction",
-                                        [FeatureFPU]>;
+                                        [FeatureHardFloat]>;
 def FeatureLFIWAX    : SubtargetFeature<"lfiwax","HasLFIWAX", "true",
                                         "Enable the lfiwax instruction",
-                                        [FeatureFPU]>;
+                                        [FeatureHardFloat]>;
 def FeatureFPRND     : SubtargetFeature<"fprnd", "HasFPRND", "true",
                                         "Enable the fri[mnpz] instructions",
-                                        [FeatureFPU]>;
+                                        [FeatureHardFloat]>;
 def FeatureFPCVT     : SubtargetFeature<"fpcvt", "HasFPCVT", "true",
   "Enable fc[ft]* (unsigned and single-precision) and lfiwzx instructions",
-                                        [FeatureFPU]>;
+                                        [FeatureHardFloat]>;
 def FeatureISEL      : SubtargetFeature<"isel","HasISEL", "true",
                                         "Enable the isel instruction">;
 def FeatureBPERMD    : SubtargetFeature<"bpermd", "HasBPERMD", "true",
@@ -132,7 +127,7 @@ def FeaturePPC6xx    : SubtargetFeature<"ppc6xx", "IsPPC6xx", "true",
                                         "Enable PPC 6xx instructions">;
 def FeatureQPX       : SubtargetFeature<"qpx","HasQPX", "true",
                                         "Enable QPX instructions",
-                                        [FeatureFPU]>;
+                                        [FeatureHardFloat]>;
 def FeatureVSX       : SubtargetFeature<"vsx","HasVSX", "true",
                                         "Enable VSX instructions",
                                         [FeatureAltivec]>;
@@ -305,14 +300,14 @@ def : Processor<"generic", G3Itineraries, [Directive32, FeatureHardFloat,
                                            FeatureMFTB]>;
 def : ProcessorModel<"440", PPC440Model, [Directive440, FeatureISEL,
                                           FeatureFRES, FeatureFRSQRTE,
-                                          FeatureICBT, FeatureBookE,
+                                          FeatureICBT, FeatureBookE, 
                                           FeatureMSYNC, FeatureMFTB]>;
 def : ProcessorModel<"450", PPC440Model, [Directive440, FeatureISEL,
                                           FeatureFRES, FeatureFRSQRTE,
-                                          FeatureICBT, FeatureBookE,
+                                          FeatureICBT, FeatureBookE, 
                                           FeatureMSYNC, FeatureMFTB]>;
-def : Processor<"601", G3Itineraries, [Directive601, FeatureFPU]>;
-def : Processor<"602", G3Itineraries, [Directive602, FeatureFPU,
+def : Processor<"601", G3Itineraries, [Directive601, FeatureHardFloat]>;
+def : Processor<"602", G3Itineraries, [Directive602, FeatureHardFloat,
                                        FeatureMFTB]>;
 def : Processor<"603", G3Itineraries, [Directive603,
                                        FeatureFRES, FeatureFRSQRTE,
@@ -348,7 +343,7 @@ def : Processor<"7450", G4PlusItineraries, [Directive7400, FeatureAltivec,
                                             FeatureFRES, FeatureFRSQRTE,
                                             FeatureMFTB]>;
 def : Processor<"g4+", G4PlusItineraries, [Directive7400, FeatureAltivec,
-                                           FeatureFRES, FeatureFRSQRTE,
+                                           FeatureFRES, FeatureFRSQRTE, 
                                            FeatureMFTB]>;
 
 def : ProcessorModel<"970", G5Model,
@@ -363,17 +358,13 @@ def : ProcessorModel<"g5", G5Model,
                    FeatureFRES, FeatureFRSQRTE,
                    Feature64Bit /*, Feature64BitRegs */,
                    FeatureMFTB, DeprecatedDST]>;
-def : ProcessorModel<"e500", PPCE500Model,
-                  [DirectiveE500,
-                   FeatureICBT, FeatureBookE,
-                   FeatureISEL, FeatureMFTB]>;
 def : ProcessorModel<"e500mc", PPCE500mcModel,
                   [DirectiveE500mc,
-                   FeatureSTFIWX, FeatureICBT, FeatureBookE,
+                   FeatureSTFIWX, FeatureICBT, FeatureBookE, 
                    FeatureISEL, FeatureMFTB]>;
 def : ProcessorModel<"e5500", PPCE5500Model,
                   [DirectiveE5500, FeatureMFOCRF, Feature64Bit,
-                   FeatureSTFIWX, FeatureICBT, FeatureBookE,
+                   FeatureSTFIWX, FeatureICBT, FeatureBookE, 
                    FeatureISEL, FeatureMFTB]>;
 def : ProcessorModel<"a2", PPCA2Model,
                   [DirectiveA2, FeatureICBT, FeatureBookE, FeatureMFOCRF,
@@ -428,7 +419,7 @@ def : ProcessorModel<"pwr6x", G5Model,
                    FeatureMFTB, DeprecatedDST]>;
 def : ProcessorModel<"pwr7", P7Model, ProcessorFeatures.Power7FeatureList>;
 def : ProcessorModel<"pwr8", P8Model, ProcessorFeatures.Power8FeatureList>;
-def : ProcessorModel<"pwr9", P9Model, ProcessorFeatures.Power9FeatureList>;
+def : ProcessorModel<"pwr9", P9Model, ProcessorFeatures.Power9FeatureList>; 
 def : Processor<"ppc", G3Itineraries, [Directive32, FeatureHardFloat,
                                        FeatureMFTB]>;
 def : Processor<"ppc32", G3Itineraries, [Directive32, FeatureHardFloat,
@@ -478,9 +469,3 @@ def PPC : Target {
   let AssemblyParserVariants = [PPCAsmParserVariant];
   let AllowRegisterRenaming = 1;
 }
-
-//===----------------------------------------------------------------------===//
-// Pfm Counters
-//===----------------------------------------------------------------------===//
-
-include "PPCPfmCounters.td"

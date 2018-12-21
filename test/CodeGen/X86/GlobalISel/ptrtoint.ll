@@ -4,8 +4,7 @@
 define i1 @ptrtoint_s1_p0(i64* %p) {
 ; CHECK-LABEL: ptrtoint_s1_p0:
 ; CHECK:       # %bb.0: # %entry
-; CHECK-NEXT:    movq %rdi, %rax
-; CHECK-NEXT:    # kill: def $al killed $al killed $rax
+; CHECK-NEXT:    movl %edi, %eax
 ; CHECK-NEXT:    retq
 entry:
   %0 = ptrtoint i64* %p to i1
@@ -15,8 +14,7 @@ entry:
 define i8 @ptrtoint_s8_p0(i64* %p) {
 ; CHECK-LABEL: ptrtoint_s8_p0:
 ; CHECK:       # %bb.0: # %entry
-; CHECK-NEXT:    movq %rdi, %rax
-; CHECK-NEXT:    # kill: def $al killed $al killed $rax
+; CHECK-NEXT:    movl %edi, %eax
 ; CHECK-NEXT:    retq
 entry:
   %0 = ptrtoint i64* %p to i8
@@ -26,8 +24,7 @@ entry:
 define i16 @ptrtoint_s16_p0(i64* %p) {
 ; CHECK-LABEL: ptrtoint_s16_p0:
 ; CHECK:       # %bb.0: # %entry
-; CHECK-NEXT:    movq %rdi, %rax
-; CHECK-NEXT:    # kill: def $ax killed $ax killed $rax
+; CHECK-NEXT:    movl %edi, %eax
 ; CHECK-NEXT:    retq
 entry:
   %0 = ptrtoint i64* %p to i16
@@ -37,8 +34,7 @@ entry:
 define i32 @ptrtoint_s32_p0(i64* %p) {
 ; CHECK-LABEL: ptrtoint_s32_p0:
 ; CHECK:       # %bb.0: # %entry
-; CHECK-NEXT:    movq %rdi, %rax
-; CHECK-NEXT:    # kill: def $eax killed $eax killed $rax
+; CHECK-NEXT:    movl %edi, %eax
 ; CHECK-NEXT:    retq
 entry:
   %0 = ptrtoint i64* %p to i32

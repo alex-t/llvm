@@ -23,7 +23,6 @@ add_llvm_target(ARMCodeGen
   ARMBaseInstrInfo.cpp
   ARMBaseRegisterInfo.cpp
   ARMCallLowering.cpp
-  ARMCodeGenPrepare.cpp
   ARMConstantIslandPass.cpp
   ARMConstantPoolValue.cpp
   ARMExpandPseudoInsts.cpp
@@ -35,7 +34,6 @@ add_llvm_target(ARMCodeGen
   ARMISelLowering.cpp
   ARMInstrInfo.cpp
   ARMLegalizerInfo.cpp
-  ARMParallelDSP.cpp
   ARMLoadStoreOptimizer.cpp
   ARMMCInstLower.cpp
   ARMMachineFunctionInfo.cpp

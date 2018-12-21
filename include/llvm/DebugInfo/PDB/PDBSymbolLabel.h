@@ -19,8 +19,12 @@ class raw_ostream;
 namespace pdb {
 
 class PDBSymbolLabel : public PDBSymbol {
-  DECLARE_PDB_SYMBOL_CONCRETE_TYPE(PDB_SymType::Label)
 public:
+  PDBSymbolLabel(const IPDBSession &PDBSession,
+                 std::unique_ptr<IPDBRawSymbol> LabelSymbol);
+
+  DECLARE_PDB_SYMBOL_CONCRETE_TYPE(PDB_SymType::Label)
+
   void dump(PDBSymDumper &Dumper) const override;
 
   FORWARD_SYMBOL_METHOD(getAddressOffset)

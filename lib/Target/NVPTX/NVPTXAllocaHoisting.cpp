@@ -41,7 +41,7 @@ public:
 bool NVPTXAllocaHoisting::runOnFunction(Function &function) {
   bool functionModified = false;
   Function::iterator I = function.begin();
-  Instruction *firstTerminatorInst = (I++)->getTerminator();
+  TerminatorInst *firstTerminatorInst = (I++)->getTerminator();
 
   for (Function::iterator E = function.end(); I != E; ++I) {
     for (BasicBlock::iterator BI = I->begin(), BE = I->end(); BI != BE;) {

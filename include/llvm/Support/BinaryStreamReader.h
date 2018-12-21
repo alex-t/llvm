@@ -24,7 +24,7 @@
 
 namespace llvm {
 
-/// Provides read only access to a subclass of `BinaryStream`.  Provides
+/// \brief Provides read only access to a subclass of `BinaryStream`.  Provides
 /// bounds checking and helpers for writing certain common data types such as
 /// null-terminated strings, integers in various flavors of endianness, etc.
 /// Can be subclassed to provide reading of custom datatypes, although no
@@ -203,12 +203,11 @@ public:
   /// \returns a success error code if the data was successfully read, otherwise
   /// returns an appropriate error code.
   template <typename T, typename U>
-  Error readArray(VarStreamArray<T, U> &Array, uint32_t Size,
-                  uint32_t Skew = 0) {
+  Error readArray(VarStreamArray<T, U> &Array, uint32_t Size) {
     BinaryStreamRef S;
     if (auto EC = readStreamRef(S, Size))
       return EC;
-    Array.setUnderlyingStream(S, Skew);
+    Array.setUnderlyingStream(S);
     return Error::success();
   }
 

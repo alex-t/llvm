@@ -9,7 +9,6 @@
 
 #include "llvm/MC/MCSection.h"
 #include "llvm/ADT/SmallVector.h"
-#include "llvm/Config/llvm-config.h"
 #include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCFragment.h"
 #include "llvm/MC/MCSymbol.h"
@@ -23,8 +22,7 @@ using namespace llvm;
 
 MCSection::MCSection(SectionVariant V, SectionKind K, MCSymbol *Begin)
     : Begin(Begin), BundleGroupBeforeFirstInst(false), HasInstructions(false),
-      HasData(false), IsRegistered(false), DummyFragment(this), Variant(V),
-      Kind(K) {}
+      IsRegistered(false), DummyFragment(this), Variant(V), Kind(K) {}
 
 MCSymbol *MCSection::getEndSymbol(MCContext &Ctx) {
   if (!End)

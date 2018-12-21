@@ -45,7 +45,7 @@ namespace {
       initializeOptimizePHIsPass(*PassRegistry::getPassRegistry());
     }
 
-    bool runOnMachineFunction(MachineFunction &Fn) override;
+    bool runOnMachineFunction(MachineFunction &MF) override;
 
     void getAnalysisUsage(AnalysisUsage &AU) const override {
       AU.setPreservesCFG();
@@ -90,10 +90,10 @@ bool OptimizePHIs::runOnMachineFunction(MachineFunction &Fn) {
 }
 
 /// IsSingleValuePHICycle - Check if MI is a PHI where all the source operands
-/// are copies of SingleValReg, possibly via copies through other PHIs. If
+/// are copies of SingleValReg, possibly via copies through other PHIs.  If
 /// SingleValReg is zero on entry, it is set to the register with the single
-/// non-copy value. PHIsInCycle is a set used to keep track of the PHIs that
-/// have been scanned. PHIs may be grouped by cycle, several cycles or chains.
+/// non-copy value.  PHIsInCycle is a set used to keep track of the PHIs that
+/// have been scanned.
 bool OptimizePHIs::IsSingleValuePHICycle(MachineInstr *MI,
                                          unsigned &SingleValReg,
                                          InstrSet &PHIsInCycle) {
@@ -119,10 +119,8 @@ bool OptimizePHIs::IsSingleValuePHICycle(MachineInstr *MI,
     if (SrcMI && SrcMI->isCopy() &&
         !SrcMI->getOperand(0).getSubReg() &&
         !SrcMI->getOperand(1).getSubReg() &&
-        TargetRegisterInfo::isVirtualRegister(SrcMI->getOperand(1).getReg())) {
-      SrcReg = SrcMI->getOperand(1).getReg();
-      SrcMI = MRI->getVRegDef(SrcReg);
-    }
+        TargetRegisterInfo::isVirtualRegister(SrcMI->getOperand(1).getReg()))
+      SrcMI = MRI->getVRegDef(SrcMI->getOperand(1).getReg());
     if (!SrcMI)
       return false;
 
@@ -131,7 +129,7 @@ bool OptimizePHIs::IsSingleValuePHICycle(MachineInstr *MI,
         return false;
     } else {
       // Fail if there is more than one non-phi/non-move register.
-      if (SingleValReg != 0 && SingleValReg != SrcReg)
+      if (SingleValReg != 0)
         return false;
       SingleValReg = SrcReg;
     }
@@ -181,9 +179,6 @@ bool OptimizePHIs::OptimizeBB(MachineBasicBlock &MBB) {
       unsigned OldReg = MI->getOperand(0).getReg();
       if (!MRI->constrainRegClass(SingleValReg, MRI->getRegClass(OldReg)))
         continue;
-
-      // for the case SingleValReg taken from copy instr
-      MRI->clearKillFlags(SingleValReg);
 
       MRI->replaceRegWith(OldReg, SingleValReg);
       MI->eraseFromParent();

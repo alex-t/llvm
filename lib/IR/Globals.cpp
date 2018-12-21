@@ -108,11 +108,6 @@ unsigned GlobalValue::getAlignment() const {
   return cast<GlobalObject>(this)->getAlignment();
 }
 
-unsigned GlobalValue::getAddressSpace() const {
-  PointerType *PtrTy = getType();
-  return PtrTy->getAddressSpace();
-}
-
 void GlobalObject::setAlignment(unsigned Align) {
   assert((Align & (Align-1)) == 0 && "Alignment is not a power of 2!");
   assert(Align <= MaximumAlignment &&
@@ -252,7 +247,7 @@ bool GlobalValue::canIncreaseAlignment() const {
   // Conservatively assume ELF if there's no parent pointer.
   bool isELF =
       (!Parent || Triple(Parent->getTargetTriple()).isOSBinFormatELF());
-  if (isELF && !isDSOLocal())
+  if (isELF && hasDefaultVisibility() && !hasLocalLinkage())
     return false;
 
   return true;

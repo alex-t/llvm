@@ -55,11 +55,12 @@ class MCSymbol;
 /// GCPoint - Metadata for a collector-safe point in machine code.
 ///
 struct GCPoint {
+  GC::PointKind Kind; ///< The kind of the safe point.
   MCSymbol *Label;    ///< A label.
   DebugLoc Loc;
 
-  GCPoint(MCSymbol *L, DebugLoc DL)
-      : Label(L), Loc(std::move(DL)) {}
+  GCPoint(GC::PointKind K, MCSymbol *L, DebugLoc DL)
+      : Kind(K), Label(L), Loc(std::move(DL)) {}
 };
 
 /// GCRoot - Metadata for a pointer to an object managed by the garbage
@@ -123,8 +124,8 @@ public:
   /// addSafePoint - Notes the existence of a safe point. Num is the ID of the
   /// label just prior to the safe point (if the code generator is using
   /// MachineModuleInfo).
-  void addSafePoint(MCSymbol *Label, const DebugLoc &DL) {
-    SafePoints.emplace_back(Label, DL);
+  void addSafePoint(GC::PointKind Kind, MCSymbol *Label, const DebugLoc &DL) {
+    SafePoints.emplace_back(Kind, Label, DL);
   }
 
   /// getFrameSize/setFrameSize - Records the function's frame size.

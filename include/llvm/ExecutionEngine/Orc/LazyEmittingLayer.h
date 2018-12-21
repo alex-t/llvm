@@ -33,7 +33,7 @@
 namespace llvm {
 namespace orc {
 
-/// Lazy-emitting IR layer.
+/// @brief Lazy-emitting IR layer.
 ///
 ///   This layer accepts LLVM IR Modules (via addModule), but does not
 /// immediately emit them the layer below. Instead, emissing to the base layer
@@ -196,10 +196,10 @@ private:
 
 public:
 
-  /// Construct a lazy emitting layer.
+  /// @brief Construct a lazy emitting layer.
   LazyEmittingLayer(BaseLayerT &BaseLayer) : BaseLayer(BaseLayer) {}
 
-  /// Add the given module to the lazy emitting layer.
+  /// @brief Add the given module to the lazy emitting layer.
   Error addModule(VModuleKey K, std::unique_ptr<Module> M) {
     assert(!ModuleMap.count(K) && "VModuleKey K already in use");
     ModuleMap[K] =
@@ -207,7 +207,7 @@ public:
     return Error::success();
   }
 
-  /// Remove the module represented by the given handle.
+  /// @brief Remove the module represented by the given handle.
   ///
   ///   This method will free the memory associated with the given module, both
   /// in this layer, and the base layer.
@@ -219,7 +219,7 @@ public:
     return EDM->removeModuleFromBaseLayer(BaseLayer);
   }
 
-  /// Search for the given named symbol.
+  /// @brief Search for the given named symbol.
   /// @param Name The name of the symbol to search for.
   /// @param ExportedSymbolsOnly If true, search only for exported symbols.
   /// @return A handle for the given named symbol, if it exists.
@@ -239,7 +239,7 @@ public:
     return nullptr;
   }
 
-  /// Get the address of the given symbol in the context of the of
+  /// @brief Get the address of the given symbol in the context of the of
   ///        compiled modules represented by the key K.
   JITSymbol findSymbolIn(VModuleKey K, const std::string &Name,
                          bool ExportedSymbolsOnly) {
@@ -247,7 +247,7 @@ public:
     return ModuleMap[K]->find(Name, ExportedSymbolsOnly, BaseLayer);
   }
 
-  /// Immediately emit and finalize the module represented by the given
+  /// @brief Immediately emit and finalize the module represented by the given
   ///        key.
   Error emitAndFinalize(VModuleKey K) {
     assert(ModuleMap.count(K) && "VModuleKey K not valid here");

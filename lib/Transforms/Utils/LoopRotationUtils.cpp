@@ -20,15 +20,13 @@
 #include "llvm/Analysis/GlobalsModRef.h"
 #include "llvm/Analysis/InstructionSimplify.h"
 #include "llvm/Analysis/LoopPass.h"
-#include "llvm/Analysis/MemorySSA.h"
-#include "llvm/Analysis/MemorySSAUpdater.h"
 #include "llvm/Analysis/ScalarEvolution.h"
 #include "llvm/Analysis/ScalarEvolutionAliasAnalysis.h"
 #include "llvm/Analysis/TargetTransformInfo.h"
+#include "llvm/Analysis/Utils/Local.h"
 #include "llvm/Analysis/ValueTracking.h"
 #include "llvm/IR/CFG.h"
 #include "llvm/IR/DebugInfoMetadata.h"
-#include "llvm/IR/DomTreeUpdater.h"
 #include "llvm/IR/Dominators.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/IntrinsicInst.h"
@@ -37,7 +35,6 @@
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
-#include "llvm/Transforms/Utils/Local.h"
 #include "llvm/Transforms/Utils/LoopUtils.h"
 #include "llvm/Transforms/Utils/SSAUpdater.h"
 #include "llvm/Transforms/Utils/ValueMapper.h"
@@ -56,7 +53,6 @@ class LoopRotate {
   AssumptionCache *AC;
   DominatorTree *DT;
   ScalarEvolution *SE;
-  MemorySSAUpdater *MSSAU;
   const SimplifyQuery &SQ;
   bool RotationOnly;
   bool IsUtilMode;
@@ -64,11 +60,10 @@ class LoopRotate {
 public:
   LoopRotate(unsigned MaxHeaderSize, LoopInfo *LI,
              const TargetTransformInfo *TTI, AssumptionCache *AC,
-             DominatorTree *DT, ScalarEvolution *SE, MemorySSAUpdater *MSSAU,
-             const SimplifyQuery &SQ, bool RotationOnly, bool IsUtilMode)
+             DominatorTree *DT, ScalarEvolution *SE, const SimplifyQuery &SQ,
+             bool RotationOnly, bool IsUtilMode)
       : MaxHeaderSize(MaxHeaderSize), LI(LI), TTI(TTI), AC(AC), DT(DT), SE(SE),
-        MSSAU(MSSAU), SQ(SQ), RotationOnly(RotationOnly),
-        IsUtilMode(IsUtilMode) {}
+        SQ(SQ), RotationOnly(RotationOnly), IsUtilMode(IsUtilMode) {}
   bool processLoop(Loop *L);
 
 private:
@@ -240,16 +235,15 @@ bool LoopRotate::rotateLoop(Loop *L, bool SimplifiedLatch) {
     CodeMetrics Metrics;
     Metrics.analyzeBasicBlock(OrigHeader, *TTI, EphValues);
     if (Metrics.notDuplicatable) {
-      LLVM_DEBUG(
-          dbgs() << "LoopRotation: NOT rotating - contains non-duplicatable"
-                 << " instructions: ";
-          L->dump());
+      DEBUG(dbgs() << "LoopRotation: NOT rotating - contains non-duplicatable"
+                   << " instructions: ";
+            L->dump());
       return false;
     }
     if (Metrics.convergent) {
-      LLVM_DEBUG(dbgs() << "LoopRotation: NOT rotating - contains convergent "
-                           "instructions: ";
-                 L->dump());
+      DEBUG(dbgs() << "LoopRotation: NOT rotating - contains convergent "
+                      "instructions: ";
+            L->dump());
       return false;
     }
     if (Metrics.NumInsts > MaxHeaderSize)
@@ -272,9 +266,7 @@ bool LoopRotate::rotateLoop(Loop *L, bool SimplifiedLatch) {
   if (SE)
     SE->forgetTopmostLoop(L);
 
-  LLVM_DEBUG(dbgs() << "LoopRotation: rotating "; L->dump());
-  if (MSSAU && VerifyMemorySSA)
-    MSSAU->getMemorySSA()->verifyMemorySSA();
+  DEBUG(dbgs() << "LoopRotation: rotating "; L->dump());
 
   // Find new Loop header. NewHeader is a Header's one and only successor
   // that is inside loop.  Header's other successor is outside the
@@ -305,18 +297,18 @@ bool LoopRotate::rotateLoop(Loop *L, bool SimplifiedLatch) {
 
   // For the rest of the instructions, either hoist to the OrigPreheader if
   // possible or create a clone in the OldPreHeader if not.
-  Instruction *LoopEntryBranch = OrigPreheader->getTerminator();
+  TerminatorInst *LoopEntryBranch = OrigPreheader->getTerminator();
 
   // Record all debug intrinsics preceding LoopEntryBranch to avoid duplication.
   using DbgIntrinsicHash =
       std::pair<std::pair<Value *, DILocalVariable *>, DIExpression *>;
-  auto makeHash = [](DbgVariableIntrinsic *D) -> DbgIntrinsicHash {
+  auto makeHash = [](DbgInfoIntrinsic *D) -> DbgIntrinsicHash {
     return {{D->getVariableLocation(), D->getVariable()}, D->getExpression()};
   };
   SmallDenseSet<DbgIntrinsicHash, 8> DbgIntrinsics;
   for (auto I = std::next(OrigPreheader->rbegin()), E = OrigPreheader->rend();
        I != E; ++I) {
-    if (auto *DII = dyn_cast<DbgVariableIntrinsic>(&*I))
+    if (auto *DII = dyn_cast<DbgInfoIntrinsic>(&*I))
       DbgIntrinsics.insert(makeHash(DII));
     else
       break;
@@ -332,7 +324,7 @@ bool LoopRotate::rotateLoop(Loop *L, bool SimplifiedLatch) {
     // something that might trap, but isn't safe to hoist something that reads
     // memory (without proving that the loop doesn't write).
     if (L->hasLoopInvariantOperands(Inst) && !Inst->mayReadFromMemory() &&
-        !Inst->mayWriteToMemory() && !Inst->isTerminator() &&
+        !Inst->mayWriteToMemory() && !isa<TerminatorInst>(Inst) &&
         !isa<DbgInfoIntrinsic>(Inst) && !isa<AllocaInst>(Inst)) {
       Inst->moveBefore(LoopEntryBranch);
       continue;
@@ -346,7 +338,7 @@ bool LoopRotate::rotateLoop(Loop *L, bool SimplifiedLatch) {
                      RF_NoModuleLevelChanges | RF_IgnoreMissingLocals);
 
     // Avoid inserting the same intrinsic twice.
-    if (auto *DII = dyn_cast<DbgVariableIntrinsic>(C))
+    if (auto *DII = dyn_cast<DbgInfoIntrinsic>(C))
       if (DbgIntrinsics.count(makeHash(DII))) {
         C->deleteValue();
         continue;
@@ -381,7 +373,8 @@ bool LoopRotate::rotateLoop(Loop *L, bool SimplifiedLatch) {
   // Along with all the other instructions, we just cloned OrigHeader's
   // terminator into OrigPreHeader. Fix up the PHI nodes in each of OrigHeader's
   // successors by duplicating their incoming values for OrigHeader.
-  for (BasicBlock *SuccBB : successors(OrigHeader))
+  TerminatorInst *TI = OrigHeader->getTerminator();
+  for (BasicBlock *SuccBB : TI->successors())
     for (BasicBlock::iterator BI = SuccBB->begin();
          PHINode *PN = dyn_cast<PHINode>(BI); ++BI)
       PN->addIncoming(PN->getIncomingValueForBlock(OrigHeader), OrigPreheader);
@@ -391,12 +384,6 @@ bool LoopRotate::rotateLoop(Loop *L, bool SimplifiedLatch) {
   // remove the corresponding incoming values from the PHI nodes in OrigHeader.
   LoopEntryBranch->eraseFromParent();
 
-  // Update MemorySSA before the rewrite call below changes the 1:1
-  // instruction:cloned_instruction_or_value mapping in ValueMap.
-  if (MSSAU) {
-    ValueMap[OrigHeader] = OrigPreheader;
-    MSSAU->updateForClonedBlockIntoPred(OrigHeader, OrigPreheader, ValueMap);
-  }
 
   SmallVector<PHINode*, 2> InsertedPHIs;
   // If there were any uses of instructions in the duplicated block outside the
@@ -423,12 +410,6 @@ bool LoopRotate::rotateLoop(Loop *L, bool SimplifiedLatch) {
     Updates.push_back({DominatorTree::Insert, OrigPreheader, NewHeader});
     Updates.push_back({DominatorTree::Delete, OrigPreheader, OrigHeader});
     DT->applyUpdates(Updates);
-
-    if (MSSAU) {
-      MSSAU->applyUpdates(Updates, *DT);
-      if (VerifyMemorySSA)
-        MSSAU->getMemorySSA()->verifyMemorySSA();
-    }
   }
 
   // At this point, we've finished our major CFG changes.  As part of cloning
@@ -451,7 +432,7 @@ bool LoopRotate::rotateLoop(Loop *L, bool SimplifiedLatch) {
     // Split the edge to form a real preheader.
     BasicBlock *NewPH = SplitCriticalEdge(
         OrigPreheader, NewHeader,
-        CriticalEdgeSplittingOptions(DT, LI, MSSAU).setPreserveLCSSA());
+        CriticalEdgeSplittingOptions(DT, LI).setPreserveLCSSA());
     NewPH->setName(NewHeader->getName() + ".lr.ph");
 
     // Preserve canonical loop form, which means that 'Exit' should have only
@@ -470,7 +451,7 @@ bool LoopRotate::rotateLoop(Loop *L, bool SimplifiedLatch) {
       SplitLatchEdge |= L->getLoopLatch() == ExitPred;
       BasicBlock *ExitSplit = SplitCriticalEdge(
           ExitPred, Exit,
-          CriticalEdgeSplittingOptions(DT, LI, MSSAU).setPreserveLCSSA());
+          CriticalEdgeSplittingOptions(DT, LI).setPreserveLCSSA());
       ExitSplit->moveBefore(Exit);
     }
     assert(SplitLatchEdge &&
@@ -485,29 +466,18 @@ bool LoopRotate::rotateLoop(Loop *L, bool SimplifiedLatch) {
 
     // With our CFG finalized, update DomTree if it is available.
     if (DT) DT->deleteEdge(OrigPreheader, Exit);
-
-    // Update MSSA too, if available.
-    if (MSSAU)
-      MSSAU->removeEdge(OrigPreheader, Exit);
   }
 
   assert(L->getLoopPreheader() && "Invalid loop preheader after loop rotation");
   assert(L->getLoopLatch() && "Invalid loop latch after loop rotation");
 
-  if (MSSAU && VerifyMemorySSA)
-    MSSAU->getMemorySSA()->verifyMemorySSA();
-
   // Now that the CFG and DomTree are in a consistent state again, try to merge
   // the OrigHeader block into OrigLatch.  This will succeed if they are
   // connected by an unconditional branch.  This is just a cleanup so the
   // emitted code isn't too gross in this common case.
-  DomTreeUpdater DTU(DT, DomTreeUpdater::UpdateStrategy::Eager);
-  MergeBlockIntoPredecessor(OrigHeader, &DTU, LI, MSSAU);
+  MergeBlockIntoPredecessor(OrigHeader, DT, LI);
 
-  if (MSSAU && VerifyMemorySSA)
-    MSSAU->getMemorySSA()->verifyMemorySSA();
-
-  LLVM_DEBUG(dbgs() << "LoopRotation: into "; L->dump());
+  DEBUG(dbgs() << "LoopRotation: into "; L->dump());
 
   ++NumRotated;
   return true;
@@ -610,17 +580,12 @@ bool LoopRotate::simplifyLoopLatch(Loop *L) {
   if (!shouldSpeculateInstrs(Latch->begin(), Jmp->getIterator(), L))
     return false;
 
-  LLVM_DEBUG(dbgs() << "Folding loop latch " << Latch->getName() << " into "
-                    << LastExit->getName() << "\n");
+  DEBUG(dbgs() << "Folding loop latch " << Latch->getName() << " into "
+               << LastExit->getName() << "\n");
 
   // Hoist the instructions from Latch into LastExit.
-  Instruction *FirstLatchInst = &*(Latch->begin());
   LastExit->getInstList().splice(BI->getIterator(), Latch->getInstList(),
                                  Latch->begin(), Jmp->getIterator());
-
-  // Update MemorySSA
-  if (MSSAU)
-    MSSAU->moveAllAfterMergeBlocks(Latch, LastExit, FirstLatchInst);
 
   unsigned FallThruPath = BI->getSuccessor(0) == Latch ? 0 : 1;
   BasicBlock *Header = Jmp->getSuccessor(0);
@@ -637,10 +602,6 @@ bool LoopRotate::simplifyLoopLatch(Loop *L) {
   if (DT)
     DT->eraseNode(Latch);
   Latch->eraseFromParent();
-
-  if (MSSAU && VerifyMemorySSA)
-    MSSAU->getMemorySSA()->verifyMemorySSA();
-
   return true;
 }
 
@@ -673,16 +634,11 @@ bool LoopRotate::processLoop(Loop *L) {
 /// The utility to convert a loop into a loop with bottom test.
 bool llvm::LoopRotation(Loop *L, LoopInfo *LI, const TargetTransformInfo *TTI,
                         AssumptionCache *AC, DominatorTree *DT,
-                        ScalarEvolution *SE, MemorySSAUpdater *MSSAU,
-                        const SimplifyQuery &SQ, bool RotationOnly = true,
+                        ScalarEvolution *SE, const SimplifyQuery &SQ,
+                        bool RotationOnly = true,
                         unsigned Threshold = unsigned(-1),
                         bool IsUtilMode = true) {
-  if (MSSAU && VerifyMemorySSA)
-    MSSAU->getMemorySSA()->verifyMemorySSA();
-  LoopRotate LR(Threshold, LI, TTI, AC, DT, SE, MSSAU, SQ, RotationOnly,
-                IsUtilMode);
-  if (MSSAU && VerifyMemorySSA)
-    MSSAU->getMemorySSA()->verifyMemorySSA();
+  LoopRotate LR(Threshold, LI, TTI, AC, DT, SE, SQ, RotationOnly, IsUtilMode);
 
   return LR.processLoop(L);
 }

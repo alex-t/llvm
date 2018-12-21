@@ -31,8 +31,7 @@ static Reloc::Model getEffectiveRelocModel(Optional<Reloc::Model> RM) {
   return *RM;
 }
 
-static CodeModel::Model
-getEffectiveXCoreCodeModel(Optional<CodeModel::Model> CM) {
+static CodeModel::Model getEffectiveCodeModel(Optional<CodeModel::Model> CM) {
   if (CM) {
     if (*CM != CodeModel::Small && *CM != CodeModel::Large)
       report_fatal_error("Target only supports CodeModel Small or Large");
@@ -52,7 +51,7 @@ XCoreTargetMachine::XCoreTargetMachine(const Target &T, const Triple &TT,
     : LLVMTargetMachine(
           T, "e-m:e-p:32:32-i1:8:32-i8:8:32-i16:16:32-i64:32-f64:32-a:0:32-n32",
           TT, CPU, FS, Options, getEffectiveRelocModel(RM),
-          getEffectiveXCoreCodeModel(CM), OL),
+          getEffectiveCodeModel(CM), OL),
       TLOF(llvm::make_unique<XCoreTargetObjectFile>()),
       Subtarget(TT, CPU, FS, *this) {
   initAsmInfo();

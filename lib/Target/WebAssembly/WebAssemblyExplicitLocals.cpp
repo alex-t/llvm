@@ -8,7 +8,7 @@
 //===----------------------------------------------------------------------===//
 ///
 /// \file
-/// This file converts any remaining registers into WebAssembly locals.
+/// \brief This file converts any remaining registers into WebAssembly locals.
 ///
 /// After register stackification and register coloring, convert non-stackified
 /// registers into locals, inserting explicit get_local and set_local
@@ -31,14 +31,12 @@ using namespace llvm;
 
 #define DEBUG_TYPE "wasm-explicit-locals"
 
-// A command-line option to disable this pass, and keep implicit locals
-// for the purpose of testing with lit/llc ONLY.
-// This produces output which is not valid WebAssembly, and is not supported
-// by assemblers/disassemblers and other MC based tools.
-static cl::opt<bool> WasmDisableExplicitLocals(
-    "wasm-disable-explicit-locals", cl::Hidden,
-    cl::desc("WebAssembly: output implicit locals in"
-             " instruction output for test purposes only."),
+// A command-line option to disable this pass. Note that this produces output
+// which is not valid WebAssembly, though it may be more convenient for writing
+// LLVM unit tests with.
+static cl::opt<bool> DisableWebAssemblyExplicitLocals(
+    "disable-wasm-explicit-locals", cl::ReallyHidden,
+    cl::desc("WebAssembly: Disable emission of get_local/set_local."),
     cl::init(false));
 
 namespace {
@@ -157,8 +155,6 @@ static MVT typeForRegClass(const TargetRegisterClass *RC) {
     return MVT::f32;
   if (RC == &WebAssembly::F64RegClass)
     return MVT::f64;
-  if (RC == &WebAssembly::V128RegClass)
-    return MVT::v16i8;
   if (RC == &WebAssembly::EXCEPT_REFRegClass)
     return MVT::ExceptRef;
   llvm_unreachable("unrecognized register class");
@@ -166,7 +162,7 @@ static MVT typeForRegClass(const TargetRegisterClass *RC) {
 
 /// Given a MachineOperand of a stackified vreg, return the instruction at the
 /// start of the expression tree.
-static MachineInstr *findStartOfTree(MachineOperand &MO,
+static MachineInstr *FindStartOfTree(MachineOperand &MO,
                                      MachineRegisterInfo &MRI,
                                      WebAssemblyFunctionInfo &MFI) {
   unsigned Reg = MO.getReg();
@@ -177,7 +173,7 @@ static MachineInstr *findStartOfTree(MachineOperand &MO,
   for (MachineOperand &DefMO : Def->explicit_uses()) {
     if (!DefMO.isReg())
       continue;
-    return findStartOfTree(DefMO, MRI, MFI);
+    return FindStartOfTree(DefMO, MRI, MFI);
   }
 
   // If there were no stackified uses, we've reached the start.
@@ -185,12 +181,17 @@ static MachineInstr *findStartOfTree(MachineOperand &MO,
 }
 
 bool WebAssemblyExplicitLocals::runOnMachineFunction(MachineFunction &MF) {
-  LLVM_DEBUG(dbgs() << "********** Make Locals Explicit **********\n"
-                       "********** Function: "
-                    << MF.getName() << '\n');
+  DEBUG(dbgs() << "********** Make Locals Explicit **********\n"
+                  "********** Function: "
+               << MF.getName() << '\n');
 
   // Disable this pass if directed to do so.
-  if (WasmDisableExplicitLocals)
+  if (DisableWebAssemblyExplicitLocals)
+    return false;
+
+  // Disable this pass if we aren't doing direct wasm object emission.
+  if (MF.getSubtarget<WebAssemblySubtarget>()
+        .getTargetTriple().isOSBinFormatELF())
     return false;
 
   bool Changed = false;
@@ -210,19 +211,19 @@ bool WebAssemblyExplicitLocals::runOnMachineFunction(MachineFunction &MF) {
       break;
     unsigned Reg = MI.getOperand(0).getReg();
     assert(!MFI.isVRegStackified(Reg));
-    Reg2Local[Reg] = static_cast<unsigned>(MI.getOperand(1).getImm());
+    Reg2Local[Reg] = MI.getOperand(1).getImm();
     MI.eraseFromParent();
     Changed = true;
   }
 
   // Start assigning local numbers after the last parameter.
-  unsigned CurLocal = static_cast<unsigned>(MFI.getParams().size());
+  unsigned CurLocal = MFI.getParams().size();
 
   // Precompute the set of registers that are unused, so that we can insert
   // drops to their defs.
   BitVector UseEmpty(MRI.getNumVirtRegs());
-  for (unsigned I = 0, E = MRI.getNumVirtRegs(); I < E; ++I)
-    UseEmpty[I] = MRI.use_empty(TargetRegisterInfo::index2VirtReg(I));
+  for (unsigned i = 0, e = MRI.getNumVirtRegs(); i < e; ++i)
+    UseEmpty[i] = MRI.use_empty(TargetRegisterInfo::index2VirtReg(i));
 
   // Visit each instruction in the function.
   for (MachineBasicBlock &MBB : MF) {
@@ -230,7 +231,7 @@ bool WebAssemblyExplicitLocals::runOnMachineFunction(MachineFunction &MF) {
       MachineInstr &MI = *I++;
       assert(!WebAssembly::isArgument(MI));
 
-      if (MI.isDebugInstr() || MI.isLabel())
+      if (MI.isDebugValue() || MI.isLabel())
         continue;
 
       // Replace tee instructions with tee_local. The difference is that tee
@@ -283,11 +284,8 @@ bool WebAssemblyExplicitLocals::runOnMachineFunction(MachineFunction &MF) {
           }
           if (UseEmpty[TargetRegisterInfo::virtReg2Index(OldReg)]) {
             unsigned Opc = getDropOpcode(RC);
-            MachineInstr *Drop =
-                BuildMI(MBB, InsertPt, MI.getDebugLoc(), TII->get(Opc))
-                    .addReg(NewReg);
-            // After the drop instruction, this reg operand will not be used
-            Drop->getOperand(0).setIsKill();
+            BuildMI(MBB, InsertPt, MI.getDebugLoc(), TII->get(Opc))
+                .addReg(NewReg);
           } else {
             unsigned LocalId = getLocalId(Reg2Local, CurLocal, OldReg);
             unsigned Opc = getSetLocalOpcode(RC);
@@ -296,9 +294,6 @@ bool WebAssemblyExplicitLocals::runOnMachineFunction(MachineFunction &MF) {
                 .addReg(NewReg);
           }
           MI.getOperand(0).setReg(NewReg);
-          // This register operand is now being used by the inserted drop
-          // instruction, so make it undead.
-          MI.getOperand(0).setIsDead(false);
           MFI.stackifyVReg(NewReg);
           Changed = true;
         }
@@ -318,17 +313,15 @@ bool WebAssemblyExplicitLocals::runOnMachineFunction(MachineFunction &MF) {
         if (MO.isDef()) {
           assert(MI.getOpcode() == TargetOpcode::INLINEASM);
           unsigned LocalId = getLocalId(Reg2Local, CurLocal, OldReg);
-          // If this register operand is tied to another operand, we can't
-          // change it to an immediate. Untie it first.
-          MI.untieRegOperand(MI.getOperandNo(&MO));
-          MO.ChangeToImmediate(LocalId);
+          MRI.removeRegOperandFromUseList(&MO);
+          MO = MachineOperand::CreateImm(LocalId);
           continue;
         }
 
         // If we see a stackified register, prepare to insert subsequent
         // get_locals before the start of its tree.
         if (MFI.isVRegStackified(OldReg)) {
-          InsertPt = findStartOfTree(MO, MRI, MFI);
+          InsertPt = FindStartOfTree(MO, MRI, MFI);
           continue;
         }
 
@@ -336,9 +329,8 @@ bool WebAssemblyExplicitLocals::runOnMachineFunction(MachineFunction &MF) {
         // indices as immediates.
         if (MI.getOpcode() == TargetOpcode::INLINEASM) {
           unsigned LocalId = getLocalId(Reg2Local, CurLocal, OldReg);
-          // Untie it first if this reg operand is tied to another operand.
-          MI.untieRegOperand(MI.getOperandNo(&MO));
-          MO.ChangeToImmediate(LocalId);
+          MRI.removeRegOperandFromUseList(&MO);
+          MO = MachineOperand::CreateImm(LocalId);
           continue;
         }
 
@@ -368,13 +360,13 @@ bool WebAssemblyExplicitLocals::runOnMachineFunction(MachineFunction &MF) {
   // Define the locals.
   // TODO: Sort the locals for better compression.
   MFI.setNumLocals(CurLocal - MFI.getParams().size());
-  for (unsigned I = 0, E = MRI.getNumVirtRegs(); I < E; ++I) {
-    unsigned Reg = TargetRegisterInfo::index2VirtReg(I);
-    auto RL = Reg2Local.find(Reg);
-    if (RL == Reg2Local.end() || RL->second < MFI.getParams().size())
+  for (size_t i = 0, e = MRI.getNumVirtRegs(); i < e; ++i) {
+    unsigned Reg = TargetRegisterInfo::index2VirtReg(i);
+    auto I = Reg2Local.find(Reg);
+    if (I == Reg2Local.end() || I->second < MFI.getParams().size())
       continue;
 
-    MFI.setLocal(RL->second - MFI.getParams().size(),
+    MFI.setLocal(I->second - MFI.getParams().size(),
                  typeForRegClass(MRI.getRegClass(Reg)));
     Changed = true;
   }
@@ -383,7 +375,7 @@ bool WebAssemblyExplicitLocals::runOnMachineFunction(MachineFunction &MF) {
   // Assert that all registers have been stackified at this point.
   for (const MachineBasicBlock &MBB : MF) {
     for (const MachineInstr &MI : MBB) {
-      if (MI.isDebugInstr() || MI.isLabel())
+      if (MI.isDebugValue() || MI.isLabel())
         continue;
       for (const MachineOperand &MO : MI.explicit_operands()) {
         assert(

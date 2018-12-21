@@ -15,7 +15,6 @@
 //===----------------------------------------------------------------------===//
 #include "llvm/Analysis/RegionPass.h"
 #include "llvm/IR/OptBisect.h"
-#include "llvm/IR/PassTimingInfo.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/Timer.h"
 #include "llvm/Support/raw_ostream.h"
@@ -159,9 +158,12 @@ bool RGPassManager::runOnFunction(Function &F) {
   }
 
   // Print the region tree after all pass.
-  LLVM_DEBUG(dbgs() << "\nRegion tree of function " << F.getName()
-                    << " after all region Pass:\n";
-             RI->dump(); dbgs() << "\n";);
+  DEBUG(
+    dbgs() << "\nRegion tree of function " << F.getName()
+           << " after all region Pass:\n";
+    RI->dump();
+    dbgs() << "\n";
+    );
 
   return Changed;
 }
@@ -287,8 +289,8 @@ bool RegionPass::skipRegion(Region &R) const {
   if (F.hasFnAttribute(Attribute::OptimizeNone)) {
     // Report this only once per function.
     if (R.getEntry() == &F.getEntryBlock())
-      LLVM_DEBUG(dbgs() << "Skipping pass '" << getPassName()
-                        << "' on function " << F.getName() << "\n");
+      DEBUG(dbgs() << "Skipping pass '" << getPassName()
+            << "' on function " << F.getName() << "\n");
     return true;
   }
   return false;

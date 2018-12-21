@@ -1,5 +1,5 @@
 ; RUN: llc -march=hexagon -trap-unreachable < %s | FileCheck %s
-; CHECK: trap
+; CHECK: call abort
 
 define void @fred() #0 {
   unreachable

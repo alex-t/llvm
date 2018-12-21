@@ -15,7 +15,6 @@
 #include "llvm/CodeGen/MachineFunctionPass.h"
 #include "llvm/CodeGen/Passes.h"
 #include "llvm/CodeGen/SlotIndexes.h"
-#include "llvm/IR/IRPrintingPasses.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
 
@@ -39,7 +38,6 @@ struct MachineFunctionPrinterPass : public MachineFunctionPass {
 
   void getAnalysisUsage(AnalysisUsage &AU) const override {
     AU.setPreservesAll();
-    AU.addUsedIfAvailable<SlotIndexes>();
     MachineFunctionPass::getAnalysisUsage(AU);
   }
 

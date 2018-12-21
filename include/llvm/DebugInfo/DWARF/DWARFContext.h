@@ -57,7 +57,8 @@ enum class ErrorPolicy { Halt, Continue };
 /// This data structure is the top level entity that deals with dwarf debug
 /// information parsing. The actual data is supplied through DWARFObj.
 class DWARFContext : public DIContext {
-  DWARFUnitVector NormalUnits;
+  DWARFUnitSection<DWARFCompileUnit> CUs;
+  std::deque<DWARFUnitSection<DWARFTypeUnit>> TUs;
   std::unique_ptr<DWARFUnitIndex> CUIndex;
   std::unique_ptr<DWARFGdbIndex> GdbIndex;
   std::unique_ptr<DWARFUnitIndex> TUIndex;
@@ -74,9 +75,10 @@ class DWARFContext : public DIContext {
   std::unique_ptr<AppleAcceleratorTable> AppleNamespaces;
   std::unique_ptr<AppleAcceleratorTable> AppleObjC;
 
-  DWARFUnitVector DWOUnits;
+  DWARFUnitSection<DWARFCompileUnit> DWOCUs;
+  std::deque<DWARFUnitSection<DWARFTypeUnit>> DWOTUs;
   std::unique_ptr<DWARFDebugAbbrev> AbbrevDWO;
-  std::unique_ptr<DWARFDebugLoclists> LocDWO;
+  std::unique_ptr<DWARFDebugLocDWO> LocDWO;
 
   /// The maximum DWARF version of all units.
   unsigned MaxVersion = 0;
@@ -93,17 +95,22 @@ class DWARFContext : public DIContext {
   std::unique_ptr<MCRegisterInfo> RegInfo;
 
   /// Read compile units from the debug_info section (if necessary)
-  /// and type units from the debug_types sections (if necessary)
-  /// and store them in NormalUnits.
-  void parseNormalUnits();
+  /// and store them in CUs.
+  void parseCompileUnits();
+
+  /// Read type units from the debug_types sections (if necessary)
+  /// and store them in TUs.
+  void parseTypeUnits();
 
   /// Read compile units from the debug_info.dwo section (if necessary)
-  /// and type units from the debug_types.dwo section (if necessary)
-  /// and store them in DWOUnits.
-  /// If \p Lazy is true, set up to parse but don't actually parse them.
-  enum { EagerParse = false, LazyParse = true };
-  void parseDWOUnits(bool Lazy = false);
+  /// and store them in DWOCUs.
+  void parseDWOCompileUnits();
 
+  /// Read type units from the debug_types.dwo section (if necessary)
+  /// and store them in DWOTUs.
+  void parseDWOTypeUnits();
+
+protected:
   std::unique_ptr<const DWARFObject> DObj;
 
 public:
@@ -132,116 +139,76 @@ public:
 
   bool verify(raw_ostream &OS, DIDumpOptions DumpOpts = {}) override;
 
-  using unit_iterator_range = DWARFUnitVector::iterator_range;
-
-  /// Get units from .debug_info in this context.
-  unit_iterator_range info_section_units() {
-    parseNormalUnits();
-    return unit_iterator_range(NormalUnits.begin(),
-                               NormalUnits.begin() +
-                                   NormalUnits.getNumInfoUnits());
-  }
-
-  /// Get units from .debug_types in this context.
-  unit_iterator_range types_section_units() {
-    parseNormalUnits();
-    return unit_iterator_range(
-        NormalUnits.begin() + NormalUnits.getNumInfoUnits(), NormalUnits.end());
-  }
+  using cu_iterator_range = DWARFUnitSection<DWARFCompileUnit>::iterator_range;
+  using tu_iterator_range = DWARFUnitSection<DWARFTypeUnit>::iterator_range;
+  using tu_section_iterator_range = iterator_range<decltype(TUs)::iterator>;
 
   /// Get compile units in this context.
-  unit_iterator_range compile_units() { return info_section_units(); }
+  cu_iterator_range compile_units() {
+    parseCompileUnits();
+    return cu_iterator_range(CUs.begin(), CUs.end());
+  }
 
   /// Get type units in this context.
-  unit_iterator_range type_units() { return types_section_units(); }
-
-  /// Get all normal compile/type units in this context.
-  unit_iterator_range normal_units() {
-    parseNormalUnits();
-    return unit_iterator_range(NormalUnits.begin(), NormalUnits.end());
-  }
-
-  /// Get units from .debug_info..dwo in the DWO context.
-  unit_iterator_range dwo_info_section_units() {
-    parseDWOUnits();
-    return unit_iterator_range(DWOUnits.begin(),
-                               DWOUnits.begin() + DWOUnits.getNumInfoUnits());
-  }
-
-  /// Get units from .debug_types.dwo in the DWO context.
-  unit_iterator_range dwo_types_section_units() {
-    parseDWOUnits();
-    return unit_iterator_range(DWOUnits.begin() + DWOUnits.getNumInfoUnits(),
-                               DWOUnits.end());
+  tu_section_iterator_range type_unit_sections() {
+    parseTypeUnits();
+    return tu_section_iterator_range(TUs.begin(), TUs.end());
   }
 
   /// Get compile units in the DWO context.
-  unit_iterator_range dwo_compile_units() { return dwo_info_section_units(); }
+  cu_iterator_range dwo_compile_units() {
+    parseDWOCompileUnits();
+    return cu_iterator_range(DWOCUs.begin(), DWOCUs.end());
+  }
 
   /// Get type units in the DWO context.
-  unit_iterator_range dwo_type_units() { return dwo_types_section_units(); }
-
-  /// Get all units in the DWO context.
-  unit_iterator_range dwo_units() {
-    parseDWOUnits();
-    return unit_iterator_range(DWOUnits.begin(), DWOUnits.end());
+  tu_section_iterator_range dwo_type_unit_sections() {
+    parseDWOTypeUnits();
+    return tu_section_iterator_range(DWOTUs.begin(), DWOTUs.end());
   }
 
   /// Get the number of compile units in this context.
   unsigned getNumCompileUnits() {
-    parseNormalUnits();
-    return NormalUnits.getNumInfoUnits();
+    parseCompileUnits();
+    return CUs.size();
   }
 
-  /// Get the number of type units in this context.
+  /// Get the number of compile units in this context.
   unsigned getNumTypeUnits() {
-    parseNormalUnits();
-    return NormalUnits.getNumTypesUnits();
+    parseTypeUnits();
+    return TUs.size();
   }
 
   /// Get the number of compile units in the DWO context.
   unsigned getNumDWOCompileUnits() {
-    parseDWOUnits();
-    return DWOUnits.getNumInfoUnits();
+    parseDWOCompileUnits();
+    return DWOCUs.size();
   }
 
-  /// Get the number of type units in the DWO context.
+  /// Get the number of compile units in the DWO context.
   unsigned getNumDWOTypeUnits() {
-    parseDWOUnits();
-    return DWOUnits.getNumTypesUnits();
+    parseDWOTypeUnits();
+    return DWOTUs.size();
   }
 
-  /// Get the unit at the specified index.
-  DWARFUnit *getUnitAtIndex(unsigned index) {
-    parseNormalUnits();
-    return NormalUnits[index].get();
+  /// Get the compile unit at the specified index for this compile unit.
+  DWARFCompileUnit *getCompileUnitAtIndex(unsigned index) {
+    parseCompileUnits();
+    return CUs[index].get();
   }
 
-  /// Get the unit at the specified index for the DWO units.
-  DWARFUnit *getDWOUnitAtIndex(unsigned index) {
-    parseDWOUnits();
-    return DWOUnits[index].get();
+  /// Get the compile unit at the specified index for the DWO compile units.
+  DWARFCompileUnit *getDWOCompileUnitAtIndex(unsigned index) {
+    parseDWOCompileUnits();
+    return DWOCUs[index].get();
   }
 
   DWARFCompileUnit *getDWOCompileUnitForHash(uint64_t Hash);
 
-  /// Return the compile unit that includes an offset (relative to .debug_info).
-  DWARFCompileUnit *getCompileUnitForOffset(uint32_t Offset);
-
   /// Get a DIE given an exact offset.
   DWARFDie getDIEForOffset(uint32_t Offset);
 
-  unsigned getMaxVersion() {
-    // Ensure info units have been parsed to discover MaxVersion
-    info_section_units();
-    return MaxVersion;
-  }
-
-  unsigned getMaxDWOVersion() {
-    // Ensure DWO info units have been parsed to discover MaxVersion
-    dwo_info_section_units();
-    return MaxVersion;
-  }
+  unsigned getMaxVersion() const { return MaxVersion; }
 
   void setMaxVersionIfGreater(unsigned Version) {
     if (Version > MaxVersion)
@@ -262,7 +229,7 @@ public:
   const DWARFDebugAbbrev *getDebugAbbrevDWO();
 
   /// Get a pointer to the parsed DebugLoc object.
-  const DWARFDebugLoclists *getDebugLocDWO();
+  const DWARFDebugLocDWO *getDebugLocDWO();
 
   /// Get a pointer to the parsed DebugAranges object.
   const DWARFDebugAranges *getDebugAranges();
@@ -292,14 +259,7 @@ public:
   const AppleAcceleratorTable &getAppleObjC();
 
   /// Get a pointer to a parsed line table corresponding to a compile unit.
-  /// Report any parsing issues as warnings on stderr.
-  const DWARFDebugLine::LineTable *getLineTableForUnit(DWARFUnit *U);
-
-  /// Get a pointer to a parsed line table corresponding to a compile unit.
-  /// Report any recoverable parsing problems using the callback.
-  Expected<const DWARFDebugLine::LineTable *>
-  getLineTableForUnit(DWARFUnit *U,
-                      std::function<void(Error)> RecoverableErrorCallback);
+  const DWARFDebugLine::LineTable *getLineTableForUnit(DWARFUnit *cu);
 
   DataExtractor getStringExtractor() const {
     return DataExtractor(DObj->getStringSection(), false, 0);
@@ -353,14 +313,10 @@ public:
   /// have initialized the relevant target descriptions.
   Error loadRegisterInfo(const object::ObjectFile &Obj);
 
-  /// Get address size from CUs.
-  /// TODO: refactor compile_units() to make this const.
-  uint8_t getCUAddrSize();
-
-  /// Dump Error as warning message to stderr.
-  static void dumpWarning(Error Warning);
-
 private:
+  /// Return the compile unit that includes an offset (relative to .debug_info).
+  DWARFCompileUnit *getCompileUnitForOffset(uint32_t Offset);
+
   /// Return the compile unit which contains instruction with provided
   /// address.
   DWARFCompileUnit *getCompileUnitForAddress(uint64_t Address);

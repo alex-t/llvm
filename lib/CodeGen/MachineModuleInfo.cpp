@@ -194,7 +194,7 @@ void MMIAddrLabelMapCallbackPtr::allUsesReplacedWith(Value *V2) {
   Map->UpdateForRAUWBlock(cast<BasicBlock>(getValPtr()), cast<BasicBlock>(V2));
 }
 
-MachineModuleInfo::MachineModuleInfo(const LLVMTargetMachine *TM)
+MachineModuleInfo::MachineModuleInfo(const TargetMachine *TM)
   : ImmutablePass(ID), TM(*TM),
     Context(TM->getMCAsmInfo(), TM->getMCRegisterInfo(),
             TM->getObjFileLowering(), nullptr, false) {
@@ -206,11 +206,10 @@ MachineModuleInfo::~MachineModuleInfo() = default;
 bool MachineModuleInfo::doInitialization(Module &M) {
   ObjFileMMI = nullptr;
   CurCallSite = 0;
-  UsesVAFloatArgument = UsesMorestackAddr = false;
+  DbgInfoAvailable = UsesVAFloatArgument = UsesMorestackAddr = false;
   HasSplitStack = HasNosplitStack = false;
   AddrLabelSymbols = nullptr;
   TheModule = &M;
-  DbgInfoAvailable = !empty(M.debug_compile_units());
   return false;
 }
 
@@ -315,10 +314,10 @@ public:
     MMI.deleteMachineFunctionFor(F);
     return true;
   }
-
+  
   StringRef getPassName() const override {
     return "Free MachineFunction";
-  }
+  } 
 };
 
 } // end anonymous namespace

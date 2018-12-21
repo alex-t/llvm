@@ -33,9 +33,7 @@ class FormattedBytes;
 
 namespace sys {
 namespace fs {
-enum FileAccess : unsigned;
 enum OpenFlags : unsigned;
-enum CreationDisposition : unsigned;
 } // end namespace fs
 } // end namespace sys
 
@@ -220,7 +218,7 @@ public:
   raw_ostream &write_uuid(const uuid_t UUID);
 
   /// Output \p Str, turning '\\', '\t', '\n', '"', and anything that doesn't
-  /// satisfy llvm::isPrint into an escape sequence.
+  /// satisfy std::isprint into an escape sequence.
   raw_ostream &write_escaped(StringRef Str, bool UseHexEscapes = false);
 
   raw_ostream &write(unsigned char C);
@@ -243,9 +241,6 @@ public:
 
   /// indent - Insert 'NumSpaces' spaces.
   raw_ostream &indent(unsigned NumSpaces);
-
-  /// write_zeros - Insert 'NumZeros' nulls.
-  raw_ostream &write_zeros(unsigned NumZeros);
 
   /// Changes the foreground color of text that will be output from this point
   /// forward.
@@ -297,6 +292,9 @@ private:
   ///
   /// \invariant { Size > 0 }
   virtual void write_impl(const char *Ptr, size_t Size) = 0;
+
+  // An out of line virtual method to provide a home for the class vtable.
+  virtual void handle();
 
   /// Return the current position within the stream, not counting the bytes
   /// currently in the buffer.
@@ -367,17 +365,11 @@ class raw_fd_ostream : public raw_pwrite_stream {
   int FD;
   bool ShouldClose;
 
-  bool SupportsSeeking;
-
-#ifdef _WIN32
-  /// True if this fd refers to a Windows console device. Mintty and other
-  /// terminal emulators are TTYs, but they are not consoles.
-  bool IsWindowsConsole = false;
-#endif
-
   std::error_code EC;
 
   uint64_t pos;
+
+  bool SupportsSeeking;
 
   /// See raw_ostream::write_impl.
   void write_impl(const char *Ptr, size_t Size) override;
@@ -405,15 +397,7 @@ public:
   /// As a special case, if Filename is "-", then the stream will use
   /// STDOUT_FILENO instead of opening a file. This will not close the stdout
   /// descriptor.
-  raw_fd_ostream(StringRef Filename, std::error_code &EC);
   raw_fd_ostream(StringRef Filename, std::error_code &EC,
-                 sys::fs::CreationDisposition Disp);
-  raw_fd_ostream(StringRef Filename, std::error_code &EC,
-                 sys::fs::FileAccess Access);
-  raw_fd_ostream(StringRef Filename, std::error_code &EC,
-                 sys::fs::OpenFlags Flags);
-  raw_fd_ostream(StringRef Filename, std::error_code &EC,
-                 sys::fs::CreationDisposition Disp, sys::fs::FileAccess Access,
                  sys::fs::OpenFlags Flags);
 
   /// FD is the file descriptor that this writes to.  If ShouldClose is true,

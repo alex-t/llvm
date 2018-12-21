@@ -12,7 +12,6 @@
 #include "LinePrinter.h"
 #include "PrettyBuiltinDumper.h"
 #include "PrettyFunctionDumper.h"
-#include "PrettyTypeDumper.h"
 
 #include "llvm/DebugInfo/PDB/IPDBSession.h"
 #include "llvm/DebugInfo/PDB/PDBExtras.h"
@@ -36,10 +35,7 @@ void TypedefDumper::start(const PDBSymbolTypeTypedef &Symbol) {
                                                       << Symbol.getName();
 }
 
-void TypedefDumper::dump(const PDBSymbolTypeArray &Symbol) {
-  TypeDumper Dumper(Printer);
-  Dumper.dump(Symbol);
-}
+void TypedefDumper::dump(const PDBSymbolTypeArray &Symbol) {}
 
 void TypedefDumper::dump(const PDBSymbolTypeBuiltin &Symbol) {
   BuiltinDumper Dumper(Printer);

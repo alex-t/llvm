@@ -101,7 +101,6 @@
 
 #include "llvm/ADT/PointerIntPair.h"
 #include "llvm/ADT/SmallVector.h"
-#include "llvm/ADT/bit.h"
 #include "llvm/Support/AlignOf.h"
 #include "llvm/Support/Allocator.h"
 #include "llvm/Support/RecyclingAllocator.h"
@@ -964,7 +963,6 @@ public:
 
 private:
   // The root data is either a RootLeaf or a RootBranchData instance.
-  LLVM_ALIGNAS(RootLeaf) LLVM_ALIGNAS(RootBranchData)
   AlignedCharArrayUnion<RootLeaf, RootBranchData> data;
 
   // Tree height.
@@ -979,10 +977,15 @@ private:
   // Allocator used for creating external nodes.
   Allocator &allocator;
 
-  /// Represent data as a node type without breaking aliasing rules.
+  /// dataAs - Represent data as a node type without breaking aliasing rules.
   template <typename T>
   T &dataAs() const {
-    return *bit_cast<T *>(const_cast<char *>(data.buffer));
+    union {
+      const char *d;
+      T *t;
+    } u;
+    u.d = data.buffer;
+    return *u.t;
   }
 
   const RootLeaf &rootLeaf() const {

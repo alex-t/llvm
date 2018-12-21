@@ -63,10 +63,25 @@ bb:
 ; CHECK: // .b8 0                                // DW_AT_producer
 ; CHECK: // .b8 4                                // DW_AT_language
 ; CHECK: // .b8 0
-; CHECK: // .b8 98,97,114,46,99,117              // DW_AT_name
+; CHECK: // .b8 98                               // DW_AT_name
+; CHECK: // .b8 97
+; CHECK: // .b8 114
+; CHECK: // .b8 46
+; CHECK: // .b8 99
+; CHECK: // .b8 117
 ; CHECK: // .b8 0
 ; CHECK: // .b32 .debug_line                     // DW_AT_stmt_list
-; CHECK: // .b8 47,115,111,117,114,99,101,47,100,105,114                // DW_AT_comp_dir
+; CHECK: // .b8 47                               // DW_AT_comp_dir
+; CHECK: // .b8 115
+; CHECK: // .b8 111
+; CHECK: // .b8 117
+; CHECK: // .b8 114
+; CHECK: // .b8 99
+; CHECK: // .b8 101
+; CHECK: // .b8 47
+; CHECK: // .b8 100
+; CHECK: // .b8 105
+; CHECK: // .b8 114
 ; CHECK: // .b8 0
 ; CHECK: // .b64 Lfunc_begin0                    // DW_AT_low_pc
 ; CHECK: // .b64 Lfunc_end1                      // DW_AT_high_pc
@@ -82,10 +97,10 @@ bb:
 !0 = distinct !DICompileUnit(language: DW_LANG_C_plus_plus, file: !1, producer: "", isOptimized: false, runtimeVersion: 0, emissionKind: LineTablesOnly, enums: !2)
 !1 = !DIFile(filename: "bar.cu", directory: "/source/dir")
 !2 = !{}
-!4 = distinct !DISubprogram(name: "foo", scope: !5, file: !5, line: 1, type: !6, isLocal: false, isDefinition: true, scopeLine: 1, flags: DIFlagPrototyped, isOptimized: false, unit: !0, retainedNodes: !2)
+!4 = distinct !DISubprogram(name: "foo", scope: !5, file: !5, line: 1, type: !6, isLocal: false, isDefinition: true, scopeLine: 1, flags: DIFlagPrototyped, isOptimized: false, unit: !0, variables: !2)
 !5 = !DIFile(filename: "foo.h", directory: "/source/dir")
 !6 = !DISubroutineType(types: !2)
-!7 = distinct !DISubprogram(name: "bar", scope: !1, file: !1, line: 2, type: !6, isLocal: false, isDefinition: true, scopeLine: 2, flags: DIFlagPrototyped, isOptimized: false, unit: !0, retainedNodes: !2)
+!7 = distinct !DISubprogram(name: "bar", scope: !1, file: !1, line: 2, type: !6, isLocal: false, isDefinition: true, scopeLine: 2, flags: DIFlagPrototyped, isOptimized: false, unit: !0, variables: !2)
 !8 = !{i32 2, !"Dwarf Version", i32 2}
 !9 = !{i32 2, !"Debug Info Version", i32 3}
 !10 = !DILocation(line: 1, column: 31, scope: !4)

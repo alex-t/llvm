@@ -8,7 +8,7 @@
 //===----------------------------------------------------------------------===//
 ///
 /// \file
-/// This file declares classes for handling the YAML representation
+/// \brief This file declares classes for handling the YAML representation
 /// of wasm binaries.
 ///
 //===----------------------------------------------------------------------===//
@@ -74,12 +74,6 @@ struct Global {
   wasm::WasmInitExpr InitExpr;
 };
 
-struct Event {
-  uint32_t Index;
-  uint32_t Attribute;
-  uint32_t SigIndex;
-};
-
 struct Import {
   StringRef Module;
   StringRef Field;
@@ -89,7 +83,6 @@ struct Import {
     Global GlobalImport;
     Table TableImport;
     Limits Memory;
-    Event EventImport;
   };
 };
 
@@ -183,21 +176,6 @@ struct CustomSection : Section {
   yaml::BinaryRef Payload;
 };
 
-struct DylinkSection : CustomSection {
-  DylinkSection() : CustomSection("dylink") {}
-
-  static bool classof(const Section *S) {
-    auto C = dyn_cast<CustomSection>(S);
-    return C && C->Name == "dylink";
-  }
-
-  uint32_t MemorySize;
-  uint32_t MemoryAlignment;
-  uint32_t TableSize;
-  uint32_t TableAlignment;
-  std::vector<StringRef> Needed;
-};
-
 struct NameSection : CustomSection {
   NameSection() : CustomSection("name") {}
 
@@ -284,16 +262,6 @@ struct GlobalSection : Section {
   std::vector<Global> Globals;
 };
 
-struct EventSection : Section {
-  EventSection() : Section(wasm::WASM_SEC_EVENT) {}
-
-  static bool classof(const Section *S) {
-    return S->Type == wasm::WASM_SEC_EVENT;
-  }
-
-  std::vector<Event> Events;
-};
-
 struct ExportSection : Section {
   ExportSection() : Section(wasm::WASM_SEC_EXPORT) {}
 
@@ -371,7 +339,6 @@ LLVM_YAML_IS_SEQUENCE_VECTOR(llvm::WasmYAML::SymbolInfo)
 LLVM_YAML_IS_SEQUENCE_VECTOR(llvm::WasmYAML::InitFunction)
 LLVM_YAML_IS_SEQUENCE_VECTOR(llvm::WasmYAML::ComdatEntry)
 LLVM_YAML_IS_SEQUENCE_VECTOR(llvm::WasmYAML::Comdat)
-LLVM_YAML_IS_SEQUENCE_VECTOR(llvm::WasmYAML::Event)
 
 namespace llvm {
 namespace yaml {
@@ -502,10 +469,6 @@ template <> struct ScalarEnumerationTraits<WasmYAML::Opcode> {
 
 template <> struct ScalarEnumerationTraits<WasmYAML::RelocType> {
   static void enumeration(IO &IO, WasmYAML::RelocType &Kind);
-};
-
-template <> struct MappingTraits<WasmYAML::Event> {
-  static void mapping(IO &IO, WasmYAML::Event &Event);
 };
 
 } // end namespace yaml

@@ -87,9 +87,9 @@ define i16 @test_fccmp(i1 %a) {
 ;CHECK: fcmp
   %cmp0 = fcmp ogt half 0xH3333, undef
   %cmp1 = fcmp ogt half 0xH2222, undef
-  %x = select i1 %cmp0, i16 0, i16 1
+  %x = select i1 %cmp0, i16 0, i16 undef
   %or = or i1 %cmp1, %cmp0
-  %y = select i1 %or, i16 4, i16 1
+  %y = select i1 %or, i16 4, i16 undef
   %r = add i16 %x, %y
   ret i16 %r
 }

@@ -155,12 +155,6 @@ struct OutgoingArgHandler : public CallLowering::ValueHandler {
 
   void assignValueToAddress(unsigned ValVReg, unsigned Addr, uint64_t Size,
                             MachinePointerInfo &MPO, CCValAssign &VA) override {
-    if (VA.getLocInfo() == CCValAssign::LocInfo::AExt) {
-      Size = VA.getLocVT().getSizeInBits() / 8;
-      ValVReg = MIRBuilder.buildAnyExt(LLT::scalar(Size * 8), ValVReg)
-                    ->getOperand(0)
-                    .getReg();
-    }
     auto MMO = MIRBuilder.getMF().getMachineMemOperand(
         MPO, MachineMemOperand::MOStore, Size, 0);
     MIRBuilder.buildStore(ValVReg, Addr, *MMO);
@@ -193,9 +187,6 @@ void AArch64CallLowering::splitToValueTypes(
   const AArch64TargetLowering &TLI = *getTLI<AArch64TargetLowering>();
   LLVMContext &Ctx = OrigArg.Ty->getContext();
 
-  if (OrigArg.Ty->isVoidTy())
-    return;
-
   SmallVector<EVT, 4> SplitVTs;
   SmallVector<uint64_t, 4> Offsets;
   ComputeValueVTs(TLI, DL, OrigArg.Ty, SplitVTs, &Offsets, 0);
@@ -227,45 +218,27 @@ void AArch64CallLowering::splitToValueTypes(
 }
 
 bool AArch64CallLowering::lowerReturn(MachineIRBuilder &MIRBuilder,
-                                      const Value *Val,
-                                      ArrayRef<unsigned> VRegs) const {
+                                      const Value *Val, unsigned VReg) const {
+  MachineFunction &MF = MIRBuilder.getMF();
+  const Function &F = MF.getFunction();
+
   auto MIB = MIRBuilder.buildInstrNoInsert(AArch64::RET_ReallyLR);
-  assert(((Val && !VRegs.empty()) || (!Val && VRegs.empty())) &&
-         "Return value without a vreg");
-
+  assert(((Val && VReg) || (!Val && !VReg)) && "Return value without a vreg");
   bool Success = true;
-  if (!VRegs.empty()) {
-    MachineFunction &MF = MIRBuilder.getMF();
-    const Function &F = MF.getFunction();
-
-    MachineRegisterInfo &MRI = MF.getRegInfo();
+  if (VReg) {
     const AArch64TargetLowering &TLI = *getTLI<AArch64TargetLowering>();
     CCAssignFn *AssignFn = TLI.CCAssignFnForReturn(F.getCallingConv());
+    MachineRegisterInfo &MRI = MF.getRegInfo();
     auto &DL = F.getParent()->getDataLayout();
-    LLVMContext &Ctx = Val->getType()->getContext();
 
-    SmallVector<EVT, 4> SplitEVTs;
-    ComputeValueVTs(TLI, DL, Val->getType(), SplitEVTs);
-    assert(VRegs.size() == SplitEVTs.size() &&
-           "For each split Type there should be exactly one VReg.");
+    ArgInfo OrigArg{VReg, Val->getType()};
+    setArgFlags(OrigArg, AttributeList::ReturnIndex, DL, F);
 
     SmallVector<ArgInfo, 8> SplitArgs;
-    for (unsigned i = 0; i < SplitEVTs.size(); ++i) {
-      // We zero-extend i1s to i8.
-      unsigned CurVReg = VRegs[i];
-      if (MRI.getType(VRegs[i]).getSizeInBits() == 1) {
-        CurVReg = MIRBuilder.buildZExt(LLT::scalar(8), CurVReg)
-                       ->getOperand(0)
-                       .getReg();
-      }
-
-      ArgInfo CurArgInfo = ArgInfo{CurVReg, SplitEVTs[i].getTypeForEVT(Ctx)};
-      setArgFlags(CurArgInfo, AttributeList::ReturnIndex, DL, F);
-      splitToValueTypes(CurArgInfo, SplitArgs, DL, MRI, F.getCallingConv(),
-                        [&](unsigned Reg, uint64_t Offset) {
-                          MIRBuilder.buildExtract(Reg, CurVReg, Offset);
-                        });
-    }
+    splitToValueTypes(OrigArg, SplitArgs, DL, MRI, F.getCallingConv(),
+                      [&](unsigned Reg, uint64_t Offset) {
+                        MIRBuilder.buildExtract(Reg, VReg, Offset);
+                      });
 
     OutgoingArgHandler Handler(MIRBuilder, MRI, MIB, AssignFn, AssignFn);
     Success = handleAssignments(MIRBuilder, SplitArgs, Handler);
@@ -337,10 +310,6 @@ bool AArch64CallLowering::lowerFormalArguments(MachineIRBuilder &MIRBuilder,
     FuncInfo->setVarArgsStackIndex(MFI.CreateFixedObject(4, StackOffset, true));
   }
 
-  auto &Subtarget = MF.getSubtarget<AArch64Subtarget>();
-  if (Subtarget.hasCustomCallingConv())
-    Subtarget.getRegisterInfo()->UpdateCustomCalleeSavedRegs(MF);
-
   // Move back to the end of the basic block.
   MIRBuilder.setMBB(MBB);
 
@@ -381,14 +350,8 @@ bool AArch64CallLowering::lowerCall(MachineIRBuilder &MIRBuilder,
   MIB.add(Callee);
 
   // Tell the call which registers are clobbered.
-  auto TRI = MF.getSubtarget<AArch64Subtarget>().getRegisterInfo();
-  const uint32_t *Mask = TRI->getCallPreservedMask(MF, F.getCallingConv());
-  if (MF.getSubtarget<AArch64Subtarget>().hasCustomCallingConv())
-    TRI->UpdateCustomCallPreservedMask(MF, &Mask);
-  MIB.addRegMask(Mask);
-
-  if (TRI->isAnyArgRegReserved(MF))
-    TRI->emitReservedArgRegCallError(MF);
+  auto TRI = MF.getSubtarget().getRegisterInfo();
+  MIB.addRegMask(TRI->getCallPreservedMask(MF, F.getCallingConv()));
 
   // Do the actual argument marshalling.
   SmallVector<unsigned, 8> PhysRegs;
