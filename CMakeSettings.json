@@ -1,0 +1,30 @@
+﻿{
+  "configurations": [
+    {
+      "name": "x86-Debug",
+      "generator": "Visual Studio 15 2017",
+      "configurationType": "Debug",
+      "inheritEnvironments": [
+        "msvc_x86"
+      ],
+      "buildRoot": "${env.USERPROFILE}\\CMakeBuilds\\${workspaceHash}\\build\\${name}",
+      "installRoot": "${env.USERPROFILE}\\CMakeBuilds\\${workspaceHash}\\install\\${name}",
+      "cmakeCommandArgs": "-DLLVM_POLLY_LINK_INTO_TOOLS=OFF -DLLVM_POLLY_BUILD=OFF -DLLVM_INCLUDE_EXAMPLES=OFF -DLLVM_INCLUDE_TESTS=ON  -DLLVM_INCLUDE_GO_TESTS=ON -DLLVM_INCLUDE_DOCS=OFF LLVM_ENABLE_OCAMLDOC=OFF -DLLVM_OPTIMIZED_TABLEGEN=ON -DLLVM_TARGETS_TO_BUILD:STRING=\"X86;AMDGPU\"",
+      "buildCommandArgs": "-v:n",
+      "ctestCommandArgs": ""
+    },
+    {
+      "name": "x86-Debug-ninja",
+      "generator": "Ninja",
+      "configurationType": "Debug",
+      "inheritEnvironments": [
+        "msvc_x86"
+      ],
+      "buildRoot": "${env.USERPROFILE}\\CMakeBuilds\\${workspaceHash}\\build\\${name}",
+      "installRoot": "${env.USERPROFILE}\\CMakeBuilds\\${workspaceHash}\\install\\${name}",
+      "cmakeCommandArgs": "-DLLVM_POLLY_LINK_INTO_TOOLS=OFF -DLLVM_POLLY_BUILD=OFF -DLLVM_INCLUDE_EXAMPLES=OFF -DLLVM_INCLUDE_TESTS=ON  -DLLVM_INCLUDE_GO_TESTS=ON -DLLVM_INCLUDE_DOCS=OFF LLVM_ENABLE_OCAMLDOC=OFF -DLLVM_OPTIMIZED_TABLEGEN=ON -DLLVM_CCACHE_BUILD=OFF -DLLVM_PARALLEL_COMPILE_JOBS=32 -DLLVM_PARALLEL_LINK_JOBS=8 -DLLVM_TARGETS_TO_BUILD:STRING=\"X86;AMDGPU\"",
+      "buildCommandArgs": "-v",
+      "ctestCommandArgs": ""
+    }
+  ]
+}
