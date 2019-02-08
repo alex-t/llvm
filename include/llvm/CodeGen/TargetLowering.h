@@ -618,10 +618,15 @@ public:
 
   /// Return the register class that should be used for the specified value
   /// type.
-  virtual const TargetRegisterClass *getRegClassFor(MVT VT) const {
+  virtual const TargetRegisterClass *getRegClassFor(MVT VT, bool isDivergent = false) const {
+    (void)isDivergent;
     const TargetRegisterClass *RC = RegClassForVT[VT.SimpleTy];
     assert(RC && "This value type is not natively supported!");
     return RC;
+  }
+
+  virtual bool requiresUniformRegister(const Value *) const {
+    return false;
   }
 
   /// Return the 'representative' register class for the specified value

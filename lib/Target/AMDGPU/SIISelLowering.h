@@ -352,7 +352,10 @@ public:
                                     bool SNaN = false,
                                     unsigned Depth = 0) const override;
   AtomicExpansionKind shouldExpandAtomicRMWInIR(AtomicRMWInst *) const override;
-};
+  virtual const TargetRegisterClass *getRegClassFor(MVT VT,
+   bool isDivergent) const override;
+  virtual bool requiresUniformRegister(const Value * V) const override;
+  };
 
 } // End namespace llvm
 

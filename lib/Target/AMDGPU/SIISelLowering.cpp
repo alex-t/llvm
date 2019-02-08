@@ -9326,7 +9326,8 @@ SDNode *SITargetLowering::PostISelFolding(MachineSDNode *Node,
       break;
 
     MVT VT = Src0.getValueType().getSimpleVT();
-    const TargetRegisterClass *RC = getRegClassFor(VT);
+    const TargetRegisterClass *RC = getRegClassFor(VT,
+     Src0.getNode()->isDivergent());
 
     MachineRegisterInfo &MRI = DAG.getMachineFunction().getRegInfo();
     SDValue UndefReg = DAG.getRegister(MRI.createVirtualRegister(RC), VT);
@@ -9791,28 +9792,88 @@ bool SITargetLowering::isKnownNeverNaNForTargetNode(SDValue Op,
                                                             SNaN, Depth);
 }
 
+const TargetRegisterClass *
+SITargetLowering::getRegClassFor(MVT VT, bool isDivergent) const {
+  const TargetRegisterClass *RC = TargetLoweringBase::getRegClassFor(VT, false);
+  const SIRegisterInfo *TRI = Subtarget->getRegisterInfo();
+  if (TRI->hasVGPRs(RC) && !isDivergent)
+    return TRI->getEquivalentSGPRClass(RC);
+  else if (TRI->isSGPRClass(RC) && isDivergent)
+    return TRI->getEquivalentVGPRClass(RC);
+
+  return RC;
+}
+
+static bool hasIfBreakUser(const Value *V,
+                              SetVector<const Value *> &Visited) {
+  if (Visited.count(V))
+    return false;
+  Visited.insert(V);
+  for (auto U : V->users()) {
+    if (const IntrinsicInst *Intrinsic = dyn_cast<IntrinsicInst>(U)) {
+      switch (Intrinsic->getIntrinsicID()) {
+      default:
+        return false;
+      case Intrinsic::amdgcn_if_break:
+        return true;
+      }
+    } else {
+      return hasIfBreakUser(U, Visited);
+    }
+  }
+}
+
+bool SITargetLowering::requiresUniformRegister(const Value *V) const {
+  if (const IntrinsicInst *Intrinsic = dyn_cast<IntrinsicInst>(V)) {
+    switch (Intrinsic->getIntrinsicID()) {
+    default:
+      return false;
+    case Intrinsic::amdgcn_if_break:
+      return true;
+    }
+  }
+  if (const ExtractValueInst *ExtValue = dyn_cast<ExtractValueInst>(V)) {
+    if (const IntrinsicInst *Intrinsic =
+            dyn_cast<IntrinsicInst>(ExtValue->getOperand(0))) {
+      switch (Intrinsic->getIntrinsicID()) {
+      default:
+        return false;
+      case Intrinsic::amdgcn_if:
+      case Intrinsic::amdgcn_else: {
+        ArrayRef<unsigned> Indices = ExtValue->getIndices();
+        if (Indices.size() == 1 && Indices[0] == 1) {
+          return true;
+        }
+      }
+      }
+    }
+  }
+  SetVector<const Value *> Visited;
+  return hasIfBreakUser(V, Visited);
+}
+
 TargetLowering::AtomicExpansionKind
 SITargetLowering::shouldExpandAtomicRMWInIR(AtomicRMWInst *RMW) const {
-  switch (RMW->getOperation()) {
-  case AtomicRMWInst::FAdd: {
-    Type *Ty = RMW->getType();
+	switch (RMW->getOperation()) {
+	case AtomicRMWInst::FAdd: {
+		Type *Ty = RMW->getType();
 
-    // We don't have a way to support 16-bit atomics now, so just leave them
-    // as-is.
-    if (Ty->isHalfTy())
-      return AtomicExpansionKind::None;
+		// We don't have a way to support 16-bit atomics now, so just leave them
+		// as-is.
+		if (Ty->isHalfTy())
+			return AtomicExpansionKind::None;
 
-    if (!Ty->isFloatTy())
-      return AtomicExpansionKind::CmpXChg;
+		if (!Ty->isFloatTy())
+			return AtomicExpansionKind::CmpXChg;
 
-    // TODO: Do have these for flat. Older targets also had them for buffers.
-    unsigned AS = RMW->getPointerAddressSpace();
-    return (AS == AMDGPUAS::LOCAL_ADDRESS && Subtarget->hasLDSFPAtomics()) ?
-      AtomicExpansionKind::None : AtomicExpansionKind::CmpXChg;
-  }
-  default:
-    break;
-  }
+		// TODO: Do have these for flat. Older targets also had them for buffers.
+		unsigned AS = RMW->getPointerAddressSpace();
+		return (AS == AMDGPUAS::LOCAL_ADDRESS && Subtarget->hasLDSFPAtomics()) ?
+			AtomicExpansionKind::None : AtomicExpansionKind::CmpXChg;
+	}
+	default:
+		break;
+	}
 
-  return AMDGPUTargetLowering::shouldExpandAtomicRMWInIR(RMW);
+	return AMDGPUTargetLowering::shouldExpandAtomicRMWInIR(RMW);
 }

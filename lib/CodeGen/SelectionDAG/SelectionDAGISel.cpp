@@ -1740,7 +1740,7 @@ void SelectionDAGISel::SelectAllBasicBlocks(const Function &Fn) {
               !Inst->use_empty()) {
             unsigned &R = FuncInfo->ValueMap[Inst];
             if (!R)
-              R = FuncInfo->CreateRegs(Inst->getType());
+              R = FuncInfo->CreateRegs(Inst);
           }
 
           bool HadTailCall = false;
