@@ -22,25 +22,25 @@
 ; MESA-NOT: s_mov_b32 s3
 ; HSA-NOT: s_mov_b32 s7
 
-; GCNMESA-DAG: s_mov_b32 s16, SCRATCH_RSRC_DWORD0
-; GCNMESA-DAG: s_mov_b32 s17, SCRATCH_RSRC_DWORD1
-; GCNMESA-DAG: s_mov_b32 s18, -1
-; SIMESA-DAG: s_mov_b32 s19, 0xe8f000
-; VIMESA-DAG: s_mov_b32 s19, 0xe80000
-; GFX9MESA-DAG: s_mov_b32 s19, 0xe00000
+; GCNMESA-DAG: s_mov_b32 s20, SCRATCH_RSRC_DWORD0
+; GCNMESA-DAG: s_mov_b32 s21, SCRATCH_RSRC_DWORD1
+; GCNMESA-DAG: s_mov_b32 s22, -1
+; SIMESA-DAG: s_mov_b32 s23, 0xe8f000
+; VIMESA-DAG: s_mov_b32 s23, 0xe80000
+; GFX9MESA-DAG: s_mov_b32 s23, 0xe00000
 
 
 ; GCNMESAMESA: buffer_store_dword {{v[0-9]+}}, off, s[16:19], s3 offset:{{[0-9]+}} ; 4-byte Folded Spill
 
-; GCNMESA: buffer_store_dword {{v[0-9]}}, off, s[16:19], s3 offset:{{[0-9]+}}
-; GCNMESA: buffer_store_dword {{v[0-9]}}, off, s[16:19], s3 offset:{{[0-9]+}}
-; GCNMESA: buffer_store_dword {{v[0-9]}}, off, s[16:19], s3 offset:{{[0-9]+}}
-; GCNMESA: buffer_store_dword {{v[0-9]}}, off, s[16:19], s3 offset:{{[0-9]+}}
+; GCNMESA: buffer_store_dword {{v[0-9]}}, off, s[20:23], s3 offset:{{[0-9]+}}
+; GCNMESA: buffer_store_dword {{v[0-9]}}, off, s[20:23], s3 offset:{{[0-9]+}}
+; GCNMESA: buffer_store_dword {{v[0-9]}}, off, s[20:23], s3 offset:{{[0-9]+}}
+; GCNMESA: buffer_store_dword {{v[0-9]}}, off, s[20:23], s3 offset:{{[0-9]+}}
 
-; GCNMESA: buffer_load_dword {{v[0-9]+}}, off, s[16:19], s3 offset:{{[0-9]+}}
-; GCNMESA: buffer_load_dword {{v[0-9]+}}, off, s[16:19], s3 offset:{{[0-9]+}}
-; GCNMESA: buffer_load_dword {{v[0-9]+}}, off, s[16:19], s3 offset:{{[0-9]+}}
-; GCNMESA: buffer_load_dword {{v[0-9]+}}, off, s[16:19], s3 offset:{{[0-9]+}}
+; GCNMESA: buffer_load_dword {{v[0-9]+}}, off, s[20:23], s3 offset:{{[0-9]+}}
+; GCNMESA: buffer_load_dword {{v[0-9]+}}, off, s[20:23], s3 offset:{{[0-9]+}}
+; GCNMESA: buffer_load_dword {{v[0-9]+}}, off, s[20:23], s3 offset:{{[0-9]+}}
+; GCNMESA: buffer_load_dword {{v[0-9]+}}, off, s[20:23], s3 offset:{{[0-9]+}}
 
 
 
@@ -69,9 +69,11 @@ bb:
   %tmp9 = extractelement <4 x float> %arg6, i32 2
   %tmp10 = extractelement <4 x float> %arg6, i32 3
   %tmp11 = bitcast float %arg5 to i32
+  %cat = fadd float %arg3, %tmp10
   br label %bb12
 
 bb12:                                             ; preds = %bb145, %bb
+  %catphi = phi float [ %cat, %bb ], [ %catsome, %bb145 ]
   %tmp13 = phi float [ 0.000000e+00, %bb ], [ %tmp338, %bb145 ]
   %tmp14 = phi float [ 0.000000e+00, %bb ], [ %tmp337, %bb145 ]
   %tmp15 = phi float [ 0.000000e+00, %bb ], [ %tmp336, %bb145 ]
@@ -339,6 +341,7 @@ bb144:                                            ; preds = %bb12
   store volatile float %tmp8, float addrspace(1)* %arg
   store volatile float %tmp9, float addrspace(1)* %arg
   store volatile float %tmp10, float addrspace(1)* %arg
+  store volatile float %catphi, float addrspace(1)* %arg
   ret void
 
 bb145:                                            ; preds = %bb12
@@ -604,6 +607,7 @@ bb145:                                            ; preds = %bb12
   %tmp405 = extractelement <128 x float> %tmp278, i32 126
   %tmp406 = extractelement <128 x float> %tmp278, i32 127
   %tmp407 = bitcast float %tmp95 to i32
+  %catsome = extractelement <128 x float> %tmp278, i32 %tmp407
   %tmp408 = add i32 %tmp407, 1
   %tmp409 = bitcast i32 %tmp408 to float
   br label %bb12
