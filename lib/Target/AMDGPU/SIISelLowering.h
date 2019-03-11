@@ -354,7 +354,8 @@ public:
   AtomicExpansionKind shouldExpandAtomicRMWInIR(AtomicRMWInst *) const override;
   virtual const TargetRegisterClass *getRegClassFor(MVT VT,
    bool isDivergent) const override;
-  virtual bool requiresUniformRegister(const Value * V) const override;
+  virtual bool requiresUniformRegister(MachineFunction &MF,
+    const Value * V) const override;
   };
 
 } // End namespace llvm

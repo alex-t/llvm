@@ -625,7 +625,8 @@ public:
     return RC;
   }
 
-  virtual bool requiresUniformRegister(const Value *) const {
+  virtual bool requiresUniformRegister(MachineFunction &MF,
+    const Value *) const {
     return false;
   }
 

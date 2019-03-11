@@ -9815,7 +9815,10 @@ static bool hasIfBreakUser(const Value *V,
       default:
         return false;
       case Intrinsic::amdgcn_if_break:
-        return true;
+      {
+        if (V == U->getOperand(1))
+          return true;
+      }
       }
     } else {
       return hasIfBreakUser(U, Visited);
@@ -9823,7 +9826,7 @@ static bool hasIfBreakUser(const Value *V,
   }
 }
 
-bool SITargetLowering::requiresUniformRegister(const Value *V) const {
+bool SITargetLowering::requiresUniformRegister(MachineFunction &MF, const Value *V) const {
   if (const IntrinsicInst *Intrinsic = dyn_cast<IntrinsicInst>(V)) {
     switch (Intrinsic->getIntrinsicID()) {
     default:
@@ -9845,6 +9848,30 @@ bool SITargetLowering::requiresUniformRegister(const Value *V) const {
           return true;
         }
       }
+      }
+    }
+  }
+  if (const CallInst *CI = dyn_cast<CallInst>(V)) {
+    if (const InlineAsm * IA = dyn_cast<InlineAsm>(CI->getCalledValue())) {
+      const SIRegisterInfo * SIRI = Subtarget->getRegisterInfo();
+      ImmutableCallSite CS(CI);
+      TargetLowering::AsmOperandInfoVector TargetConstraints = ParseConstraints(
+        MF.getDataLayout(), Subtarget->getRegisterInfo(), CS);
+      for (auto &TC : TargetConstraints) {
+        if (TC.Type == InlineAsm::isOutput) {
+          ComputeConstraintToUse(TC, SDValue());
+          unsigned AssignedReg;
+          const TargetRegisterClass *RC;
+          std::tie(AssignedReg, RC) = getRegForInlineAsmConstraint(
+            SIRI, TC.ConstraintCode, getSimpleValueType(MF.getDataLayout(), CS.getType()));
+          if (RC) {
+            MachineRegisterInfo &MRI = MF.getRegInfo();
+            if (AssignedReg != 0 && SIRI->isSGPRReg(MRI, AssignedReg))
+              return true;
+            else if (SIRI->isSGPRClass(RC))
+              return true;
+          }
+        }
       }
     }
   }

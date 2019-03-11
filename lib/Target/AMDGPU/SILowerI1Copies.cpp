@@ -523,9 +523,12 @@ void SILowerI1Copies::lowerPhis() {
         MachineInstr *IncomingDef = MRI->getUniqueVRegDef(IncomingReg);
 
         if (IncomingDef->getOpcode() == AMDGPU::COPY) {
-          IncomingReg = IncomingDef->getOperand(1).getReg();
-          assert(isLaneMaskReg(IncomingReg));
-          assert(!IncomingDef->getOperand(1).getSubReg());
+          do {
+            IncomingReg = IncomingDef->getOperand(1).getReg();
+            assert(!IncomingDef->getOperand(1).getSubReg());
+            IncomingDef = MRI->getUniqueVRegDef(IncomingReg);
+          } while (IncomingDef->getOpcode() == AMDGPU::COPY &&
+            !isLaneMaskReg(IncomingReg));
         } else if (IncomingDef->getOpcode() == AMDGPU::IMPLICIT_DEF) {
           continue;
         } else {

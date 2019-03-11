@@ -621,7 +621,8 @@ bool SIFixSGPRCopies::runOnMachineFunction(MachineFunction &MF) {
         break;
       }
       case AMDGPU::PHI: {
-        bool hasVGPRUses = false;
+        //bool hasVGPRUses = false;
+        unsigned hasVGPRUses = 0;
         SetVector<MachineInstr*> worklist;
         worklist.insert(&MI);
         while (!worklist.empty()) {
@@ -634,16 +635,17 @@ bool SIFixSGPRCopies::runOnMachineFunction(MachineFunction &MF) {
                 unsigned Reg = UseMI->getOperand(0).getReg();
                 if (TRI->isPhysicalRegister(Reg)) {
                   if (TRI->hasVGPRs(TRI->getPhysRegClass(Reg))) {
-                    hasVGPRUses = true;
-                    break;
+                    //hasVGPRUses = true;
+                    //break;
+                    hasVGPRUses++;
                   }
                 }
               }
               worklist.insert(UseMI);
               continue;
             }
-            if (UseMI->isPHI())
-              continue;
+            //if (UseMI->isPHI())
+            //  continue;
 
             unsigned OpNo = UseMI->getOperandNo(&Use);
             const MCInstrDesc &Desc = TII->get(UseMI->getOpcode());
@@ -653,13 +655,14 @@ bool SIFixSGPRCopies::runOnMachineFunction(MachineFunction &MF) {
               if (!TRI->isSGPRClass(OpRC) &&
                 OpRC != &AMDGPU::VS_32RegClass &&
                 OpRC != &AMDGPU::VS_64RegClass) {
-                hasVGPRUses = true;
-                break;
+                //hasVGPRUses = true;
+                //break;
+                hasVGPRUses++;
               }
             }
           }
-          if (hasVGPRUses)
-            break;
+          //if (hasVGPRUses)
+          //  break;
         }
         bool hasVGPRInput = false;
         for (unsigned i = 1; i < MI.getNumOperands(); i += 2) {
@@ -683,19 +686,29 @@ bool SIFixSGPRCopies::runOnMachineFunction(MachineFunction &MF) {
         }
         unsigned PHIRes = MI.getOperand(0).getReg();
         const TargetRegisterClass * RC0 = MRI.getRegClass(PHIRes);
-        if (TRI->isVGPR(MRI, PHIRes) ||
-            RC0 == &AMDGPU::VReg_1RegClass ||
-            hasVGPRInput ||
-            hasVGPRUses)
-            TII->moveToVALU(MI);
-
-        if (RC0 == &AMDGPU::SReg_1RegClass) {
-          MRI.setRegClass(PHIRes, &AMDGPU::SReg_64RegClass);
-          for (unsigned i = 1; i < MI.getNumOperands(); i += 2) {
-            unsigned InputReg = MI.getOperand(i).getReg();
-            MRI.setRegClass(InputReg, &AMDGPU::SReg_64RegClass);
+        if ((!TRI->isVGPR(MRI, PHIRes) && RC0 != &AMDGPU::VReg_1RegClass) &&
+            (hasVGPRInput || hasVGPRUses > 1)) {
+          TII->moveToVALU(MI);
+        }
+        else {
+          TII->legalizeOperands(MI, MDT);
+          if (RC0 == &AMDGPU::SReg_1RegClass) {
+            MRI.setRegClass(PHIRes, &AMDGPU::SReg_64RegClass);
+            for (unsigned i = 1; i < MI.getNumOperands(); i += 2) {
+              unsigned InputReg = MI.getOperand(i).getReg();
+              MRI.setRegClass(InputReg, &AMDGPU::SReg_64RegClass);
+            }
           }
         }
+
+        //if (!hasVGPRInput && (TRI->isVGPR(MRI, PHIRes) ||
+        //  RC0 == &AMDGPU::VReg_1RegClass)) {
+        //  const TargetRegisterClass * RCS = TRI->getEquivalentSGPRClass(RC0);
+        //  MRI.setRegClass(PHIRes, RCS);
+        //  TII->legalizeOperands(MI, MDT);
+        //}
+
+ 
         break;
       }
       case AMDGPU::REG_SEQUENCE:
