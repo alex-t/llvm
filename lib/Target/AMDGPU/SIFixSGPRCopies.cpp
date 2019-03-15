@@ -621,7 +621,6 @@ bool SIFixSGPRCopies::runOnMachineFunction(MachineFunction &MF) {
         break;
       }
       case AMDGPU::PHI: {
-        //bool hasVGPRUses = false;
         unsigned hasVGPRUses = 0;
         SetVector<MachineInstr*> worklist;
         worklist.insert(&MI);
@@ -635,8 +634,6 @@ bool SIFixSGPRCopies::runOnMachineFunction(MachineFunction &MF) {
                 unsigned Reg = UseMI->getOperand(0).getReg();
                 if (TRI->isPhysicalRegister(Reg)) {
                   if (TRI->hasVGPRs(TRI->getPhysRegClass(Reg))) {
-                    //hasVGPRUses = true;
-                    //break;
                     hasVGPRUses++;
                   }
                 }
@@ -644,8 +641,6 @@ bool SIFixSGPRCopies::runOnMachineFunction(MachineFunction &MF) {
               worklist.insert(UseMI);
               continue;
             }
-            //if (UseMI->isPHI())
-            //  continue;
 
             unsigned OpNo = UseMI->getOperandNo(&Use);
             const MCInstrDesc &Desc = TII->get(UseMI->getOpcode());
@@ -655,14 +650,12 @@ bool SIFixSGPRCopies::runOnMachineFunction(MachineFunction &MF) {
               if (!TRI->isSGPRClass(OpRC) &&
                 OpRC != &AMDGPU::VS_32RegClass &&
                 OpRC != &AMDGPU::VS_64RegClass) {
-                //hasVGPRUses = true;
-                //break;
                 hasVGPRUses++;
+                //if (Use.getSubReg() != 0)
+                //  hasVGPRUses++;
               }
             }
           }
-          //if (hasVGPRUses)
-          //  break;
         }
         bool hasVGPRInput = false;
         for (unsigned i = 1; i < MI.getNumOperands(); i += 2) {
@@ -686,11 +679,11 @@ bool SIFixSGPRCopies::runOnMachineFunction(MachineFunction &MF) {
         }
         unsigned PHIRes = MI.getOperand(0).getReg();
         const TargetRegisterClass * RC0 = MRI.getRegClass(PHIRes);
+        
         if ((!TRI->isVGPR(MRI, PHIRes) && RC0 != &AMDGPU::VReg_1RegClass) &&
             (hasVGPRInput || hasVGPRUses > 1)) {
           TII->moveToVALU(MI);
-        }
-        else {
+        } else {
           TII->legalizeOperands(MI, MDT);
           if (RC0 == &AMDGPU::SReg_1RegClass) {
             MRI.setRegClass(PHIRes, &AMDGPU::SReg_64RegClass);

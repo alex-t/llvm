@@ -464,6 +464,12 @@ void SILowerI1Copies::lowerCopiesFromI1() {
 
       unsigned DstReg = MI.getOperand(0).getReg();
       unsigned SrcReg = MI.getOperand(1).getReg();
+
+      if (TargetRegisterInfo::isVirtualRegister(SrcReg) &&
+        MRI->getRegClass(SrcReg) == &AMDGPU::SReg_1RegClass) {
+        MRI->replaceRegWith(SrcReg, createLaneMaskReg(*MF));
+      }
+
       if (!TargetRegisterInfo::isVirtualRegister(SrcReg) ||
           MRI->getRegClass(SrcReg) != &AMDGPU::VReg_1RegClass)
         continue;
@@ -523,12 +529,9 @@ void SILowerI1Copies::lowerPhis() {
         MachineInstr *IncomingDef = MRI->getUniqueVRegDef(IncomingReg);
 
         if (IncomingDef->getOpcode() == AMDGPU::COPY) {
-          do {
-            IncomingReg = IncomingDef->getOperand(1).getReg();
-            assert(!IncomingDef->getOperand(1).getSubReg());
-            IncomingDef = MRI->getUniqueVRegDef(IncomingReg);
-          } while (IncomingDef->getOpcode() == AMDGPU::COPY &&
-            !isLaneMaskReg(IncomingReg));
+          IncomingReg = IncomingDef->getOperand(1).getReg();
+          assert(isLaneMaskReg(IncomingReg));
+          assert(!IncomingDef->getOperand(1).getSubReg());
         } else if (IncomingDef->getOpcode() == AMDGPU::IMPLICIT_DEF) {
           continue;
         } else {

@@ -101,18 +101,24 @@ ENDIF:                                            ; preds = %LOOP
 
 ; GCN: ; %case1
 ; GCN:      buffer_load_dword  [[LOAD2:v[0-9]+]],
-; GCN:      v_cmp_ge_i32_e64   [[VCC:s\[[0-9]+:[0-9]+\]]], {{v[0-9]+}}, [[LOAD2]]
+; GCN:      v_cmp_ge_i32_e32   vcc, {{v[0-9]+}}, [[LOAD2]]
+; GCN:      s_orn2_b64         [[BREAK]], vcc, exec
 
 ; GCN: ; %Flow3
 ; GCN:      s_branch           [[FLOW:BB[0-9]+_[0-9]+]]
 
 ; GCN:      s_mov_b64          [[BREAK]], -1{{$}}
 
+; GCN: [[FLOW]]: ; %Flow
+
 ; GCN: ; %case0
 ; GCN:      buffer_load_dword  [[LOAD1:v[0-9]+]],
-; GCN-DAG:  v_cmp_ge_i32_e64   [[VCC]], {{v[0-9]+}}, [[LOAD1]]
+; GCN-DAG:  s_andn2_b64        [[BREAK]], [[BREAK]], exec
+; GCN-DAG:  v_cmp_ge_i32_e32   vcc, {{v[0-9]+}}, [[LOAD1]]
+; GCN-DAG:  s_and_b64          [[TMP:s\[[0-9]+:[0-9]+\]]], vcc, exec
+; GCN:      s_or_b64           [[BREAK]], [[BREAK]], [[TMP]]
 
-; GCN: [[FLOW]]: ; %Flow4
+; GCN: ; %Flow4
 ; GCN:      s_and_b64          [[BREAK]], exec, [[BREAK]]
 ; GCN:      s_or_b64           [[LEFT]], [[BREAK]], [[OLD_LEFT]]
 ; GCN:      s_andn2_b64        exec, exec, [[LEFT]]
