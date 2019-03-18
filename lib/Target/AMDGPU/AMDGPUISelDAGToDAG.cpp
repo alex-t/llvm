@@ -660,57 +660,6 @@ void AMDGPUDAGToDAGISel::Select(SDNode *N) {
     SelectINTRINSIC_W_CHAIN(N);
     return;
   }
-  //case ISD::INLINEASM:
-  //{
-  //  unsigned Flag, Kind;
-  //  bool Changed = false;
-  //  unsigned NumOps = N->getNumOperands();
-  //  SDLoc dl(N);
-  //  SDValue Glue = N->getGluedNode() ? N->getOperand(NumOps - 1)
-  //    : SDValue(nullptr, 0);
-  //  SmallVector<bool, 8> OpChanged;
-  //  // Glue node will be appended late.
-  //  for (unsigned i = 0, e = N->getGluedNode() ? NumOps - 1 : NumOps; i < e; ++i) {
-  //    SDValue op = N->getOperand(i);
-
-  //    if (i < InlineAsm::Op_FirstOperand)
-  //      continue;
-
-  //    if (ConstantSDNode *C = dyn_cast<ConstantSDNode>(N->getOperand(i))) {
-  //      Flag = C->getZExtValue();
-  //      Kind = InlineAsm::getKind(Flag);
-  //    }
-  //    else
-  //      continue;
-  //  }
-
-  //  unsigned RC;
-  //  bool HasRC = InlineAsm::hasRegClassConstraint(Flag, RC);
-  //  if (!HasRC) {
-  //    if (RegisterSDNode * RegN = dyn_cast<RegisterSDNode>(
-  //      // TODO: more exact info of the output operand using
-  //      // isRegDefKind / isClobberKind
-  //      N->getOperand(InlineAsm::Op_FirstOperand + 1))) {
-  //      unsigned Reg = RegN->getReg();
-  //      const SIRegisterInfo * SIRI = Subtarget->getRegisterInfo();
-  //      MachineRegisterInfo &MRI = CurDAG->getMachineFunction().getRegInfo();
-  //      const TargetRegisterClass * TRC;
-  //      if (SIRI->isVirtualRegister(Reg)) {
-  //        TRC = MRI.getRegClass(Reg);
-  //      } else {
-  //        TRC = SIRI->getPhysRegClass(Reg);
-  //      }
-  //      bool UniformOut = SIRI->isSGPRClass(TRC);
-  //      if (UniformOut) {
-  //        dbgs() << "Uniform output INLINEASM\n";
-  //        CurDAG->viewGraph();
-  //        // TODO: Well, we know it is uniform. How to patch the VGPR reg class set by 
-  //        // the FunctionLoweringInfo before the selection?
-  //      }
-  //    }
-  //  }
-
-  //}
   }
 
   SelectCode(N);

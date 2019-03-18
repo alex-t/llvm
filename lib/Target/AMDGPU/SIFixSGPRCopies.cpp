@@ -694,14 +694,6 @@ bool SIFixSGPRCopies::runOnMachineFunction(MachineFunction &MF) {
           }
         }
 
-        //if (!hasVGPRInput && (TRI->isVGPR(MRI, PHIRes) ||
-        //  RC0 == &AMDGPU::VReg_1RegClass)) {
-        //  const TargetRegisterClass * RCS = TRI->getEquivalentSGPRClass(RC0);
-        //  MRI.setRegClass(PHIRes, RCS);
-        //  TII->legalizeOperands(MI, MDT);
-        //}
-
- 
         break;
       }
       case AMDGPU::REG_SEQUENCE:
