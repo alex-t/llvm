@@ -9809,21 +9809,19 @@ static bool hasIfBreakUser(const Value *V,
   if (Visited.count(V))
     return false;
   Visited.insert(V);
+  bool Result = false;
   for (auto U : V->users()) {
     if (const IntrinsicInst *Intrinsic = dyn_cast<IntrinsicInst>(U)) {
-      switch (Intrinsic->getIntrinsicID()) {
-      default:
-        return false;
-      case Intrinsic::amdgcn_if_break:
-      {
-        if (V == U->getOperand(1))
-          return true;
-      }
-      }
+      if ((Intrinsic->getIntrinsicID() == Intrinsic::amdgcn_if_break) &&
+        (V == U->getOperand(1)))
+        Result = true;
     } else {
-      return hasIfBreakUser(U, Visited);
+      Result =  hasIfBreakUser(U, Visited);
     }
+    if (Result)
+      break;
   }
+  return Result;
 }
 
 bool SITargetLowering::requiresUniformRegister(MachineFunction &MF, const Value *V) const {
