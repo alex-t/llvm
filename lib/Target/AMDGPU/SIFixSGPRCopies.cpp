@@ -685,13 +685,6 @@ bool SIFixSGPRCopies::runOnMachineFunction(MachineFunction &MF) {
           TII->moveToVALU(MI);
         } else {
           TII->legalizeOperands(MI, MDT);
-          if (RC0 == &AMDGPU::SReg_1RegClass) {
-            MRI.setRegClass(PHIRes, &AMDGPU::SReg_64RegClass);
-            for (unsigned i = 1; i < MI.getNumOperands(); i += 2) {
-              unsigned InputReg = MI.getOperand(i).getReg();
-              MRI.setRegClass(InputReg, &AMDGPU::SReg_64RegClass);
-            }
-          }
         }
 
         break;

@@ -4,16 +4,13 @@
 
 ; GCN: ; %entry
 ; GCN:      s_cmp_eq_u32    s0, 0
-; GCN:      s_cbranch_scc1  [[PREEXIT2:BB[0-9_]+]]
+; GCN:      s_cbranch_scc1  [[PREEXIT:BB[0-9_]+]]
 
 ; GCN: ; %blocka
 ; GCN:      s_cmp_eq_u32    s1, 0
-; GCN:      s_cbranch_scc1  [[PREEXIT1:BB[0-9_]+]]
+; GCN:      s_cbranch_scc1  [[EXIT:BB[0-9_]+]]
 
-; GCN: [[PREEXIT1]]
-; GCN: s_branch [[EXIT:BB[0-9_]+]]
-
-; GCN: [[PREEXIT2]]:
+; GCN: [[PREEXIT]]:
 ; GCN: [[EXIT]]:
 
 define amdgpu_vs float @test_dont_clobber_scc(i32 inreg %uni, i32 inreg %uni2) #0 {

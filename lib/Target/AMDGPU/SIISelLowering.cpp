@@ -9796,6 +9796,8 @@ const TargetRegisterClass *
 SITargetLowering::getRegClassFor(MVT VT, bool isDivergent) const {
   const TargetRegisterClass *RC = TargetLoweringBase::getRegClassFor(VT, false);
   const SIRegisterInfo *TRI = Subtarget->getRegisterInfo();
+  if (RC == &AMDGPU::VReg_1RegClass && !isDivergent)
+    return &AMDGPU::SReg_64RegClass;
   if (TRI->hasVGPRs(RC) && !isDivergent)
     return TRI->getEquivalentSGPRClass(RC);
   else if (TRI->isSGPRClass(RC) && isDivergent)
@@ -9850,7 +9852,7 @@ bool SITargetLowering::requiresUniformRegister(MachineFunction &MF, const Value 
     }
   }
   if (const CallInst *CI = dyn_cast<CallInst>(V)) {
-    if (const InlineAsm * IA = dyn_cast<InlineAsm>(CI->getCalledValue())) {
+    if (isa<InlineAsm>(CI->getCalledValue())) {
       const SIRegisterInfo * SIRI = Subtarget->getRegisterInfo();
       ImmutableCallSite CS(CI);
       TargetLowering::AsmOperandInfoVector TargetConstraints = ParseConstraints(

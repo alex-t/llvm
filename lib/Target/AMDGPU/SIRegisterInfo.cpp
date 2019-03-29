@@ -1278,9 +1278,6 @@ bool SIRegisterInfo::hasVGPRs(const TargetRegisterClass *RC) const {
 
 const TargetRegisterClass *SIRegisterInfo::getEquivalentVGPRClass(
                                          const TargetRegisterClass *SRC) const {
-  if (SRC == &AMDGPU::SReg_1RegClass)
-    return &AMDGPU::VReg_1RegClass;
-
   switch (getRegSizeInBits(*SRC)) {
   case 32:
     return &AMDGPU::VGPR_32RegClass;
@@ -1301,9 +1298,6 @@ const TargetRegisterClass *SIRegisterInfo::getEquivalentVGPRClass(
 
 const TargetRegisterClass *SIRegisterInfo::getEquivalentSGPRClass(
                                          const TargetRegisterClass *VRC) const {
-  if (VRC == &AMDGPU::VReg_1RegClass)
-    return &AMDGPU::SReg_1RegClass;
-
   switch (getRegSizeInBits(*VRC)) {
   case 32:
     return &AMDGPU::SGPR_32RegClass;
